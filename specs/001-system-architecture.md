@@ -10,6 +10,8 @@ Boxes group ownership/trust boundaries, not machines. A home server can colocate
 components; AKS or another cluster can distribute them. Databases, storage
 engines, and network providers are configuration/adapters, not client contracts.
 Arrows identify logical communication; they do not grant authorization.
+Mobile behavior and unconfirmed UX recommendations are in
+[003 - Native mobile client](003-mobile-client.md).
 
 ## 2. System and trust boundaries
 
@@ -31,6 +33,10 @@ flowchart TB
         idAdmin["Identity management endpoints"]
     end
 
+    subgraph pushEdge["Optional external OS push delivery"]
+        push["APNs / Android provider or restricted relay"]
+    end
+
     subgraph identity["Identity provider ownership"]
         idp["Auth server: OIDC and passkeys"]
         iddb[("Identity persistence")]
@@ -43,7 +49,7 @@ flowchart TB
         search["Search service: generations and vector adapter"]
         curation["Curation service: cleanup assessments and scan generations"]
         publish["Library-owned gallery projection / publisher"]
-        notify["Notification gateway: SSE hints"]
+        notify["Notification gateway: SSE / mobile push hints"]
         broker["Durable broker: pub/sub and work queues"]
         media["Media / verification workers"]
         faceWork["Face pipeline workers"]
@@ -78,6 +84,8 @@ flowchart TB
     edge --> library
     edge --> upload
     edge -->|"SSE connection"| notify
+    notify -->|"Minimal coalesced hints"| push
+    push -->|"Best-effort wake-up"| client
     library -->|"Authorized search"| search
     library -->|"Person resolution"| face
     library -->|"Scoped cleanup assessment queries"| curation
@@ -119,6 +127,10 @@ admin endpoints, databases, broker, provider management, or inference. The priva
 network is not an administrator role: identities and permissions remain required.
 Login and identity management may be routes of the same identity provider; they
 are separate exposure surfaces, not necessarily separate server installations.
+Native clients use HTTPS catch-up after optional OS push hints; they do not
+require an application-owned persistent connection. Push sending authority is
+scoped to the configured app/build. Provider/relay failure never blocks core
+backup, browsing, or synchronization during permitted client execution.
 
 Each service owns its persistence. The library publisher is an internal library
 component, not an independent service that writes another owner's database.
@@ -217,6 +229,8 @@ are durable.
 
 SSE event IDs are not synchronization tokens. Clients use HTTPS for snapshots,
 segments, deltas, and media, with polling recovery when SSE is unavailable.
+Mobile clients can use the same durable APIs without SSE; OS push carries only
+optional wake-up hints, not a replacement event log or guaranteed worker lease.
 History expiry triggers an explicit anchored reset. Every read enforces current
 authorization; retaining a snapshot never retains a revoked grant.
 

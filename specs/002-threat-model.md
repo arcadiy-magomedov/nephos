@@ -8,6 +8,8 @@ flows in [001 - System architecture](001-system-architecture.md). No application
 implementation exists in this workspace. Findings identify missing or unresolved
 security contracts or residual implementation risks, not demonstrated
 implementation vulnerabilities.
+The [003 - Mobile client draft](003-mobile-client.md) extends the boundary to
+device-library integration, discovery, OS push, and local-space reclamation.
 
 The review uses STRIDE: spoofing, tampering, repudiation, information disclosure,
 denial of service, and elevation of privilege. Resource-exhaustion scenarios are
@@ -35,6 +37,7 @@ accepted-risk decisions.
 | Assets, memberships, grants, upload provenance | Authoritative current access and attributable changes |
 | Face observations, embeddings, names, aliases, corrections | Permission-scoped disclosure and editing |
 | Cleanup assessments, private review decisions, trash and recovery deadlines | No implicit deletion, cross-user opinion leakage, or premature reclamation |
+| Device-source mappings, backup receipts, offload holds, push registrations | No last-copy deletion, cross-account task reuse, or private notification leakage |
 | Identity bindings, credentials, enrollment/recovery authority, sessions | Prevent impersonation and unauthorized enrollment |
 | Manifests, counts, segments, journal, deltas, tombstones | Consistent publication without historical permission leakage |
 | Upload sessions, parts, staging objects, reservations | Owner binding, integrity, bounded lifecycle |
@@ -75,9 +78,13 @@ established features.
 | Storage service through adapter to provider | Physical credentials and locations remain behind the adapter |
 | Artifact source to runtime | Integrity/provenance verification before loading |
 | Backup to restored deployment | Reconcile security state, references, epochs, and pending work before reopening |
+| Discovered backend to native client | Advertisement is not trust; verify approved TLS/server/issuer identity before sending credentials |
+| OS push to client execution | Minimal hint only; fetch authoritative changes with current authorization |
+| Verified server backup to OS-library removal | Complete resource evidence, fresh retention assurance, explicit user/OS consent, separate deletion domains |
 
-The selected external transport is HTTPS plus SSE. Raw TCP is not selected and
-does not add a current attack surface.
+The selected external transport is HTTPS plus web/optional foreground SSE and
+optional native OS push hints. Raw TCP is not selected and does not add a current
+attack surface.
 
 ## 4. Resolved north-star design findings
 
@@ -88,12 +95,12 @@ remain release gates under R31.
 
 | ID | Review severity | Source | Adopted design decision |
 |---|---|---|---|
-| F01 | HIGH | [R08/R09](000-media-platform.md#L295) | Passkey-only; bound single-use activation; single-use offline recovery codes or audited administrator recovery with fresh admin passkey and verified out-of-band identity; revoke old credentials/sessions; never re-enable disabled membership |
-| F02 | HIGH | [R24.1](000-media-platform.md#L698) | Hostile parsers and inference run isolated, non-root, with scoped read-only inputs, constrained output, default-deny egress and resource limits; verify artifact provenance before loading |
-| F03 | HIGH | [R24](000-media-platform.md#L652) | Authenticated workload identities, broker/topic ACLs, job/attempt-scoped capabilities, and owning-service result validation; no ambient authority |
-| F04 | HIGH | [R28](000-media-platform.md#L1023) | Quarantined restore, consistent recovery set, monotonic security epoch and protected revocation journal; fail closed if current authority cannot be proven |
-| F05 | HIGH | [R24.1](000-media-platform.md#L698) | Immutable verified artifact references, controlled origins/update authority, no unverified executable model loading, offline verified weights |
-| F06 | MEDIUM | [R19](000-media-platform.md#L550) | Annotations private per user/library view; explicit separate view/edit grants; identity/label state never inherited from deduplicated bytes |
+| F01 | HIGH | [R08/R09](000-media-platform.md#38-r08---passwordless-identity-and-biometrics) | Passkey-only; bound single-use activation; single-use offline recovery codes or audited administrator recovery with fresh admin passkey and verified out-of-band identity; revoke old credentials/sessions; never re-enable disabled membership |
+| F02 | HIGH | [Processing isolation](000-media-platform.md#3241-untrusted-processing-isolation) | Hostile parsers and inference run isolated, non-root, with scoped read-only inputs, constrained output, default-deny egress and resource limits; verify artifact provenance before loading |
+| F03 | HIGH | [R24](000-media-platform.md#324-r24---durable-pubsub-and-queued-processing) | Authenticated workload identities, broker/topic ACLs, job/attempt-scoped capabilities, and owning-service result validation; no ambient authority |
+| F04 | HIGH | [R28](000-media-platform.md#328-r28---ownership-and-cloud-service-independence) | Quarantined restore, consistent recovery set, monotonic security epoch and protected revocation journal; fail closed if current authority cannot be proven |
+| F05 | HIGH | [Artifact verification](000-media-platform.md#3241-untrusted-processing-isolation) | Immutable verified artifact references, controlled origins/update authority, no unverified executable model loading, offline verified weights |
+| F06 | MEDIUM | [R19](000-media-platform.md#319-r19---face-recognition-clustering-and-names) | Annotations private per user/library view; explicit separate view/edit grants; identity/label state never inherited from deduplicated bytes |
 
 ## 5. Threat register and abuse acceptance
 
@@ -428,6 +435,31 @@ or tool-enabled features need separate assessment.
   Verify private decisions stay isolated, no automatic deletion occurs, restored
   media retains current authorization, and independent blob references survive.
 
+### T20 - Mobile trust confusion and unsafe phone offloading
+
+**STRIDE:** spoofing, tampering, information disclosure, elevation of privilege.
+
+- **Preconditions/impact:** A spoofed advertisement or endpoint change steals
+  credentials; stale/incomplete backup evidence removes the last usable original;
+  push or a native bridge induces unintended actions; old installation work runs
+  under a different account.
+- **Specified:** Client C02/C19 require verified server/issuer identity and scoped
+  native capabilities. C05/C12 require complete resource/revision evidence, fresh
+  retention assurance, and explicit OS-aware local removal. Neither a push nor a
+  server tombstone authorizes device deletion. Tasks, cache, registrations, and
+  pending operations are bound to the approved server/account/installation.
+  Provider payloads contain no private media content or credentials.
+- **Implementation choices/residual:** UI/native framework, push distribution,
+  and offload-hold mechanics require acceptance evidence. OS library deletion can
+  propagate to an existing photo-cloud service; private caches already downloaded
+  to an offline device cannot be remotely guaranteed erased. Server retention is
+  not protection against a compromised host or unrecoverable storage failure.
+- **E2E:** Spoof discovery/issuer data, swap accounts mid-transfer, revoke limited
+  permissions, omit a compound resource, race server deletion with phone removal,
+  expire an offload assurance, and replay hints/native commands. Ineligible items
+  stay local; successful offload preserves server resources and reports OS
+  cancellation/partial outcomes accurately.
+
 ## 6. Security evidence and release gates
 
 Apply R31 to these threats. Prefer a failing abuse test before implementing a
@@ -450,6 +482,7 @@ integrations; mocked authorization alone is not E2E security evidence.
 | Provider and artifact integrity | T14-T15 | Storage adapters, release, ML |
 | Security-preserving restore and audit | T16-T17 | Operations and state-owning services |
 | Advisory cleanup and recoverable removal | T19 | Curation, library, storage, client synchronization |
+| Mobile trust and last-copy safety | T20 | Native adapters, session/transfer coordinator, library, storage, notification adapters |
 
 ## 7. Decision register
 

@@ -60,6 +60,7 @@ Supporting documents:
 
 - [001 - System architecture and flows](001-system-architecture.md).
 - [002 - Design-time threat model](002-threat-model.md).
+- [003 - Native mobile client draft](003-mobile-client.md).
 
 ## 2. Requirements
 
@@ -770,9 +771,26 @@ stable, versioned contracts for:
 - Logical asset/date anchors, atomic revision transitions, and the R30
   notification/reconnect protocol.
 - Sharing, effective permissions, and provenance.
+- Backend capability/identity discovery and optional LAN advertisement.
+- Authorized, minimal, paginated known-user recipient discovery; no client access
+  to identity-provider administration.
+- Complete original-resource manifests and durable backup evidence, including
+  compound media where supported. Per-file uploads are composed into a logical
+  asset through a recoverable workflow; incomplete resource sets are not complete
+  backups or eligible for device removal.
+- Fresh phone-offload eligibility and a declared original-retention assurance
+  protecting resources against concurrent application deletion/reference release.
+  Define operation holds, expiry, delayed OS confirmation, and crash recovery
+  before certifying device cleanup; a prior existence check alone is insufficient.
+- Installation-scoped push registration, rotation, revocation, and optional
+  provider/relay delivery under R30.
 
 Specify retry/idempotency semantics and public URL reachability so clients remain
 independent of internal services, database engines, and storage vendors.
+Phone removal never implies server deletion; remote trash never instructs a
+client to erase an independently held device original. Client behavior, cache
+policy, platform restrictions, and unconfirmed UX recommendations are in
+[003 - Native mobile client](003-mobile-client.md).
 
 ### 3.27 R27 - Large-library chronology and infinite-scroll API
 
@@ -1234,12 +1252,15 @@ out of scope; these synchronization contracts belong to the backend.
 #### Transport selection
 
 Use HTTPS request/response for commands, snapshots, segments, and durable delta
-retrieval, and **SSE (server-sent events)** for server-to-client notifications.
+retrieval. Use **SSE (server-sent events)** for web/optional foreground streaming,
+and optional OS push hints for native mobile clients without requiring an
+application-owned persistent connection.
 SSR means server-side rendering and does not define a synchronization transport.
 
 | Option | Assessment |
 |---|---|
-| HTTPS + SSE | Selected architecture: one-way live hints, existing HTTP authentication/routing, durable catch-up over separate requests |
+| HTTPS + SSE | Web/optional foreground streaming: one-way hints with durable catch-up over separate requests |
+| HTTPS + OS push | Native mobile hint delivery when configured and permitted; best-effort wake-up followed by durable HTTPS catch-up, with no-push operation supported |
 | HTTPS + WebSocket | Valid alternative if bidirectional live messaging becomes a requirement; requires explicit framing, subscription, flow-control, and reconnect semantics |
 | Custom raw TCP | Not justified for this API: browsers lack direct raw-TCP access, and public ingress/TLS/framing/authentication would require additional infrastructure |
 
@@ -1277,7 +1298,39 @@ may be duplicated, coalesced, delayed, or lost on disconnect. There is no
 exactly-once promise. Unknown additive fields are ignored; unsupported major
 protocol versions require explicit negotiation/error rather than guessed parsing.
 
-#### Race-free connect, catch-up, and reconnect
+#### Mobile push delivery
+
+Provide an authenticated installation-scoped device-registration API for the
+configured APNs/Android provider adapter. Bind registration to account, app
+identity/environment, and server; rotate tokens, unregister/revoke installations,
+and remove invalid provider tokens. Push tokens are sensitive routing identifiers,
+not bearer credentials. Recheck current account/subscription authority before
+delivery and send only minimal opaque wake-up hints, not private media metadata.
+
+Coalesce notifications for durably published changes. Push may be lost, delayed,
+reordered, or collapsed; provider acceptance is not client receipt or applied
+state. It cannot authorize mutations or replace the durable journal. Ordinary
+background sync must not misuse high-priority visible alerts to evade OS limits.
+
+After device registration, clients catch up through HTTPS, including changes
+committed before/during registration. Reconcile again on launch/resume and when
+execution is permitted without depending on receipt of a final push. No-push
+clients retain correct foreground/manual synchronization; arbitrary background
+freshness is not guaranteed by iOS or Android.
+
+The provider adapter needs credentials authorized for the distributed app.
+Support appropriately configured operator builds; a stock application may need
+an optional restricted relay rather than exposing its signing/sender credentials
+to independent servers. Build/relay trust and deployment support must be selected
+explicitly; no relay or platform push service is required for core self-hosted
+backup/browsing. Provider failure does not block manifest publication or HTTPS
+APIs. See client C08 for lifecycle and privacy requirements.
+
+#### Race-free stream connect, catch-up, and reconnect
+
+The following readiness sequence applies to SSE consumers; native push-only
+clients use HTTPS catch-up after registration and on permitted execution without
+waiting for `stream.ready`.
 
 1. Authenticate and establish subscriptions; wait for `stream.ready`.
 2. Bootstrap if there is no valid local revision, otherwise request deltas from
@@ -1336,6 +1389,8 @@ reconnect rate, dropped/coalesced hints, slow-consumer disconnects, snapshot/del
 reset frequency, and snapshot/history storage growth. Define production latency,
 retention, and resource targets for documented deployment profiles. Measure
 degraded polling behavior separately from connected-stream behavior.
+For push, separately measure dispatch/adapter failures, invalid registrations,
+and observed client catch-up; do not equate provider acceptance with delivery.
 
 ### 3.31 R31 - End-to-end testability and test-driven development
 
@@ -1510,6 +1565,12 @@ upgrade may resurface a dismissed candidate only through an explicit user
 rescan/reset of dismissals. Allow library/album and category exclusions; apply
 keep/exclusion protections before presenting or executing a cleanup action.
 
+Record private review-resume/defer state for mobile "Later" actions separately
+from keep/dismiss and machine training feedback. Deferral must not immediately
+reinsert the same candidate into an active batch or loop across devices; the
+revisit policy is an explicit client/server contract, still open for UX review.
+Silence and dialog cancellation do not constitute feedback or deletion consent.
+
 Validated assessment events feed library-owned, user-scoped candidate projections
 through durable publication, not cross-service database writes. Review decisions
 and their journal entries commit within the library service. Publish private
@@ -1577,6 +1638,9 @@ Before implementation, resolve or explicitly defer:
   including browsing-revision lifetime and aggregate freshness guarantees.
 - Snapshot/delta retention budgets, bounded segment sizing, lease policy, and
   notification connection/heartbeat/reconciliation limits.
+- Mobile build/signing and push provider/optional relay trust, original-resource
+  support matrix, and phone-offload retention/eligibility mechanics; client
+  recommendations and open UX decisions are recorded separately in spec 003.
 - E2E harness/tooling, fixture corpus, supported profile matrix, and CI resource
   budgets; testability itself is not optional.
 - Cleanup classifier, category thresholds/calibration, video sampling, quality
