@@ -130,6 +130,46 @@ Use versioned APIs and events for extensions. Initially, extensions are trusted
 first-party services/workers. Untrusted plugins, their sandboxing, and a public
 plugin marketplace are **not established requirements**.
 
+#### Follow-up: generic files and a drive-style library
+
+Extend the platform to arbitrary files, with Photos as a specialized view of
+eligible media rather than a separate upload silo. The Yandex Disk analogy is a
+product model, not an assumption about its internal implementation. This is a
+recorded follow-up, not an expansion of the current photo/video implementation
+scope or a commitment to an S3-compatible public API.
+
+The existing blob/upload layer is reusable, but a user-facing drive also needs
+logical file identities, folders/namespaces, move/rename and overwrite/version
+semantics, grants, quotas, trash, and synchronization. Immutable physical blobs
+alone do not provide those behaviors.
+
+**Open question: one upload entry point or domain-specific endpoints?**
+
+| Approach | Trade-off |
+|---|---|
+| Shared upload-intent API with a typed destination | One resumable transfer contract for all files; destination authorization and publication must route to the owning domain |
+| Domain-specific intent APIs over a shared upload service | Domain-specific validation is explicit; transfer/session mechanics remain shared rather than duplicated |
+| Independent upload pipelines per application | Stronger isolation, but duplicates retry, quota, integrity, and lifecycle logic; needs a concrete justification |
+
+**Recommendation, not yet selected:** share the upload-session/data-transfer
+contract, preferably with one intent entry point. Bind each intent to an
+authorized logical destination and its owning service, not merely a MIME type.
+The owning domain validates and durably publishes the entry after verification;
+workers run only for applicable, validated content and enabled features. Arbitrary
+files must not be sent automatically through photo/face pipelines.
+
+A shared entry point can still return multiple chunk/provider URLs. It does not
+require one physical server or eliminate domain-specific APIs. Safe deduplication,
+quota reservation, reference acquisition, retry/idempotency, and current
+authorization at publication must apply consistently to every destination.
+
+The follow-up must decide ownership between generic file entries and photo
+projections, including whether one entry appears in both views, and the effects
+of moves, edits, sharing, and deletion. Do not create independent file/photo
+entries or extra ownership grants solely to populate a gallery. Cross-view
+authorization, lifecycle consistency, unsupported-file handling, and failed
+publication recovery require R31 E2E evidence before accepting this extension.
+
 ### 3.3 R03 - Microservice boundaries
 
 Use the following proposed deployment units:
@@ -1618,6 +1658,9 @@ trash, and synchronization invariants; real-model E2E evidence is also required.
 
 Before implementation, resolve or explicitly defer:
 
+- Generic file/drive extension in R02 is deferred follow-up work. Its upload
+  entry-point topology and file/photo ownership relationship remain open;
+  shared ingestion is a recommendation, not a selected API change.
 - Resource budgets and expected library size; physical disk layout is an
   operator concern, not a prerequisite for application design.
 - Initial language/framework choices and supported persistence adapters.
