@@ -40,6 +40,36 @@ def verify_manifest(path):
     return manifest
 
 
+def export_volume(volume, destination):
+    # Docker needs root to read database files; the host must own the archive.
+    with destination.open("xb") as archive:
+        os.fchmod(archive.fileno(), 0o600)
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "-v",
+                volume + ":/source:ro",
+                "alpine:3.23",
+                "tar",
+                "-cf",
+                "-",
+                "-C",
+                "/source",
+                ".",
+            ],
+            stdout=archive,
+            stderr=subprocess.PIPE,
+            cwd=ROOT,
+            check=True,
+        )
+        archive.flush()
+        os.fsync(archive.fileno())
+
+
 def create(path):
     os.umask(0o077)
     path.mkdir(parents=True, exist_ok=False)
@@ -55,25 +85,7 @@ def create(path):
         for name in VOLUMES:
             volume = config["volumes"][name]["name"]
             run("docker", "volume", "inspect", volume)
-            run(
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                volume + ":/source:ro",
-                "-v",
-                str(path) + ":/backup",
-                "alpine:3.23",
-                "tar",
-                "-cf",
-                "/backup/" + name + ".tar",
-                "-C",
-                "/source",
-                ".",
-            )
-            os.chmod(path / (name + ".tar"), 0o600)
-            with (path / (name + ".tar")).open("rb") as archive:
-                os.fsync(archive.fileno())
+            export_volume(volume, path / (name + ".tar"))
             manifest["archives"][name] = digest(path / (name + ".tar"))
         shutil.copyfile(source_env, path / ".env")
         os.chmod(path / ".env", 0o600)
