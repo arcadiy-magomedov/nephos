@@ -19,9 +19,20 @@ def query(expression):
     ]
 
 
+expected_services = {
+    "nephos-library",
+    "nephos-library-worker",
+    "nephos-library-admin",
+    "nephos-storage",
+    "nephos-storage-worker",
+    "nephos-admin-console",
+}
 smoke.wait(
-    "six independently identified application service heartbeats",
-    lambda: len(query("time() - max by(service) (nephos_service_heartbeat) < 60")) == 6,
+    "all six core application service heartbeats, allowing optional services",
+    lambda: (
+        expected_services
+        <= {row["metric"]["service"] for row in query("time() - max by(service) (nephos_service_heartbeat) < 60")}
+    ),
 )
 smoke.wait("fresh storage state sampled through Collector", lambda: query("time() - nephos_storage_sampled_at < 60"))
 smoke.wait("media volume headroom measured", lambda: query("nephos_storage_free_bytes > 0"))
@@ -29,9 +40,18 @@ smoke.wait(
     "per-queue broker backlog metrics",
     lambda: len(query('rabbitmq_queue_messages{queue=~"nephos.assets.(ready|dead)"}')) == 2,
 )
-rules = smoke.request(proxy + "/api/v1/rules", basic=auth)["data"]["groups"]
-alerts = [r for group in rules for r in group["rules"]]
-assert len(alerts) >= 11 and all(r["health"] == "ok" for r in alerts)
+
+
+def evaluated_alerts():
+    groups = smoke.request(proxy + "/api/v1/rules", basic=auth)["data"]["groups"]
+    alerts = [rule for group in groups for rule in group["rules"]]
+    assert len(alerts) >= 11, "Expected operational alert rules are not loaded"
+    unhealthy = [(rule["name"], rule["health"], rule.get("lastError")) for rule in alerts if rule["health"] != "ok"]
+    assert not unhealthy, unhealthy
+    return True
+
+
+smoke.wait("all operational alert rules successfully evaluated", evaluated_alerts)
 dashboard = smoke.request(smoke.GRAFANA + "/api/dashboards/uid/nephos-operations", basic=auth)
 assert dashboard["dashboard"]["title"] == "Nephos operations"
 trace_id = uuid.uuid4().hex

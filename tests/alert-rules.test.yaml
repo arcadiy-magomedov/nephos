@@ -26,3 +26,47 @@ tests:
         exp_alerts:
           - exp_labels: {severity: warning, queue: nephos.assets.dead}
             exp_annotations: {summary: "Rejected publications require operator investigation; do not blindly purge or replay."}
+  - interval: 15s
+    input_series:
+      - series: 'nephos_service_heartbeat{service="nephos-library"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-library-worker"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-library-admin"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-storage"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-admin-console"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-faces"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-faces-worker"}'
+        values: '0+15x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NephosServiceSetIncomplete
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "Expected API, administration, or worker telemetry is missing."}
+  - interval: 15s
+    input_series:
+      - series: 'nephos_service_heartbeat{service="nephos-library"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-library-worker"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-library-admin"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-storage"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-storage-worker"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-admin-console"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-faces"}'
+        values: '0+15x20'
+      - series: 'nephos_service_heartbeat{service="nephos-faces-worker"}'
+        values: '0+15x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NephosServiceSetIncomplete
+        exp_alerts: []

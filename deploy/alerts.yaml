@@ -12,7 +12,7 @@ groups:
         labels: {severity: critical}
         annotations: {summary: "Application service heartbeat is stale; inspect its container and database connectivity."}
       - alert: NephosServiceSetIncomplete
-        expr: count(time() - max by(service) (nephos_service_heartbeat) < 60) < 6 or absent(nephos_service_heartbeat)
+        expr: count(time() - max by(service) (nephos_service_heartbeat{service=~"nephos-(library(-worker|-admin)?|storage(-worker)?|admin-console)"}) < 60) < 6 or absent(nephos_service_heartbeat{service=~"nephos-(library(-worker|-admin)?|storage(-worker)?|admin-console)"})
         for: 2m
         labels: {severity: critical}
         annotations: {summary: "Expected API, administration, or worker telemetry is missing."}
