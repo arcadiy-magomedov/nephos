@@ -210,7 +210,10 @@ def main():
         page = request(
             API + "/v1/libraries", token=token, headers={"traceparent": f"00-{trace_id}-{secrets.token_hex(8)}-01"}
         )
-        assert page == {"items": [{"id": library_id, "name": "Smoke visible"}], "nextCursor": None}, page
+        assert page == {
+            "items": [{"id": library_id, "name": "Smoke visible", "isShared": False}],
+            "nextCursor": None,
+        }, page
         print("PASS: actual Keycloak JWT and PostgreSQL membership isolate libraries")
         sql(
             """
