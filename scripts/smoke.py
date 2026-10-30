@@ -257,9 +257,12 @@ def main():
             "logs stored in Loki",
             lambda: request(proxy + "loki/loki/api/v1/query_range?" + logs, basic=auth)["data"]["result"],
         )
-        trace = wait(
-            "request trace stored in Tempo", lambda: request(proxy + "tempo/api/traces/" + trace_id, basic=auth)
-        )
+
+        def database_trace():
+            value = request(proxy + "tempo/api/traces/" + trace_id, basic=auth)
+            return value if '"Npgsql"' in json.dumps(value) else None
+
+        trace = wait("request and database spans stored in Tempo", database_trace)
         serialized_trace = json.dumps(trace)
         assert '"Npgsql"' in serialized_trace, "Missing database spans in request trace"
         assert '"db.query.text"' not in serialized_trace and '"db.statement"' not in serialized_trace
@@ -272,14 +275,21 @@ def main():
         finally:
             subprocess.run(["docker", "compose", "start", "otel-collector"], cwd=ROOT, check=True, capture_output=True)
         recovery_trace = uuid.uuid4().hex
-        request(
-            API + "/v1/libraries",
-            token=token,
-            headers={"traceparent": f"00-{recovery_trace}-{secrets.token_hex(8)}-01"},
-        )
+        recovery_parent = secrets.token_hex(8)
+
+        def recovery_probe():
+            # A batch emitted during reconnection can be lost; prove new traffic recovers.
+            response = request(
+                API + "/v1/libraries",
+                token=token,
+                headers={"traceparent": f"00-{recovery_trace}-{recovery_parent}-01"},
+            )
+            assert [item["id"] for item in response["items"]] == expected_ids
+            return request(proxy + "tempo/api/traces/" + recovery_trace, basic=auth)
+
         wait(
-            "trace collection recovers after Collector restart",
-            lambda: request(proxy + "tempo/api/traces/" + recovery_trace, basic=auth),
+            "new request traces reach Tempo after Collector reconnects",
+            recovery_probe,
         )
     finally:
         try:
