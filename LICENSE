@@ -1,0 +1,22 @@
+Nephos Proprietary License
+
+Copyright (c) 2026 Nephos contributors. All rights reserved.
+
+Except with prior explicit written permission from the applicable copyright
+holder, no permission is granted to use, reproduce, modify, distribute,
+sublicense, sell, or otherwise exploit this software or its documentation.
+Public availability of this repository does not grant such permission.
+
+This restriction does not override rights required by applicable law or rights
+expressly granted under the terms of the repository's hosting platform.
+
+Third-party components, dependencies, model weights, and test media are not
+relicensed by this document. They remain subject to their own licenses and
+notices, including those retained under face-inference/licenses/ and recorded
+in face-inference/fixtures/provenance.json.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED
+BY LAW, THE COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.

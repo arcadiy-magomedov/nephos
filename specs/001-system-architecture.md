@@ -68,6 +68,17 @@ flowchart TB
         objects[("Originals, derivatives, retained gallery metadata")]
     end
 
+    subgraph observability["Private centralized observability"]
+        collector["Shared OpenTelemetry Collector endpoint"]
+        telemetryStores[("Selected logs / metrics / traces stores")]
+        dashboards["Operator dashboards and alerting"]
+    end
+
+    services -.->|"OTLP logs, metrics, traces from all application services"| collector
+    collector -->|"Configured pipelines and exporters"| telemetryStores
+    dashboards --> telemetryStores
+    privateGw -->|"Operator authorization"| dashboards
+
     client -->|"HTTPS APIs and ranged media"| edge
     client -->|"OIDC / passkey ceremonies"| login
     admin -->|"Private network plus admin authentication"| privateGw
@@ -145,6 +156,13 @@ permission/protection checks, can move selected assets to recoverable trash.
 Curation workers cannot delete assets or release references. Review changes use
 private library projections and the existing durable sync contract; merely
 flagging media never removes it from the ordinary gallery.
+
+All application services and workers share the centralized telemetry pipeline
+under R34. Infrastructure signals use supported receivers/exporters as needed.
+The Collector is not a telemetry database. The MVP selects Prometheus metrics,
+Loki logs, and Tempo traces, queried through Grafana.
+Receiver and dashboard access is private, buffers are bounded, and telemetry
+failure cannot block media operations. Audit and operation journals are separate.
 
 ## 3. Upload, processing, and publication milestones
 

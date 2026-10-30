@@ -1,0 +1,4 @@
+# Test-only loopback database access; never needed by normal deployment.
+services:
+  faces-postgres:
+    ports: ["127.0.0.1:18086:5432"]

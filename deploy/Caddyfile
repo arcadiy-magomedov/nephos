@@ -1,0 +1,14 @@
+{$PUBLIC_HOST} {
+	handle /v1/* {
+		reverse_proxy gateway:8080
+	}
+	handle /realms/nephos/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

@@ -1,0 +1,28 @@
+rule_files:
+  - /etc/prometheus/alerts.yaml
+evaluation_interval: 15s
+tests:
+  - interval: 15s
+    input_series:
+      - series: 'nephos_storage_free_bytes'
+        values: '1000000+0x32'
+      - series: 'nephos_service_heartbeat{service="nephos-library"}'
+        values: '0+0x32'
+      - series: 'rabbitmq_queue_messages{queue="nephos.assets.dead"}'
+        values: '1+0x32'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NephosStorageHeadroom
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "Media volume has less than 5 GiB free; new uploads may be refused safely."}
+      - eval_time: 3m
+        alertname: NephosServiceMissing
+        exp_alerts:
+          - exp_labels: {severity: critical, service: nephos-library}
+            exp_annotations: {summary: "Application service heartbeat is stale; inspect its container and database connectivity."}
+      - eval_time: 2m
+        alertname: NephosDeadLetters
+        exp_alerts:
+          - exp_labels: {severity: warning, queue: nephos.assets.dead}
+            exp_annotations: {summary: "Rejected publications require operator investigation; do not blindly purge or replay."}

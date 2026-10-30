@@ -1,0 +1,9 @@
+**
+!Directory.Build.props
+!global.json
+!src/
+!src/Nephos.ServiceDefaults/**
+!src/Nephos.Faces.Api/**
+!src/Nephos.Migrations/**
+**/bin
+**/obj

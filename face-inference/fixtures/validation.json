@@ -1,0 +1,82 @@
+{
+  "verifiedAt": "2026-10-30",
+  "modelVersion": "yunet-2023mar-sface-2021dec-8f2383e4-0ba9fbfa",
+  "preprocessVersion": "exif-rgb-max1280-align5-v1",
+  "thresholdFixedBeforeEvaluation": 0.45,
+  "ambiguityMargin": 0.05,
+  "labels": "Publisher metadata only; no visual identity inference.",
+  "inputs": "Six distinct exact original downloads, two different photographs per source-labelled person; not augmentations.",
+  "order": ["obama-2009", "obama-2012", "biden-2013", "biden-2021", "trump-2017", "trump-2025"],
+  "detectedFaces": [1, 1, 1, 1, 1, 1],
+  "usableEmbeddings": [1, 1, 1, 1, 1, 1],
+  "uprightDimensions": [[1916,2608], [2687,3356], [3277,4096], [2400,3000], [2250,2850], [612,792]],
+  "localInferenceSeconds": [0.433,0.252,0.299,0.260,0.275,0.129],
+  "similarityMatrix": [
+    [1.000000,0.784739,0.230311,0.268846,-0.004549,0.092344],
+    [0.784739,1.000000,0.129516,0.141130,0.018279,-0.006277],
+    [0.230311,0.129516,1.000000,0.664694,0.223547,0.108259],
+    [0.268846,0.141130,0.664694,1.000000,0.226721,0.146083],
+    [-0.004549,0.018279,0.223547,0.226721,1.000000,0.524939],
+    [0.092344,-0.006277,0.108259,0.146083,0.524939,1.000000]
+  ],
+  "samePersonPairSimilarities": [0.784739,0.664694,0.524939],
+  "crossPersonPairCount": 12,
+  "crossPersonMaximumSimilarity": 0.268846,
+  "observedFalsePairSplits": 0,
+  "observedFalsePairMerges": 0,
+  "durableWorkerResult": {
+    "jobs": 6,
+    "complete": 6,
+    "clusters": 3,
+    "membersPerCluster": [2,2,2],
+    "userAssignedNames": ["Barack Obama","Joe Biden","Donald Trump"],
+    "namesSurviveAspNetHostAndNpgsqlPoolRestart": true,
+    "mergeSurvivesRestart": true,
+    "undoMergeRestoresGroups": true,
+    "manualSplitAndRejoin": true,
+    "modelReprocessingPreservesManualTracks": "Separately verified with deterministic version/correction fixtures."
+  },
+  "testBoundary": "Six real YuNet/SFace subprocess inferences through the actual API-created durable jobs and FaceWorker. Library/Storage authorization and bytes are supplied by a controlled fixture adapter, not the live parent deployment. Private-container HTTP inference separately verified on an original portrait.",
+  "liveStackVerification": {
+    "command": "python3 scripts/faces-smoke.py",
+    "status": "passed",
+    "boundary": "Actual Keycloak JWTs, exact-original uploads, hashing, Storage, RabbitMQ, Library projection and transactional outbox, automatic face jobs, private Linux CPU inference.",
+    "samePersonPairSimilarities": [0.784875, 0.664746, 0.524891],
+    "crossPersonMaximumSimilarity": 0.268699,
+    "similarityMatrix": [
+      [1.000000,0.784875,0.230226,0.268699,-0.004546,0.092290],
+      [0.784875,1.000000,0.129522,0.141152,0.018312,-0.006277],
+      [0.230226,0.129522,1.000000,0.664746,0.223581,0.108328],
+      [0.268699,0.141152,0.664746,1.000000,0.226577,0.146002],
+      [-0.004546,0.018312,0.223581,0.226577,1.000000,0.524891],
+      [0.092290,-0.006277,0.108328,0.146002,0.524891,1.000000]
+    ],
+    "detectedPortraits": 6,
+    "clusters": 3,
+    "falsePairSplits": 0,
+    "falsePairMerges": 0,
+    "actualFaceContainerRestarts": 2,
+    "verified": [
+      "Automatic indexing was observed before any manual enqueue.",
+      "Manual enqueue returns the existing durable job.",
+      "Cross-owner and shared-reader media access never exposes private face annotations.",
+      "An independent upload of identical bytes receives independent private identity/name state.",
+      "Names, aliases, merges, undo and splits persist across actual face-container restarts.",
+      "Pending compound and hidden companion images are denied; committed primary indexing is automatic.",
+      "Removing current library membership denies source access.",
+      "A real blank image produces no_faces, not an invented identity.",
+      "A faces-api-only outage leaves original upload/retrieval available and automatically recovers durable publication retries.",
+      "Admin disablement denies already-issued JWTs while an independent owner remains isolated.",
+      "Original bytes remain unchanged; disposable users, media and biometric annotations are cleaned up."
+    ],
+    "rawReport": "artifacts/faces-live-smoke.json (ignored local artifact)",
+    "numerics": "Small differences from the local Python matrix above reflect the actual Linux CPU runtime; threshold remained fixed."
+  },
+  "limitations": [
+    "This small set of well-lit frontal official portraits is not a family-photo accuracy benchmark.",
+    "It does not establish accuracy on children, occlusion, profiles, low light, mixed-age collections or demographic subgroups.",
+    "No threshold was changed in response to these portraits.",
+    "HEIC and video-frame indexing are not implemented.",
+    "The current base backup script does not protect the optional face database or its credentials; manual annotations are not rebuildable."
+  ]
+}

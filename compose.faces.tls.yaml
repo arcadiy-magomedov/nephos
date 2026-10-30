@@ -1,0 +1,10 @@
+# Apply after compose.yaml, compose.faces.yaml and compose.tls.yaml.
+services:
+  faces-api:
+    environment: &face-production
+      ASPNETCORE_ENVIRONMENT: Production
+      Authentication__Authority: https://${PUBLIC_HOST:?Set PUBLIC_HOST}/realms/nephos
+      Authentication__MetadataAddress: https://${PUBLIC_HOST}/realms/nephos/.well-known/openid-configuration
+  faces-worker:
+    environment:
+      <<: *face-production

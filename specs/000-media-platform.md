@@ -61,6 +61,7 @@ Supporting documents:
 - [001 - System architecture and flows](001-system-architecture.md).
 - [002 - Design-time threat model](002-threat-model.md).
 - [003 - Native mobile client draft](003-mobile-client.md).
+- [004 - MVP stack decisions and draft execution plan](004-mvp-execution-plan.md).
 
 ## 2. Requirements
 
@@ -99,6 +100,7 @@ Supporting documents:
 | R31 | Make the entire system end-to-end testable at every stage; an architecture that prevents an E2E test of supported behavior is unacceptable. Prefer test-driven development where appropriate. |
 | R32 | Apply least privilege, hostile-input isolation, artifact verification, privacy-scoped annotations, and security-preserving recovery across public APIs, internal services, asynchronous work, storage, and deployment. |
 | R33 | Classify potentially unwanted photos/videos, including social-media memes/forwards, blurred captures, and temporary screenshots, and suggest cleanup with explanations and user control; classification must never automatically delete media. |
+| R34 | Centralize logs, metrics, and distributed traces from all application microservices through shared OpenTelemetry Collector infrastructure, with correlated diagnostics, bounded resource use, and private operator access. |
 
 ## 3. Solutions by requirement
 
@@ -378,8 +380,9 @@ Recovery uses two explicit paths:
 
 Recovery never enables a disabled account or changes application membership.
 Credential addition and recovery are visible to the account owner through the
-verified channel. Authentik and Keycloak remain candidates only until they
-demonstrate these behaviors; provider limitations do not weaken the contract.
+verified channel. Keycloak is selected for the MVP in spec 004; acceptance must
+demonstrate these behaviors rather than assuming provider selection proves them.
+Provider limitations do not weaken the contract.
 
 ### 3.9 R09 - Administrator-provisioned users
 
@@ -733,8 +736,9 @@ reliable publication mechanism at service boundaries.
 
 Retry transient errors with backoff. Expose exhausted jobs through dead-letter
 queues and administrative retry controls. Handle cancellation, deleted assets,
-and stale generations without publishing obsolete outputs. Broker selection is
-**open**.
+and stale generations without publishing obsolete outputs. RabbitMQ is selected
+for the MVP in spec 004; delivery configuration and client-library choices must
+preserve these contracts.
 
 ### 3.24.1 Untrusted processing isolation
 
@@ -1505,7 +1509,7 @@ scheduled/release suites for real inference, restore, failure injection,
 production-scale datasets, and orchestrator/network boundaries. Scheduling a
 suite less frequently does not remove its acceptance requirement.
 
-Map R01-R33 and the acceptance scenarios below to test identifiers, fixtures,
+Map R01-R34 and the acceptance scenarios below to test identifiers, fixtures,
 supported profiles, and observable outcomes. New functionality is not complete
 without this traceability and executable evidence. Since this repository
 currently contains specifications only, these are required future test
@@ -1654,7 +1658,58 @@ resource budgets before certifying a model, prioritizing low false positives.
 No model score bypasses review. Prefer TDD for review, authorization, revision,
 trash, and synchronization invariants; real-model E2E evidence is also required.
 
-### 3.34 Open decisions and acceptance evidence
+### 3.34 R34 - Centralized OpenTelemetry
+
+Every application API, worker, publisher, and notification service emits
+structured logs, metrics, and distributed traces through OpenTelemetry to a
+shared private Collector endpoint. Centralization means a common collection and
+querying architecture, not independent telemetry stacks per microservice.
+The MVP uses a shared Collector service in Compose. Other deployments can scale
+collectors or add agent tiers without changing application instrumentation.
+
+Configure OTLP receivers and explicit logs, metrics, and traces pipelines.
+Applications must not depend directly on a particular log store, metrics engine,
+or tracing product. Collector processing/export and adapters connect the signals
+to their selected durable stores and private dashboards. Collector ingestion
+alone is not storage, querying, alerting, or proof that a signal was retained.
+The MVP selects Grafana with Prometheus for metrics, Loki for logs, and Tempo for
+traces. Retention limits, storage modes, and resource budgets remain open.
+
+Use consistent resource attributes such as service name, version, instance, and
+deployment environment. Propagate W3C trace context across HTTP and RabbitMQ
+publication/consumption, including outbox and retry relationships where relevant.
+Correlate logs with trace/span identifiers. Treat incoming trace context as
+untrusted observability data, never as identity, authorization, or an unrestricted
+sampling instruction.
+
+Measure request/error/latency rates, transferred bytes, verification duration,
+queue depth/age, retries/dead letters, storage capacity, gallery/sync latency,
+and worker resource saturation. Avoid user IDs, filenames, asset IDs, raw URLs,
+and other unbounded values as metric labels. Bound trace sampling and log volume;
+redact credentials, cookies, signed URLs, recovery codes, private media metadata,
+SQL parameter values, and payloads before export.
+
+Collect available infrastructure signals from Keycloak, PostgreSQL, RabbitMQ,
+ingress, and the host through supported native exporters/receivers or adapters;
+do not assume third-party services emit all three signals natively. Avoid
+duplicating logs through both OTLP and container-log collection. Application
+instrumentation is shared convention, not a requirement to share domain state.
+
+Keep receiver, storage, and dashboard endpoints off public ingress; authenticate
+and protect telemetry transport according to the deployment's workload boundary.
+Telemetry export is asynchronous, with finite queues, memory limits, batching,
+timeouts, and bounded retries. A collector or backend outage must not block
+uploads or exhaust application memory. Expose dropped/refused records, exporter
+failures, and collector health through an independent operational check so a
+broken pipeline is not mistaken for a healthy quiet system.
+
+Telemetry is not the authoritative operation journal, security audit record,
+or backup-completion evidence. Retain those correctness records independently
+of sampling or telemetry loss. R31 E2E runs verify all three signals at their
+configured destinations, cross-service correlation, redaction, and application
+behavior during telemetry outages.
+
+### 3.35 Open decisions and acceptance evidence
 
 Before implementation, resolve or explicitly defer:
 
@@ -1663,15 +1718,22 @@ Before implementation, resolve or explicitly defer:
   shared ingestion is a recommendation, not a selected API change.
 - Resource budgets and expected library size; physical disk layout is an
   operator concern, not a prerequisite for application design.
-- Initial language/framework choices and supported persistence adapters.
-- Identity provider selection and account activation delivery integration. The
+- MVP choices are recorded in spec 004: ASP.NET Core, PostgreSQL, mounted-volume
+  storage, Keycloak, RabbitMQ, Swift iOS, Docker Compose, and centralized
+  OpenTelemetry. PostgreSQL repositories use Npgsql and explicit parameterized
+  SQL, not Entity Framework. Other library choices and additional provider
+  support remain open.
+- Keycloak enrollment/recovery integration and account activation delivery. The
   passkey-only, recovery-code/admin recovery, revocation, and disabled-account
   policies in R08/R09 are fixed contracts, not open choices.
 - Protected security-journal and monotonic-epoch implementation, recovery-key
   custody, and backup consistency-set mechanics must be selected while
   preserving mandatory fail-closed restore behavior in R28.
-- Broker, vector engine, initial storage-adapter implementation order, and public
-  ingress.
+- RabbitMQ client/topology configuration, vector engine, additional storage
+  adapters, and public ingress.
+- Telemetry storage modes, retention, sampling, alerting, and resource budgets for
+  the selected Grafana/Prometheus/Loki/Tempo stack; centralized collection of all
+  three signals is required.
 - Deduplication/trust scope and encryption requirements.
 - Optional annotation-sharing configuration; the default isolation and explicit
   grant requirements in R19 are fixed.
@@ -1795,8 +1857,14 @@ Production acceptance scenarios must demonstrate:
     restore against expiry/GC. Preserve revoked grants, remaining blob references,
     and gallery anchoring; distinguish logical bytes from delayed or unavailable
     physical reclamation.
+33. Exercise an authenticated upload through verification and publication, and
+    observe service-attributed logs, metrics, and correlated HTTP/RabbitMQ traces
+    in the configured centralized destinations. Check sensitive-data redaction
+    and private telemetry access. Interrupt collector/backend availability:
+    uploads continue with bounded telemetry buffers, and export failures or
+    dropped signals are operationally detectable.
 
-### 3.35 Design reference
+### 3.36 Design reference
 
 [Yandex Disk's engineering description of gallery clustering and Smartcache
 synchronization](https://habr.com/ru/companies/yandex/articles/849584/) describes

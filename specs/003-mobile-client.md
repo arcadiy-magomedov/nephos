@@ -23,7 +23,8 @@ not an MVP or a promise of unrestricted mobile background execution.
 
 Native integration is required for the OS photo library, permissions,
 background transfers, secure credentials, push delivery, and local removal.
-Whether all presentation code must be native is a separate, open decision.
+The MVP selects Swift with SwiftUI/UIKit for iOS; Android implementation and
+future code-sharing decisions remain open.
 The existing backend remains responsible for identity, durable uploads, media
 authorization, classification, and synchronization.
 
@@ -33,23 +34,25 @@ hints, phone-space reclamation, and small batches of AI cleanup candidates.
 Interpret "permanently cached ... defeat the purpose" as **not permanently
 cached**; temporary bounded previews and upload staging are still necessary.
 
-This is a reviewable draft. Recommendations below are not recorded as user
-decisions: user-confirmed phone offloading, a 24-item cleanup review batch, and
-the implementation approaches in section 4. Automatic phone deletion is not an
-approved behavior. Settings beyond necessary safety/operational controls remain
-to be designed.
+The MVP discussion confirms two independent opt-in settings: automatic backup
+of all accessible existing/new photos and videos, and automatic removal of
+verified backed-up device media. Both obey OS execution/permission/confirmation
+requirements; this does not promise unattended deletion where iOS disallows it.
+The 24-item AI cleanup batch remains a recommendation, not a selected value.
+Other settings and Android implementation remain to be designed.
 
 Supporting specifications:
 
 - [000 - Backend requirements and contracts](000-media-platform.md).
 - [001 - System architecture](001-system-architecture.md).
 - [002 - Threat model](002-threat-model.md).
+- [004 - MVP stack decisions and draft execution plan](004-mvp-execution-plan.md).
 
 ## 2. Requirements
 
 | ID | Requirement |
 |---|---|
-| C01 | Support iOS and Android through native OS integrations without prematurely fixing the UI framework or code-sharing approach. |
+| C01 | Support native OS integrations, with Swift/SwiftUI/UIKit selected for the iOS MVP and Android implementation/code sharing left open. |
 | C02 | Allow manual backend URL setup and permission-aware local server discovery, with explicit server trust and safe endpoint changes. |
 | C03 | Authenticate only administrator-provisioned users using the backend's passkey/passwordless identity contract. |
 | C04 | Access device photos/videos through supported OS APIs, honoring denied, limited, changed, and revoked permissions. |
@@ -60,7 +63,7 @@ Supporting specifications:
 | C09 | Browse million-asset remote chronologies through layered counts, lazy pages, direct date jumps, and stable scroll anchors. |
 | C10 | Display photos/videos on demand and expose backend semantic/person search without making browsing dependent on AI availability. |
 | C11 | Share selected media or permitted libraries with backend-authorized known users and show shared-media provenance. |
-| C12 | Reclaim phone space only for explicitly eligible, verified backups, respecting OS consent and the consequences of synchronized photo libraries. |
+| C12 | Offer opt-in automatic removal of eligible, verified backed-up device media, respecting OS execution/consent requirements and synchronized-library consequences. |
 | C13 | Keep local removal, server trash, cache eviction, and reimport decisions separate and recoverable where supported. |
 | C14 | Bound persistent preview, original, staging, and metadata storage; do not permanently cache uploaded originals by default. |
 | C15 | Preserve committed offline state, clearly surface stale/pending/error states, and reconcile safely across clients and backend generations. |
@@ -84,10 +87,10 @@ Gallery virtualization, selection, navigation, and settings need not depend on
 native photo-library objects. Local media identifiers and remote asset IDs are
 different types; a local filename is neither an identity nor backup evidence.
 
-Native views, a shared core with native views, or a bundled hybrid UI can
-implement these boundaries. A UI layer must not own the only copy of pending
-upload state or require a WebView to remain alive for transfers. Section 4
-records alternatives without selecting a framework.
+Swift with SwiftUI/UIKit implements these boundaries for the iOS MVP. A UI
+layer must not own the only copy of pending upload state or need to remain
+active for OS-managed transfers. Section 4 retains alternatives for future
+platform decisions; it does not reopen the selected iOS implementation.
 
 ### 3.2 C02 - Connection setup and local discovery
 
@@ -307,10 +310,13 @@ annotations and cleanup decisions.
 
 ### 3.12 C12 - Free up phone space safely
 
-**Recommended policy, awaiting review:** a user-triggered "Free up phone space"
-screen lists eligible backed-up items, estimated local bytes, exclusions, and
-consequences, followed by explicit confirmation and any required OS dialog.
-Do not enable automatic local deletion in the draft's default flow.
+Provide separate opt-in settings for automatic backup and automatic phone-copy
+removal. Enabling removal authorizes the application to initiate cleanup of
+eligible verified backups, subject to platform execution and consent rules; it
+does not bypass an OS confirmation or authorize server deletion. While disabled,
+no automatic removal is initiated. Explain eligibility and synchronized-library
+consequences at opt-in, and show items pending required confirmation or blocked
+by permissions. A user-triggered cleanup screen remains available for review.
 
 Before invoking the OS removal API, obtain fresh authenticated server evidence
 that every required resource/revision is durably retained in the user's own
@@ -533,16 +539,16 @@ These options are recorded for discussion, not silently selected:
 
 | Area | Alternatives | Trade-off / recommendation |
 |---|---|---|
-| Client implementation | Separate Swift/Kotlin apps; shared core with native views; cross-platform native-rendered UI; bundled WebView UI with native adapters | Prototype gallery scrolling and suspended transfers before selecting. Shared core/native presentation is a candidate, not an adopted framework. |
+| Client implementation | Separate native apps; shared core; cross-platform or bundled hybrid UI | Swift with SwiftUI/UIKit selected for iOS MVP; Android strategy remains open. |
 | Update transport | Push + HTTPS reconciliation; foreground SSE plus push; HTTPS-only foreground refresh and OS-scheduled catch-up | Recommend push + HTTPS for mobile, keep SSE optional and a no-push profile. No approach guarantees execution when the OS forbids it. |
-| Phone removal | Reviewed free-space batches; opt-in scheduled offload; both | Recommend reviewed batches. Automatic offload needs explicit policy approval, OS evidence, and recovery guarantees. |
+| Phone removal | Reviewed free-space batches; opt-in automatic offload | Independent opt-in automatic backup and removal settings selected; actual scheduling/consent follows OS capabilities and backup-safety checks. |
 | Discovery | Manual URL; DNS-SD suggestions; independently trusted QR pairing | Combine manual setup and optional discovery; pairing can simplify trust without treating advertisements as credentials. |
 | Refused cleanup | Keep protection; dismiss assessment; later deferral | Offer distinct choices rather than treating every refusal as training feedback. |
 | Media availability | Evictable previews only; explicitly pinned offline originals | Recommend bounded previews by default; pinned originals are optional, quota-accounted scope. |
 
 Before implementation, decide minimum OS versions and app distribution/signing,
-direct push versus optional relay operation, native/UI sharing strategy, the
-lossless media support matrix, offload retention assurance and consent policy,
+direct push versus optional relay operation, Android/code-sharing strategy, the
+lossless media support matrix, offload retention assurance and OS consent UX,
 review deferral semantics, numerical resource/quality budgets, and the complete
 settings design. These are north-star implementation decisions, not permission
 to weaken data safety or sync correctness.

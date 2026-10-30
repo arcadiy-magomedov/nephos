@@ -1,0 +1,11 @@
+**
+!face-inference/
+!face-inference/*.py
+!face-inference/*.txt
+!face-inference/models.json
+!face-inference/licenses/**
+face-inference/.venv
+face-inference/models
+face-inference/fixtures
+face-inference/results
+face-inference/__pycache__

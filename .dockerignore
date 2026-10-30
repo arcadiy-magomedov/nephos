@@ -1,0 +1,9 @@
+**/bin
+**/obj
+.git
+.env*
+artifacts
+**/TestResults
+ios
+**/__pycache__
+**/.venv

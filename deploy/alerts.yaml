@@ -1,0 +1,58 @@
+groups:
+  - name: nephos
+    rules:
+      - alert: NephosCollectorUnavailable
+        expr: up{job="collector-internal"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "Central telemetry collection is unavailable; inspect Collector and destination logs."}
+      - alert: NephosServiceMissing
+        expr: time() - max by(service) (nephos_service_heartbeat) > 60
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "Application service heartbeat is stale; inspect its container and database connectivity."}
+      - alert: NephosServiceSetIncomplete
+        expr: count(time() - max by(service) (nephos_service_heartbeat) < 60) < 6 or absent(nephos_service_heartbeat)
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Expected API, administration, or worker telemetry is missing."}
+      - alert: NephosStorageMetricsStale
+        expr: time() - max(nephos_storage_sampled_at) > 60 or absent(nephos_storage_sampled_at)
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "Storage state cannot be sampled; check database and volume before trusting other gauges."}
+      - alert: NephosStorageHeadroom
+        expr: nephos_storage_free_bytes < 5368709120
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Media volume has less than 5 GiB free; new uploads may be refused safely."}
+      - alert: NephosVerificationStalled
+        expr: nephos_storage_verification_age > 600
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Verification is pending for over ten minutes; inspect worker logs and disk throughput."}
+      - alert: NephosUploadFailures
+        expr: nephos_storage_failed > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Uploads failed in the last day; inspect verification errors before retrying."}
+      - alert: NephosOutboxBacklog
+        expr: nephos_storage_outbox > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Verified publications are not leaving the durable outbox; inspect broker and publisher."}
+      - alert: NephosProjectionBacklog
+        expr: rabbitmq_queue_messages{queue="nephos.assets.ready"} > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Library projection is falling behind; inspect projector and library database."}
+      - alert: NephosDeadLetters
+        expr: rabbitmq_queue_messages{queue="nephos.assets.dead"} > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: "Rejected publications require operator investigation; do not blindly purge or replay."}
+      - alert: NephosBrokerMetricsMissing
+        expr: absent(rabbitmq_identity_info)
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Broker monitoring is unavailable; check RabbitMQ and Collector scraping."}

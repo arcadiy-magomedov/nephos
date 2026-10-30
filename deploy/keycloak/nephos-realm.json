@@ -1,0 +1,56 @@
+{
+  "realm": "nephos",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "smtpServer": {"host": "mailpit", "port": "1025", "from": "nephos@localhost", "fromDisplayName": "Nephos development"},
+  "browserFlow": "nephos-passkeys",
+  "webAuthnPolicyPasswordlessRpEntityName": "Nephos",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "authenticationFlows": [
+    {
+      "alias": "nephos-passkeys",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "authenticatorFlow": false},
+        {"flowAlias": "nephos-passkey-form", "requirement": "ALTERNATIVE", "priority": 20, "authenticatorFlow": true}
+      ]
+    },
+    {
+      "alias": "nephos-passkey-form",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "auth-username-form", "requirement": "REQUIRED", "priority": 10, "authenticatorFlow": false},
+        {"authenticator": "webauthn-authenticator-passwordless", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false}
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "nephos-ios",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["nephos://oauth/callback"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "nephos-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {"included.custom.audience": "nephos-api", "access.token.claim": "true", "id.token.claim": "false"}
+        }
+      ]
+    }
+  ]
+}

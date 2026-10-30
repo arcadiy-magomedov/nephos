@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/TestResults/
+.env
+.env.*
+!.env.example
+.DS_Store
+.vs/
+*.user
+artifacts/
+__pycache__/
+.venv/
+.ruff_cache/

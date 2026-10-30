@@ -1,0 +1,100 @@
+# Optional overlay; start only the services listed in face-inference/README.md.
+services:
+  library-worker:
+    environment:
+      Analysis__Enabled: "true"
+      Services__Faces: http://faces-api:8080
+
+  faces-postgres:
+    image: postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    environment:
+      POSTGRES_PASSWORD: ${FACES_POSTGRES_PASSWORD:?Run python3 scripts/faces-env.py}
+      FACES_OWNER_PASSWORD: ${FACES_OWNER_PASSWORD:?Required}
+      FACES_APP_PASSWORD: ${FACES_APP_PASSWORD:?Required}
+    volumes:
+      - faces-postgres:/var/lib/postgresql
+      - ./deploy/faces/init.sql:/docker-entrypoint-initdb.d/01-faces.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+  migrate-faces:
+    build: {context: ., dockerfile: deploy/faces/Dockerfile, args: {PROJECT: Nephos.Migrations}}
+    command: ["Nephos.Migrations.dll", "faces"]
+    environment:
+      MIGRATION_CONNECTION: Host=faces-postgres;Database=faces;Username=faces_owner;Password=${FACES_OWNER_PASSWORD}
+    depends_on:
+      faces-postgres: {condition: service_healthy}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  face-inference:
+    build: {context: ., dockerfile: face-inference/Dockerfile}
+    environment:
+      INFERENCE_KEY: ${FACES_INFERENCE_KEY:?Required}
+    read_only: true
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 32
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [face-private]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  faces-api:
+    build: {context: ., dockerfile: deploy/faces/Dockerfile}
+    command: ["Nephos.Faces.Api.dll"]
+    environment: &face-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      Authentication__Authority: http://localhost:18081/realms/nephos
+      Authentication__MetadataAddress: http://keycloak:8080/realms/nephos/.well-known/openid-configuration
+      Authentication__Audience: nephos-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      Telemetry__TraceSampleRatio: "1"
+      DOTNET_EnableDiagnostics: "0"
+      Services__Library: http://library-api:8080
+      Services__Storage: http://storage-api:8080
+      Services__Key: ${SERVICE_KEY:?Required}
+      Inference__Url: http://face-inference:8090
+      Inference__Key: ${FACES_INFERENCE_KEY:?Required}
+      ConnectionStrings__Faces: Host=faces-postgres;Database=faces;Username=faces_app;Password=${FACES_APP_PASSWORD}
+    ports: ["127.0.0.1:18085:8080"]
+    depends_on:
+      migrate-faces: {condition: service_completed_successfully}
+    read_only: true
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [default, face-private]
+
+  faces-worker:
+    build: {context: ., dockerfile: deploy/faces/Dockerfile}
+    command: ["Nephos.Faces.Api.dll"]
+    environment:
+      <<: *face-environment
+      Worker__Enabled: "true"
+    depends_on:
+      migrate-faces: {condition: service_completed_successfully}
+      face-inference: {condition: service_healthy}
+    read_only: true
+    mem_limit: 384m
+    cpus: 0.5
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [default, face-private]
+
+networks:
+  face-private:
+    internal: true
+volumes:
+  faces-postgres:

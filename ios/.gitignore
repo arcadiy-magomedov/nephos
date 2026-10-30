@@ -1,0 +1,6 @@
+.build/
+.derivedData/
+.test-work/
+*.xcuserstate
+xcuserdata/
+.logs/

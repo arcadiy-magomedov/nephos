@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nephos.Faces.Api/Nephos.Faces.Api.csproj" />
+    <Project Path="src/Nephos.Library.Api/Nephos.Library.Api.csproj" />
+    <Project Path="src/Nephos.Migrations/Nephos.Migrations.csproj" />
+    <Project Path="src/Nephos.ServiceDefaults/Nephos.ServiceDefaults.csproj" />
+    <Project Path="src/Nephos.Storage.Api/Nephos.Storage.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nephos.Faces.Tests/Nephos.Faces.Tests.csproj" />
+    <Project Path="tests/Nephos.Tests/Nephos.Tests.csproj" />
+  </Folder>
+</Solution>

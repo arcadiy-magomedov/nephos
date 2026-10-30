@@ -1,0 +1,81 @@
+[
+  {
+    "id": "obama-2009",
+    "label": "Barack Obama",
+    "file": "Official_portrait_of_Barack_Obama.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/e/e9/Official_portrait_of_Barack_Obama.jpg",
+    "author": "Pete Souza",
+    "date": "2009-01-13",
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Official_portrait_of_Barack_Obama.jpg",
+    "sha256": "19ec613e6831dd0c285b907f4cf1be13a654f8ac237435146320ec3dcc42cd45",
+    "bytes": 803500,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  },
+  {
+    "id": "obama-2012",
+    "label": "Barack Obama",
+    "file": "President_Barack_Obama.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/8/8d/President_Barack_Obama.jpg",
+    "author": "Official White House Photo by Pete Souza",
+    "date": "2012-12-06",
+    "license": "Public domain",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:President_Barack_Obama.jpg",
+    "sha256": "744dd848fbb0584229169e01c4944664957c62495fb9e8af514a088ebca43e19",
+    "bytes": 1276121,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  },
+  {
+    "id": "biden-2013",
+    "label": "Joe Biden",
+    "file": "Joe_Biden_official_portrait_2013.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/f/f4/Joe_Biden_official_portrait_2013.jpg",
+    "author": "David Lienemann",
+    "date": "2013-01-10",
+    "license": "Public domain",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Joe_Biden_official_portrait_2013.jpg",
+    "sha256": "ad176d4d368e0944c666bea12e6372347f27d1194837e6731766f878d254bdee",
+    "bytes": 2022950,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  },
+  {
+    "id": "biden-2021",
+    "label": "Joe Biden",
+    "file": "Joe_Biden_presidential_portrait.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/6/68/Joe_Biden_presidential_portrait.jpg",
+    "author": "Adam Schultz",
+    "date": "2021-03-03",
+    "license": "Public domain",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Joe_Biden_presidential_portrait.jpg",
+    "sha256": "563f24c3a1a7392bb7f96831ba0ee8e7d53755ac9c053e9eeb520530542cc051",
+    "bytes": 4574031,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  },
+  {
+    "id": "trump-2017",
+    "label": "Donald Trump",
+    "file": "Donald_Trump_official_portrait.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/5/56/Donald_Trump_official_portrait.jpg",
+    "author": "Shealah Craighead",
+    "date": "2017-10-06",
+    "license": "Public domain",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Donald_Trump_official_portrait.jpg",
+    "sha256": "dac8cb8479f133d91d768777f2a64adec68d19ea29c4994108f2aea5811ff5f2",
+    "bytes": 5891405,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  },
+  {
+    "id": "trump-2025",
+    "label": "Donald Trump",
+    "file": "Presidential_Portrait_of_Donald_Trump,_2025.jpg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Presidential_Portrait_of_Donald_Trump%2C_2025.jpg",
+    "author": "Daniel Torok",
+    "date": "2025-01-15",
+    "license": "Public domain",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Presidential_Portrait_of_Donald_Trump%2C_2025.jpg",
+    "sha256": "3ab93774d130f3cdfc3a138f15b2fc6f5cac32f5f2339aeb2c3fc12316993c8d",
+    "bytes": 112203,
+    "transformation": "None; exact downloaded originals are submitted to the pipeline."
+  }
+]

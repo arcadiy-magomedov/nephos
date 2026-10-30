@@ -1,0 +1,16 @@
+extends: relaxed
+ignore: |
+  **/bin/
+  **/obj/
+  **/.venv/
+  ios/.build/
+  ios/.derivedData/
+  artifacts/
+rules:
+  line-length: disable
+  trailing-spaces: enable
+  empty-lines:
+    max: 2
+  truthy:
+    allowed-values: ['true', 'false']
+    check-keys: false

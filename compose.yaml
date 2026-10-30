@@ -1,0 +1,288 @@
+name: nephos-dev
+
+x-app-environment: &app-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  Authentication__Authority: http://localhost:18081/realms/nephos
+  Authentication__MetadataAddress: http://keycloak:8080/realms/nephos/.well-known/openid-configuration
+  Authentication__Audience: nephos-api
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+  Telemetry__TraceSampleRatio: "1"
+  DOTNET_EnableDiagnostics: "0"
+  Services__Library: http://library-api:8080
+  Services__Storage: http://storage-api:8080
+  Services__Key: ${SERVICE_KEY:?Run scripts/upgrade-dev-env.py for an existing environment}
+  Platform__ServerId: ${SERVER_ID:?Required}
+  Broker__Host: rabbitmq
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python3 scripts/dev-env.py}
+      LIBRARY_OWNER_PASSWORD: ${LIBRARY_OWNER_PASSWORD:?Required}
+      LIBRARY_APP_PASSWORD: ${LIBRARY_APP_PASSWORD:?Required}
+      STORAGE_OWNER_PASSWORD: ${STORAGE_OWNER_PASSWORD:?Required}
+      STORAGE_APP_PASSWORD: ${STORAGE_APP_PASSWORD:?Required}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Required}
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/01-nephos.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+
+  migrate-library:
+    build: {context: ., args: {PROJECT: Nephos.Migrations}}
+    command: ["Nephos.Migrations.dll", "library"]
+    environment:
+      MIGRATION_CONNECTION: Host=postgres;Database=library;Username=library_owner;Password=${LIBRARY_OWNER_PASSWORD:?Required}
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  migrate-storage:
+    build: {context: ., args: {PROJECT: Nephos.Migrations}}
+    command: ["Nephos.Migrations.dll", "storage"]
+    environment:
+      MIGRATION_CONNECTION: Host=postgres;Database=storage;Username=storage_owner;Password=${STORAGE_OWNER_PASSWORD:?Required}
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  volume-init:
+    image: alpine:3.23
+    user: "0"
+    command: ["sh", "-c", "mkdir -p /data/media && chown 1654:1654 /data/media"]
+    volumes: ["media:/data"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Required}
+      KC_HOSTNAME: http://localhost:18081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Required}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports: ["127.0.0.1:18081:8080"]
+    volumes: ["./deploy/keycloak/nephos-realm.json:/opt/keycloak/data/import/nephos-realm.json:ro"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    mem_limit: 768m
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine@sha256:0452ee3fd3b9a74160b251e693338616b464f22df4d4ba43304c101bebdca292
+    hostname: nephos-rabbitmq
+    environment:
+      RABBITMQ_NODENAME: rabbit@nephos-rabbitmq
+      RABBITMQ_DEFAULT_USER: nephos
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Required}
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+      - ./deploy/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 512m
+
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    ports: ["127.0.0.1:18083:8025"]
+    environment:
+      MP_MAX_MESSAGES: "100"
+    mem_limit: 64m
+
+  broker-init:
+    image: python:3.12-slim
+    command: ["python", "/app/broker-init.py"]
+    environment:
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      BROKER_PUBLISHER_PASSWORD: ${BROKER_PUBLISHER_PASSWORD:?Run scripts/upgrade-dev-env.py}
+      BROKER_PROJECTOR_PASSWORD: ${BROKER_PROJECTOR_PASSWORD:?Run scripts/upgrade-dev-env.py}
+    volumes: ["./scripts/broker-init.py:/app/broker-init.py:ro"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+    user: "65534:65534"
+    read_only: true
+    mem_limit: 64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  library-api:
+    build: {context: ., args: {PROJECT: Nephos.Library.Api}}
+    command: ["Nephos.Library.Api.dll"]
+    environment:
+      <<: *app-environment
+      ConnectionStrings__Library: Host=postgres;Database=library;Username=library_app;Password=${LIBRARY_APP_PASSWORD:?Required}
+    depends_on:
+      migrate-library: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  library-worker:
+    build: {context: ., args: {PROJECT: Nephos.Library.Api}}
+    command: ["Nephos.Library.Api.dll"]
+    environment:
+      <<: *app-environment
+      ConnectionStrings__Library: Host=postgres;Database=library;Username=library_app;Password=${LIBRARY_APP_PASSWORD}
+      Worker__Enabled: "true"
+      Broker__Username: library-projector
+      Broker__Password: ${BROKER_PROJECTOR_PASSWORD}
+    depends_on:
+      migrate-library: {condition: service_completed_successfully}
+      broker-init: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  library-admin:
+    build: {context: ., args: {PROJECT: Nephos.Library.Api}}
+    command: ["Nephos.Library.Api.dll"]
+    environment:
+      <<: *app-environment
+      ConnectionStrings__Library: Host=postgres;Database=library;Username=library_app;Password=${LIBRARY_APP_PASSWORD}
+      ConnectionStrings__LibraryAdmin: Host=postgres;Database=library;Username=library_owner;Password=${LIBRARY_OWNER_PASSWORD}
+      Administration__Enabled: "true"
+      Administration__Key: ${ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
+    depends_on:
+      migrate-library: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  admin-console:
+    build: {context: ., dockerfile: deploy/admin.Dockerfile}
+    environment:
+      ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      IDENTITY_URL: http://keycloak:8080
+      LIBRARY_ADMIN_URL: http://library-admin:8080
+      SERVICE_KEY: ${ADMIN_SERVICE_KEY}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    ports: ["127.0.0.1:18082:8080"]
+    user: "65534:65534"
+    read_only: true
+    mem_limit: 128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  storage-api:
+    build: {context: ., args: {PROJECT: Nephos.Storage.Api}}
+    command: ["Nephos.Storage.Api.dll"]
+    environment:
+      <<: *app-environment
+      ConnectionStrings__Storage: Host=postgres;Database=storage;Username=storage_app;Password=${STORAGE_APP_PASSWORD:?Required}
+      Storage__Root: /data/media
+    volumes: ["media:/data"]
+    depends_on:
+      migrate-storage: {condition: service_completed_successfully}
+      volume-init: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  storage-worker:
+    build: {context: ., args: {PROJECT: Nephos.Storage.Api}}
+    command: ["Nephos.Storage.Api.dll"]
+    environment:
+      <<: *app-environment
+      ConnectionStrings__Storage: Host=postgres;Database=storage;Username=storage_app;Password=${STORAGE_APP_PASSWORD}
+      Storage__Root: /data/media
+      Worker__Enabled: "true"
+      Broker__Username: storage-publisher
+      Broker__Password: ${BROKER_PUBLISHER_PASSWORD}
+    volumes: ["media:/data"]
+    depends_on:
+      migrate-storage: {condition: service_completed_successfully}
+      volume-init: {condition: service_completed_successfully}
+      broker-init: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 512m
+    cpus: 1.0
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  gateway:
+    image: nginx:1.28-alpine
+    ports: ["127.0.0.1:18080:8080"]
+    volumes: ["./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    depends_on: [library-api, storage-api]
+    mem_limit: 64m
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.163.2
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["./deploy/otel/collector.yaml:/etc/otelcol/config.yaml:ro"]
+    mem_limit: 256m
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+    volumes:
+      - ./deploy/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./deploy/alerts.yaml:/etc/prometheus/alerts.yaml:ro
+      - prometheus:/prometheus
+    mem_limit: 384m
+
+  loki:
+    image: grafana/loki:3.7.9
+    command: ["-config.file=/etc/loki/nephos.yaml"]
+    volumes:
+      - ./deploy/loki.yaml:/etc/loki/nephos.yaml:ro
+      - loki:/loki
+    mem_limit: 384m
+
+  tempo:
+    image: grafana/tempo:3.1.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./deploy/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo:/var/tempo
+    mem_limit: 384m
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports: ["127.0.0.1:13000:3000"]
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    mem_limit: 384m
+
+volumes:
+  postgres:
+  rabbitmq:
+  media:
+  prometheus:
+  loki:
+  tempo:
+  grafana:

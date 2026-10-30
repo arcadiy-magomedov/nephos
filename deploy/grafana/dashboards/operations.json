@@ -1,0 +1,17 @@
+{
+  "uid": "nephos-operations",
+  "title": "Nephos operations",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "tags": ["nephos"],
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "API / worker heartbeat age (seconds)", "gridPos": {"x": 0, "y": 0, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"refId": "A", "expr": "time() - max by(service) (nephos_service_heartbeat)", "legendFormat": "{{service}}"}]},
+    {"id": 2, "type": "timeseries", "title": "Media volume free bytes", "gridPos": {"x": 12, "y": 0, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"refId": "A", "expr": "nephos_storage_free_bytes"}], "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}},
+    {"id": 3, "type": "timeseries", "title": "Uploads, verification and outbox", "gridPos": {"x": 0, "y": 7, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"refId": "A", "expr": "nephos_storage_uploading", "legendFormat": "Uploading"}, {"refId": "B", "expr": "nephos_storage_verifying", "legendFormat": "Verifying"}, {"refId": "C", "expr": "nephos_storage_outbox", "legendFormat": "Unpublished"}, {"refId": "D", "expr": "nephos_storage_failed", "legendFormat": "Failed (24h)"}]},
+    {"id": 4, "type": "timeseries", "title": "Projection queues", "gridPos": {"x": 12, "y": 7, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"refId": "A", "expr": "rabbitmq_queue_messages", "legendFormat": "{{queue}}"}]},
+    {"id": 5, "type": "table", "title": "Active alert rules", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 7}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"refId": "A", "expr": "ALERTS{alertstate=\"firing\"}", "instant": true, "format": "table"}]},
+    {"id": 6, "type": "logs", "title": "Application logs (trace links open Tempo)", "gridPos": {"x": 0, "y": 21, "w": 24, "h": 10}, "datasource": {"type": "loki", "uid": "loki"}, "targets": [{"refId": "A", "expr": "{service_name=~\"nephos-.*\"}"}]}
+  ]
+}

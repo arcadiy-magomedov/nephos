@@ -1,0 +1,190 @@
+name: Nephos CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint and secret checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install checksum-pinned scanners
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/quality-tools"
+          cd "$RUNNER_TEMP/quality-tools"
+          curl --fail --silent --show-error --location --retry 3 \
+            -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz' | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+          curl --fail --silent --show-error --location --retry 3 \
+            -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum --check
+          tar -xzf actionlint.tar.gz actionlint
+          echo "$RUNNER_TEMP/quality-tools" >> "$GITHUB_PATH"
+      - run: python3 scripts/secret_scan.py --history
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - run: python3 -m pip install -r scripts/quality-requirements.txt
+      - run: ruff check . && ruff format --check .
+      - run: yamllint -s .github compose*.yaml deploy tests/alert-rules.test.yaml .yamllint.yaml
+      - run: actionlint -color
+      - run: shellcheck .githooks/pre-commit .githooks/pre-push
+      - run: dotnet restore Nephos.slnx --locked-mode
+      - run: dotnet format Nephos.slnx --verify-no-changes --no-restore
+
+  backend:
+    name: Backend build and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - run: dotnet restore Nephos.slnx --locked-mode
+      - run: dotnet build Nephos.slnx -c Release --no-restore
+      - run: dotnet test Nephos.slnx -c Release --no-build --logger trx --results-directory artifacts/test-results
+        env:
+          OTEL_SDK_DISABLED: "true"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: artifacts/test-results/*.trx
+          retention-days: 7
+
+  integration:
+    name: Backend integration and recovery
+    needs: [quality, backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/dev-env.py
+      - run: docker compose config --quiet
+      - run: docker compose run --rm --no-deps -v ./tests/alert-rules.test.yaml:/etc/prometheus/tests.yaml:ro --entrypoint promtool prometheus test rules /etc/prometheus/tests.yaml
+      - run: docker compose up -d --build --quiet-pull
+      - run: python3 scripts/smoke.py
+      - run: python3 scripts/admin-smoke.py
+      - run: pip install -r scripts/browser-requirements.txt && python3 -m playwright install --with-deps chromium
+      - run: python3 scripts/passkey-smoke.py
+      - run: python3 scripts/media-smoke.py
+      - run: python3 scripts/release-smoke.py
+      - run: python3 scripts/sharing-smoke.py
+      - run: python3 scripts/operations-smoke.py
+      - run: python3 scripts/edge-smoke.py
+      - run: python3 scripts/identity-production-smoke.py
+      - run: python3 scripts/low-storage-smoke.py
+      - run: python3 scripts/restore-smoke.py
+      - name: Failure diagnostics
+        if: failure()
+        run: docker compose logs --no-color --tail=80
+      - name: Stop development services
+        if: always()
+        run: docker compose down
+
+  faces:
+    name: Face models and real-photo integration
+    needs: [quality, backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OTEL_SDK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: dotnet restore Nephos.slnx --locked-mode
+      - name: Prepare real inference fixtures
+        run: |
+          python3 scripts/dev-env.py
+          python3 scripts/faces-env.py
+          python3 -m venv face-inference/.venv
+          face-inference/.venv/bin/python -m pip install -r face-inference/requirements.txt
+          python3 face-inference/download_models.py
+          python3 face-inference/fixtures/download.py
+          face-inference/.venv/bin/python face-inference/test_inference.py
+          face-inference/.venv/bin/python face-inference/fixtures/evaluate.py
+      - name: Build and start optional face deployment
+        run: |
+          docker compose --env-file .env --env-file .env.faces \
+            -f compose.yaml -f compose.faces.yaml -f deploy/faces/compose.test.yaml \
+            up -d --build --quiet-pull
+      - name: Repository, API and real-photo tests
+        run: |
+          python3 scripts/faces-tests.py
+          python3 scripts/faces-smoke.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: face-integration-evidence
+          path: artifacts/faces-live-smoke.json
+          retention-days: 7
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          docker compose --env-file .env --env-file .env.faces \
+            -f compose.yaml -f compose.faces.yaml logs --no-color --tail=80
+      - name: Stop face deployment
+        if: always()
+        run: |
+          docker compose --env-file .env --env-file .env.faces \
+            -f compose.yaml -f compose.faces.yaml -f deploy/faces/compose.test.yaml down
+
+  ios:
+    name: iOS lint, tests and simulator builds
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Swift formatting
+        run: swift format lint --strict --recursive ios/Nephos ios/Tests ios/Qualification ios/Package.swift
+      - name: Deterministic Swift tests
+        working-directory: ios
+        run: env -u NEPHOS_NATIVE_E2E -u NEPHOS_E2E_BEARER swift test --scratch-path .build
+      - name: Signing-disabled simulator builds
+        working-directory: ios
+        run: |
+          for configuration in Debug Release; do
+            xcodebuild -quiet -project Nephos.xcodeproj -target Nephos \
+              -configuration "$configuration" -sdk iphonesimulator \
+              ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+              CONFIGURATION_BUILD_DIR="$PWD/.derivedData/Build/Products/$configuration-iphonesimulator" \
+              OBJROOT="$PWD/.derivedData/Build/Intermediates.noindex" \
+              SYMROOT="$PWD/.derivedData/Build/Products" build
+          done
