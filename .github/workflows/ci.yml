@@ -136,8 +136,11 @@ jobs:
           face-inference/.venv/bin/python -m pip install -r face-inference/requirements.txt
           python3 face-inference/download_models.py
           python3 face-inference/fixtures/download.py
-          face-inference/.venv/bin/python face-inference/test_inference.py
+          face-inference/.venv/bin/python face-inference/fixtures/generate_heic.py
+          face-inference/.venv/bin/python face-inference/fixtures/download_camera.py
+          face-inference/.venv/bin/python -m unittest discover -s face-inference -p 'test_*.py'
           face-inference/.venv/bin/python face-inference/fixtures/evaluate.py
+          face-inference/.venv/bin/python face-inference/fixtures/evaluate_heic.py
       - name: Build and start optional face deployment
         run: |
           docker compose --env-file .env --env-file .env.faces \
@@ -145,6 +148,7 @@ jobs:
             up -d --build --quiet-pull
       - name: Repository, API and real-photo tests
         run: |
+          python3 scripts/heic-upgrade-smoke.py
           python3 scripts/faces-tests.py
           python3 scripts/faces-smoke.py
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

@@ -1,0 +1,40 @@
+{
+  "verifiedAt": "2026-10-30",
+  "python": "3.12.12",
+  "binding": "pillow-heif 1.8.1",
+  "nativeSources": "face-inference/heif-native.json (pinned URLs, sizes and SHA-256)",
+  "sourceRecipe": "face-inference/build_heif.py and face-inference/Dockerfile",
+  "runtimeCodecs": {
+    "libheif": "1.23.6",
+    "decoders": {"libde265": "1.1.3"},
+    "hevcEncoder": false,
+    "avifEncoder": false,
+    "internalMaskHelper": true,
+    "dynamicPluginLoading": false,
+    "x265Linked": false
+  },
+  "runtimeNativeDependencyCheck": "ldd libheif.so and libde265.so: libde265, libstdc++, libm, libgcc_s, libc and loader only; no x265.",
+  "runtimeLicenses": ["BSD-3-Clause pillow-heif source", "LGPLv3 libheif", "LGPLv3 libde265"],
+  "sourceArchivesRetainedInImage": "/opt/heif/share/sources",
+  "sourceNoticesRetainedInImage": "/opt/heif/share/licenses",
+  "sourceBuilds": {
+    "linux/arm64": {"build":"passed", "testsPassed":20, "testSeconds":17.774, "testRuntime":"native Linux arm64 Docker on Apple Silicon"},
+    "linux/amd64": {"build":"passed", "testsPassed":20, "testSeconds":18.559, "testRuntime":"Linux amd64 Docker emulation on Apple Silicon"}
+  },
+  "resourceLimitedTestCommand": "docker run --rm --network none --read-only --memory 1536m --cpus 1 --pids-limit 32 --mount type=bind,source=$PWD/face-inference/fixtures,target=/app/fixtures,readonly IMAGE python -m unittest discover -s /app -p 'test_*.py'",
+  "wheelAvailabilityOnly": {
+    "resolution": "pip download --only-binary=:all: for every pinned requirement, CPython 3.12, manylinux_2_28 plus manylinux2014, separately for aarch64 and x86_64: passed.",
+    "notShipped": "These upstream pillow-heif wheels bundle GPLv2 x265; production uses the source-built decoder-only binding instead.",
+    "wheels": [
+      {
+        "file": "pillow_heif-1.8.1-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
+        "sha256": "a36caeeb3e3ce12a3492aa8ab52d08393601303fa9b8b1bb807bef32b1edb505"
+      },
+      {
+        "file": "pillow_heif-1.8.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "3811fa95ad29d6abd37a72c88c8c682dd1ff41d51fddf4899255328bfccbe358"
+      }
+    ]
+  },
+  "boundary": "The ARM/AMD build and resource-limit tests recorded here used standalone disposable images/containers only. Separately, the parent verified the deployed scripts/faces-smoke.py end-to-end HEIC/HEIF originals, identity joining, orientation, privacy, compound eligibility, outage/backfill and exact public camera-original API upload. Neither verification qualifies a physical iPhone Photos permission/export/upload/restore round-trip."
+}

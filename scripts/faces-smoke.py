@@ -302,6 +302,15 @@ def main():
         assert hashlib.sha256(data).hexdigest() == fixture["sha256"]
         assert len(data) == fixture["bytes"] and len(data) <= 20 * 1024 * 1024
     report["fixtures"] = [{key: value for key, value in row.items()} for row in fixtures]
+    heic_manifest = json.loads((ROOT / "face-inference/fixtures/heic/provenance.json").read_text())
+    heic_fixtures = {row["id"]: row for row in heic_manifest["fixtures"]}
+    heic_bytes = {}
+    for identifier, fixture in heic_fixtures.items():
+        path = (ROOT / "face-inference" / fixture["path"]).resolve()
+        assert path.is_relative_to(ROOT / "face-inference/fixtures/heic")
+        data = path.read_bytes()
+        assert len(data) == fixture["bytes"] and hashlib.sha256(data).hexdigest() == fixture["sha256"]
+        heic_bytes[identifier] = data
     try:
         smoke.wait("Library ready", lambda: request(API + "/health/library") == "Healthy")
         smoke.wait("Storage ready", lambda: request(API + "/health/storage") == "Healthy")
@@ -477,10 +486,65 @@ def main():
                 }
                 print("PASS: labels/aliases, reversible merge, undo and split survive actual face-container restarts")
 
+                heic_assets = [
+                    upload(
+                        owner,
+                        library,
+                        uploads,
+                        heic_bytes[fixture["id"]],
+                        fixture["id"] + (".heif" if index % 2 else ".heic"),
+                        "image/heif" if index % 2 else "image/heic",
+                    )
+                    for index, fixture in enumerate(fixtures)
+                ]
+                automatic_jobs(owner, heic_assets)
+                for fixture, asset, jpeg_face in zip(fixtures, heic_assets, faces):
+                    observed = face_for(owner, asset["id"])
+                    assert observed["personId"] == identities[fixture["label"]]
+                    assert observed["sourceSha256"] == asset["sha256"]
+                    assert (observed["imageWidth"], observed["imageHeight"]) == (
+                        jpeg_face["imageWidth"],
+                        jpeg_face["imageHeight"],
+                    )
+                    assert max(abs(observed[key] - jpeg_face[key]) for key in ("x", "y", "width", "height")) < 0.05
+                    assert (
+                        media["raw"]("/v1/assets/" + asset["id"] + "/original", owner)[0] == heic_bytes[fixture["id"]]
+                    )
+                    request(API + "/v1/faces/jobs/" + asset["id"], token=outsider, method="POST", expected=404)
+                oriented = upload(
+                    owner, library, uploads, heic_bytes["obama-2009-orientation-6"], "oriented.heic", "image/heic"
+                )
+                automatic_jobs(owner, [oriented])
+                oriented_face = face_for(owner, oriented["id"])
+                assert oriented_face["personId"] == identities[fixtures[0]["label"]]
+                assert (oriented_face["imageWidth"], oriented_face["imageHeight"]) == (470, 640)
+                report["heic"] = {
+                    "generatedFromAttributedPortraits": True,
+                    "cameraOriginalPortraits": False,
+                    "mimeTypes": ["image/heic", "image/heif"],
+                    "automaticPortraitJobs": len(heic_assets),
+                    "sameNamedPeopleAsJpeg": True,
+                    "exactUploadedBytesPreserved": True,
+                    "uprightDimensionsAndBoxes": True,
+                    "orientation6ThroughFullPipeline": True,
+                    "fixtures": [heic_fixtures[row["id"]] for row in fixtures],
+                }
+                print(
+                    "PASS: HEIC/HEIF originals auto-index into existing named JPEG identities without rewriting bytes"
+                )
+
                 group = str(uuid.uuid4())
                 pending = [
-                    upload(owner, library, uploads, data, "compound-" + fixture["id"] + ".jpg", resource_set=group)
-                    for fixture, data in zip(fixtures[:2], originals[:2])
+                    upload(
+                        owner,
+                        library,
+                        uploads,
+                        heic_bytes[fixture["id"]],
+                        "compound-" + fixture["id"] + ".heic",
+                        "image/heic",
+                        resource_set=group,
+                    )
+                    for fixture in fixtures[:2]
                 ]
                 for item in pending:
                     request(API + "/v1/faces/jobs/" + item["id"], token=owner, method="POST", expected=404)
@@ -492,7 +556,7 @@ def main():
                         "size": p["size"],
                         "fileName": p["fileName"],
                         "role": "photo" if i == 0 else "alternatePhoto",
-                        "uniformTypeIdentifier": "public.jpeg",
+                        "uniformTypeIdentifier": "public.heic",
                     }
                     for i, p in enumerate(pending)
                 ]
@@ -534,6 +598,11 @@ def main():
                         lambda: publication_retry_recorded(no_face["id"]),
                         timeout=45,
                     )
+                    legacy_heic = upload(
+                        owner, library, uploads, heic_bytes["obama-2009-grid"], "preexisting-grid.heic", "image/heic"
+                    )
+                    # Mimic an older committed HEIC with no analysis publication.
+                    smoke.sql("DELETE FROM face_publications WHERE asset_id=:'asset'::uuid;", asset=legacy_heic["id"])
                 finally:
                     subprocess.run(
                         COMPOSE + ["start", "faces-api"], cwd=ROOT, check=True, capture_output=True, timeout=30
@@ -543,6 +612,30 @@ def main():
                 )
                 automatic_jobs(owner, [no_face], expected_status="no_faces")
                 assert page_all("/v1/faces/observations?assetId=" + no_face["id"], owner) == []
+                assert legacy_heic["id"] not in {job["assetId"] for job in page_all("/v1/faces/jobs", owner)}
+                subprocess.run(["python3", "scripts/faces-backfill.py"], cwd=ROOT, check=True, timeout=120)
+                automatic_jobs(owner, [legacy_heic])
+                assert face_for(owner, legacy_heic["id"])["personId"] == identities[fixtures[0]["label"]]
+                assert (
+                    media["raw"]("/v1/assets/" + legacy_heic["id"] + "/original", owner)[0]
+                    == heic_bytes["obama-2009-grid"]
+                )
+                report["heic"]["previouslyUnindexedOriginalBackfilled"] = True
+                report["heic"]["hiddenCompanionExcluded"] = True
+
+                camera_source = json.loads((ROOT / "face-inference/fixtures/camera-source.json").read_text())
+                camera_bytes = (ROOT / "face-inference/fixtures/camera" / camera_source["filename"]).read_bytes()
+                assert hashlib.sha256(camera_bytes).hexdigest() == camera_source["sha256"]
+                camera = upload(owner, library, uploads, camera_bytes, camera_source["filename"], "image/heic")
+                automatic_jobs(owner, [camera], expected_status="no_faces")
+                assert media["raw"]("/v1/assets/" + camera["id"] + "/original", owner)[0] == camera_bytes
+                report["heic"]["publicCameraSample"] = {
+                    "source": camera_source,
+                    "result": "no_faces",
+                    "exactOriginalUnchanged": True,
+                    "boundary": "Published iPhone original uploaded through API; not a physical-device Photos round trip.",
+                }
+                print("PASS: older HEIC backfill, hidden compound exclusion and exact public iPhone-camera original")
                 report["sourceAuthorization"] = {
                     "pendingRejected": True,
                     "hiddenCompanionRejected": True,

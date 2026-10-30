@@ -50,4 +50,41 @@ public sealed class ClientTests
         await Assert.ThrowsAsync<InvalidDataException>(() => client.OriginalAsync(source with { Sha256 = new string('f', 64) }, default));
         await Assert.ThrowsAsync<InvalidDataException>(() => client.OriginalAsync(source with { Size = 3 }, default));
     }
+
+    [Theory]
+    [InlineData("image/jpeg", true)]
+    [InlineData("image/png", true)]
+    [InlineData("image/webp", true)]
+    [InlineData("image/heic", true)]
+    [InlineData("image/heif", true)]
+    [InlineData("image/heic-sequence", false)]
+    [InlineData("image/heif-sequence", false)]
+    [InlineData("image/gif", false)]
+    [InlineData("video/quicktime", false)]
+    [InlineData("application/octet-stream", false)]
+    public async Task AuthorizedSourceAcceptsSupportedStillImagesOnly(string mediaType, bool supported)
+    {
+        var source = PersistenceTests.Source("owner") with { MediaType = mediaType };
+        var client = new AnalysisSourceClient(new Factory(_ =>
+            new(HttpStatusCode.OK) { Content = JsonContent.Create(source) }), Config);
+        Assert.Equal(supported, await client.SourceAsync(source.Subject, source.Id, default) is not null);
+    }
+
+    [Fact]
+    public async Task HeicDoesNotBypassSourceSizeLimitOrExactHash()
+    {
+        byte[] bytes = [1, 2, 3, 4];
+        var source = PersistenceTests.Source("owner") with
+        {
+            MediaType = "image/heic",
+            Size = Pipeline.MaxBytes + 1L
+        };
+        var metadata = new AnalysisSourceClient(new Factory(_ =>
+            new(HttpStatusCode.OK) { Content = JsonContent.Create(source) }), Config);
+        Assert.Null(await metadata.SourceAsync(source.Subject, source.Id, default));
+        var original = new AnalysisSourceClient(new Factory(_ =>
+            new(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }), Config);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            original.OriginalAsync(source with { Size = bytes.Length, Sha256 = new string('f', 64) }, default));
+    }
 }

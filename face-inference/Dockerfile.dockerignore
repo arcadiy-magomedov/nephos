@@ -3,6 +3,9 @@
 !face-inference/*.py
 !face-inference/*.txt
 !face-inference/models.json
+!face-inference/heif-native.json
+!face-inference/README.md
+!face-inference/Dockerfile
 !face-inference/licenses/**
 face-inference/.venv
 face-inference/models

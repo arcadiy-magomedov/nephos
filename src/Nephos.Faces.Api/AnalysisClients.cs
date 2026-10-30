@@ -38,7 +38,7 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
         response.EnsureSuccessStatusCode();
         var source = await response.Content.ReadFromJsonAsync<AnalysisSource>(ct);
         if (source is null || source.Id != assetId || source.Subject != owner || source.Size is <= 0 or > Pipeline.MaxBytes ||
-            source.MediaType is not ("image/jpeg" or "image/png" or "image/webp") ||
+            !Pipeline.SupportsMediaType(source.MediaType) ||
             source.Sha256.Length != 64 || !source.Sha256.All(char.IsAsciiHexDigit))
             return null;
         return source with { Sha256 = source.Sha256.ToLowerInvariant() };

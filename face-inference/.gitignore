@@ -2,4 +2,6 @@ models/
 .venv/
 __pycache__/
 fixtures/photos/
+fixtures/heic/
+fixtures/camera/
 results/

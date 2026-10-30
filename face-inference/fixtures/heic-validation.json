@@ -1,0 +1,60 @@
+{
+  "verifiedAt": "2026-10-30",
+  "modelVersion": "yunet-2023mar-sface-2021dec-8f2383e4-0ba9fbfa",
+  "preprocessVersion": "exif-rgb-max1280-align5-v1",
+  "command": "face-inference/.venv/bin/python face-inference/fixtures/evaluate_heic.py",
+  "numericalRuntime": "macOS arm64, Python 3.10.12, pillow-heif 1.8.1, libheif 1.23.6, libde265 1.1.3",
+  "generationRuntime": "Development-only x265 4.3+1-e9b8812 encoder; not shipped in production.",
+  "generatedFixtureCount": 17,
+  "inputs": "Six existing attributed JPEG portraits encoded as actual HEVC/HEIF plus generated orientation, grid, 10-bit SDR and rejection fixtures.",
+  "provenance": "fixtures/heic/provenance.json is regenerated with source/output SHA-256, attribution and transformation; original portrait attribution remains in fixtures/provenance.json.",
+  "order": ["obama-2009", "obama-2012", "biden-2013", "biden-2021", "trump-2017", "trump-2025"],
+  "generatedHeicSha256": [
+    "f93d404cde95efa6c8fd903549aa08b8fb98b0d0207c4006060234a1a9661e4d",
+    "43f636e2bada9a2db049b60b1a3b8637a506aa40ea2ea6174a94fc1f1e34b87c",
+    "be122b191197ac12b7da1d565cb8e67e68f88edb57b7547ccaa869d553b2b1f0",
+    "3bcb97233b51034dc01c46fd49e8eee3349b70e21d947df91f9008a26b0ab531",
+    "47c978108886f1baecd7310b8659b29e66488bb06006b5f335f24e7e03168379",
+    "8ab1bed34e2af61992a629ff5c5ccce1521f2c1a491511087403884dd2970aa9"
+  ],
+  "detectedFaces": [1, 1, 1, 1, 1, 1],
+  "usableEmbeddingDimensions": [128, 128, 128, 128, 128, 128],
+  "uprightDimensions": [[1916,2608], [2687,3356], [3277,4096], [2400,3000], [2250,2850], [612,792]],
+  "samePhotographJpegHeicSimilarity": [0.984127, 0.999375, 0.988224, 0.993712, 0.96345, 0.994666],
+  "maximumNormalizedBoxDelta": [0.001726, 0.000195, 0.000181, 0.000702, 0.000706, 0.000340],
+  "thresholdUnchanged": 0.45,
+  "differentPhotoSamePersonJpegHeicPairs": [
+    {"jpeg":"obama-2009", "heic":"obama-2012", "similarity":0.784789},
+    {"jpeg":"obama-2012", "heic":"obama-2009", "similarity":0.797624},
+    {"jpeg":"biden-2013", "heic":"biden-2021", "similarity":0.667142},
+    {"jpeg":"biden-2021", "heic":"biden-2013", "similarity":0.668960},
+    {"jpeg":"trump-2017", "heic":"trump-2025", "similarity":0.517520},
+    {"jpeg":"trump-2025", "heic":"trump-2017", "similarity":0.515021}
+  ],
+  "crossPersonJpegHeicMaximum": 0.283710,
+  "orientationValues": [2,3,4,5,6,7,8],
+  "similarityToUpright": [0.999714,0.999282,0.999691,0.999662,0.998166,0.999227,0.999596],
+  "publicCameraSample": {
+    "provenance": "fixtures/camera-source.json",
+    "publisherAndExifDevice": "Apple iPhone 12 Pro",
+    "originalSha256": "65960bf2782cd8ebd29a958e75b6adb7dff2bbff841389e869d917438c729010",
+    "uprightDimensions": [3024,4032],
+    "originalOrientation": 8,
+    "gridTileSize": [512,512],
+    "iccProfileBytes": 536,
+    "detectedHumanFaces": 0,
+    "exactOriginalUnchanged": true
+  },
+  "testCommand": "face-inference/.venv/bin/python -m unittest discover -s face-inference -p 'test_*.py'",
+  "testsPassed": 20,
+  "linuxVerification": "See fixtures/heic-build-verification.json for decoder-only runtime builds and resource-limited tests.",
+  "limitsUnchanged": {"bytes":20971520,"pixels":32000000,"faces":64,"wallSeconds":45,"cpuSeconds":40,"addressSpaceBytes":2147483648},
+  "limitations": [
+    "Generated HEIC portraits are codec fixtures, NOT original camera captures.",
+    "The separate public iPhone camera sample contains no human faces; test-use permission is not a general redistribution license.",
+    "No physical iPhone Photos permission/export/upload/restore round-trip was performed.",
+    "No new ICC-to-sRGB transform, HDR tone mapping or gain-map application.",
+    "No sequence, multiple top-level image, video or 48-megapixel support.",
+    "Six publisher-labelled portraits do not establish population or family-photo accuracy."
+  ]
+}

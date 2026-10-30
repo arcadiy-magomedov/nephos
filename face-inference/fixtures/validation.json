@@ -76,7 +76,7 @@
     "This small set of well-lit frontal official portraits is not a family-photo accuracy benchmark.",
     "It does not establish accuracy on children, occlusion, profiles, low light, mixed-age collections or demographic subgroups.",
     "No threshold was changed in response to these portraits.",
-    "HEIC and video-frame indexing are not implemented.",
+    "HEIC decoding is separately verified in heic-validation.json; physical-device Photos qualification and video-frame indexing remain incomplete.",
     "The current base backup script does not protect the optional face database or its credentials; manual annotations are not rebuildable."
   ]
 }

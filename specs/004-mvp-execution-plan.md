@@ -69,9 +69,11 @@ The user subsequently explicitly requested face-service implementation and real
 internet-photo validation. An optional Faces API/worker and private local
 inference service now implement owner-private detection, embeddings, clusters,
 names and reversible corrections. Library supplies live source authorization and
-a transactional publication outbox; JPEG/PNG/WebP primary photos are eligible.
+a transactional publication outbox; JPEG/PNG/WebP/HEIC/HEIF primary photos are eligible.
 Six licensed portraits are a small real-inference smoke set, not a representative
-accuracy benchmark. HEIC/video analysis, native People UI and semantic/person
+accuracy benchmark. HEIC decoding is server-side and never replaces an original;
+the format-expansion migration queues eligible older HEIC/HEIF photos. Video
+analysis, native People UI and semantic/person
 combined search are still outstanding. See `face-inference/README.md`.
 
 The custom platform administration UI and APNs delivery deserve explicit scope

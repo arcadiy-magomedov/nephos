@@ -160,9 +160,14 @@ the API without erasing their audit history.
 
 ## Limits and honest scope
 
-Accepted originals: single-frame **JPEG, PNG and WebP**, ≤20 MiB, ≤32 million
-pixels, ≤64 detections. No HEIC, animated images or sampled video-frame indexing
-yet. Unsupported images never become a `no_faces` success. An image without
+Accepted originals: single-frame **JPEG, PNG, WebP and HEVC-coded HEIC/HEIF**,
+≤20 MiB, ≤32 million pixels, ≤64 detections. This includes ordinary 12/24-MP
+iPhone HEIC originals within those limits, not 48-MP originals. There is no
+client-side conversion requirement: inference decodes an in-memory copy and
+returns the SHA-256 of the unchanged original upload.
+Animated images, HEIF sequences, multiple independent top-level images,
+non-HEVC HEIF codecs and sampled video frames are not supported.
+Unsupported images never become a `no_faces` success. An image without
 detections is `no_faces`; detections smaller than 48 pixels are preserved as
 `too_small` with no embedding/person (unknown), not forcibly identified.
 Unlabelled high-quality clusters have stable IDs but null names, not guessed
@@ -174,13 +179,37 @@ replace passkeys, or make biometric authentication decisions.
 EXIF transpose happens before detection/alignment; boxes are relative to the
 upright full-resolution image (`exif-normalized`). Detection downsizes to a
 maximum dimension of 1280; SFace aligns from the full decoded upright image.
+For HEIF, libheif first applies container `irot`/`imir` transforms and grid
+assembly; pillow-heif clears descriptive EXIF orientation to prevent applying
+the same rotation twice. EXIF-only rotation without HEIF transforms is not
+treated as authoritative, following HEIF presentation semantics. Embedded
+thumbnails, depth and gain-map auxiliary images are not separately indexed;
+only the single primary display image is used. A collection with multiple
+top-level images is rejected, not silently reduced to its selected primary.
+Sequence brands and movie tracks are rejected even when a still preview exists.
+
+The existing RGB convention is unchanged: no ICC-to-sRGB transform is added
+for JPEG or HEIF. Native HEVC YCbCr conversion supplies RGB samples; ICC/P3
+profile values are not reinterpreted with a new color-management pipeline.
+10/12-bit samples are reduced to 8-bit by the decoder; this is **not HDR tone
+mapping** and auxiliary gain maps are not applied. Wide-gamut/HDR accuracy is
+not qualified. Both frozen model and preprocessing versions remain unchanged
+because this adds a new codec without changing existing image preprocessing.
+Any future color-management or tone-mapping change needs a coordinated
+preprocessing-version bump and reprocessing policy.
+
 Inference concurrency is one; each request runs a killable child with a 45-second
 wall timeout, 40-second CPU and 2-GiB address-space ceiling. The container's
 1.5-GiB memory ceiling is stricter. Model checksums are verified on startup and
 per child. Native decoder isolation is resource containment, not a proof of
 absence of decoder vulnerabilities. Production needs ordinary dependency patching.
+HEIF uses one decode thread, keeps libheif's security limits enabled, and checks
+container structure/frame count and dimensions before pixel loading (and
+dimensions again afterward). Decoder failures return sanitized reasons such as
+`unsupported_image`, `unsupported_sequence`, `animated_image`, `corrupt_image`,
+`pixel_limit` or `payload_limit`, never native exception text.
 
-Annotation sharing/grants, recipient-owned annotation views, video/HEIC,
+Annotation sharing/grants, recipient-owned annotation views, video indexing,
 model training, semantic/person combined search and native People UX are not
 implemented by this service. This does not claim whole-platform completion.
 
@@ -203,6 +232,41 @@ inference has no external network. Redistributing the image must retain included
 model licenses/attributions. No warranty about upstream training-data rights or
 generalization is implied by the weights' license.
 
+## HEIF dependencies, builds and licenses
+
+Pinned Python binding: **pillow-heif 1.8.1**, BSD-3-Clause source. The upstream
+prebuilt wheels also bundle **GPLv2 x265 encoding**, in addition to LGPLv3
+libheif/libde265; calling the upstream wheel merely BSD would be incorrect.
+`requirements.txt` is convenient for **local tests/fixture generation**, whose
+encoder produces our derived fixtures. Do not copy that development environment
+into the production image.
+
+The Dockerfile instead builds the binding from its checksum-pinned source,
+**libheif 1.23.6** and **libde265 1.1.3** (LGPLv3), dynamically linked, with x265,
+other external encoders/codecs and plugin loading disabled. A build assertion
+requires the only decoder to be `libde265` and no HEVC/AVIF encoder; libheif's
+internal mask helper is not a HEVC encoder. No GPL x265 wheel or library enters
+the final image. `heif-native.json` pins URLs, lengths and SHA-256 for all three
+source archives; `build_heif.py` is the reproducible build recipe.
+
+`licenses/pillow-heif-LICENSE.txt`, `licenses/pillow-heif-LICENSES_bundled.txt`,
+`licenses/libheif-COPYING` and `licenses/libde265-COPYING` retain unmodified
+upstream notices. The bundled-wheel notice describes the **development wheels**,
+not the custom decoder-only build. The runtime also includes corresponding
+unmodified sources in `/opt/heif/share/sources` and notices in
+`/opt/heif/share/licenses`; the recipe/manifest are in `/app`. Native shared
+libraries in `/opt/heif/lib` remain replaceable/relinkable. First-party license
+restrictions must not override third-party LGPL rights, including modification
+and reverse engineering for debugging such modifications. Distributors must
+preserve applicable notices/source and comply with third-party terms;
+HEVC patent rights are a separate question, not granted by these licenses.
+
+CPython 3.12 manylinux wheels for **amd64 and arm64**, including the other
+pinned Python requirements, were resolved explicitly. The source-built runtime
+is used instead to avoid the wheel's encoder license. See
+`fixtures/heic-build-verification.json` for actual architecture/build checks,
+distinct from wheel availability.
+
 ## Reproducible verification
 
 ```sh
@@ -211,7 +275,11 @@ face-inference/.venv/bin/python -m pip install -r face-inference/requirements.tx
 python3 face-inference/download_models.py
 face-inference/.venv/bin/python face-inference/fixtures/download.py
 face-inference/.venv/bin/python face-inference/fixtures/evaluate.py
-face-inference/.venv/bin/python face-inference/test_inference.py
+face-inference/.venv/bin/python face-inference/fixtures/generate_heic.py
+# Required for faces-smoke.py; optional for standalone decoder tests. Never redistributed.
+face-inference/.venv/bin/python face-inference/fixtures/download_camera.py
+face-inference/.venv/bin/python face-inference/fixtures/evaluate_heic.py
+face-inference/.venv/bin/python -m unittest discover -s face-inference -p 'test_*.py'
 
 # Test-only loopback database access; does not expose the normal platform DB.
 docker compose --env-file .env --env-file .env.faces \
@@ -228,8 +296,16 @@ and restart persistence. The fixture Library/Storage adapter in that test is
 controlled; it is **not** proof that a real Library deployment is wired.
 Actual HTTP inference is separately testable inside the private container.
 
-After deploying the complete development stack, run
-`python3 scripts/faces-smoke.py` for real Keycloak JWTs, exact-original uploads,
+After deploying the complete development stack and downloading the six licensed
+JPEG fixtures above, prepare both required HEIC fixture sets before the live smoke:
+
+```sh
+face-inference/.venv/bin/python face-inference/fixtures/generate_heic.py
+face-inference/.venv/bin/python face-inference/fixtures/download_camera.py
+python3 scripts/faces-smoke.py
+```
+
+The smoke verifies real Keycloak JWTs, exact-original uploads,
 hash/storage/RabbitMQ/Library projection, **automatic** indexing, private CPU
 inference, three expected portrait groups, shared-reader/cross-owner isolation,
 live disablement/membership checks, compound pending/hidden-primary gates and
@@ -239,6 +315,13 @@ and retrieval remain available; coordinate that face-only outage before running.
 It cleans up its disposable accounts, originals and biometric annotations and
 writes `artifacts/faces-live-smoke.json`. It never restarts base services and
 does not install an authentication bypass.
+The deployed HEIC checks also passed: six `image/heic`/`image/heif` portraits
+automatically join their existing named JPEG identities, with unchanged original
+bytes/hashes and upright dimensions/boxes; an orientation-6 original produces
+470×640 upright coordinates. HEIC compound-primary/hidden-companion eligibility,
+backfill of a preexisting grid HEIC after the actual Faces outage, and the exact
+public iPhone 12 Pro camera original uploaded through the API (`no_faces`) are
+covered alongside the existing privacy, correction and restart checks.
 
 `fixtures/provenance.json` records original URLs, source pages, attribution,
 licenses, dates, source labels and SHA-256. No unauthorized copyrighted images
@@ -250,3 +333,42 @@ not replacement fixtures. See `fixtures/validation.json` for actual observed
 similarities and limitations; raw local output/embeddings stay in ignored
 `results/`. Six controlled portraits are a smoke test, not a representative
 family-photo accuracy benchmark.
+
+### HEIC evidence and its boundaries
+
+`fixtures/generate_heic.py` generates genuine HEVC-encoded HEIF files from those
+same attributed portraits, retaining dimensions for all six. Its ignored
+outputs are `fixtures/heic/{source-id}.heic`, orientation cases
+`obama-2009-orientation-{1..8}.heic`, grid/10-bit/multiple-image cases, and
+`fixtures/heic/provenance.json` (`fixtures[]` records output hashes, original
+hashes, attribution, transformations and `cameraOriginal:false`). The fixed
+encoder settings make these repeatable codec fixtures on a pinned runtime;
+cross-platform encoders need not produce byte-identical compressed files.
+No generated HEIC is represented as an untouched camera original.
+
+`test_decoder.py` performs actual YuNet/SFace inference, verifies one nonempty
+128-dimensional embedding per portrait, cosine similarity >0.95 against its
+original JPEG, normalized boxes and original hashes; all mirrored/rotated cases
+must match the upright embedding >0.99. It also checks 512px grid tiles, 10-bit
+SDR decoding, collection/sequence/codec/corruption/pixel/payload rejection,
+isolated child inference and the unchanged HTTP timeout policy.
+`fixtures/evaluate_heic.py` additionally checks JPEG-to-HEIC matching across
+**different photographs** of each source-labelled person using the unchanged
+0.45 threshold. Checked-in numerical evidence is
+`fixtures/heic-validation.json`; raw output remains in ignored `results/`.
+
+Separately, `fixtures/camera-source.json` identifies a public **iPhone 12 Pro**
+camera-origin sample (publisher claim plus Apple/iPhone EXIF): 3024×4032,
+orientation 8, 512px tiles, 8-bit, embedded ICC profile. The publisher explicitly
+allows software testing; no broad redistribution license is inferred. The
+bounded checksum-verifying `download_camera.py` fetches it into ignored
+`fixtures/camera/`; it is optional for standalone decoder tests but required for
+the full-stack smoke, and excluded from production images.
+It decodes upright without modifying bytes and has **no human faces**.
+Its exact public original has also passed upload, storage and automatic
+inference through the deployed API. That is a camera-origin **API upload** test,
+not an upload initiated from a physical iPhone's Photos library.
+These camera-origin and generated human-face checks do
+**not** qualify all camera devices or substitute for a physical iPhone Photos
+permission/export/original-upload/restore round-trip. Real HDR, auxiliary-depth,
+Live Photo, different iOS versions and 48-MP inputs remain explicit gaps.

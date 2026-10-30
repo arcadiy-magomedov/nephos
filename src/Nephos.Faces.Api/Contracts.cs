@@ -7,6 +7,8 @@ public static class Pipeline
     public const string Version = Model + ":" + Preprocess + ":cosine045-v1";
     public const double Threshold = 0.45;
     public const int MaxBytes = 20 * 1024 * 1024;
+    public static bool SupportsMediaType(string mediaType) =>
+        mediaType is "image/jpeg" or "image/png" or "image/webp" or "image/heic" or "image/heif";
 }
 
 public sealed record AnalysisSource(Guid Id, Guid LibraryId, string Subject, string MediaType, long Size, string Sha256);

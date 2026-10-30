@@ -51,7 +51,12 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
 This is a functional MVP, **not certification of every north-star requirement**.
 Native sharing/People UI, semantic search, APNs, Android, HA, and multi-host
 workload/network isolation remain unfinished. Face analysis currently supports
-JPEG/PNG/WebP, not HEIC/video. See the iOS documentation for supported resource restoration and
+JPEG/PNG/WebP/HEIC/HEIF still images, not video. HEIC is decoded only inside the
+bounded analysis service; the phone uploads its original and the stored bytes,
+hash and download format stay unchanged. Existing eligible HEIC/HEIF primaries
+are queued by Library migration `006`; `scripts/faces-backfill.py` can safely
+repeat discovery. The 20 MiB / 32-million-pixel analysis limits still apply.
+See the iOS documentation for supported resource restoration and
 device-only acceptance checks; a simulator build does not certify Face ID,
 background scheduling, or Photos deletion.
 
