@@ -42,6 +42,101 @@ final class BackupRetryTests: XCTestCase {
             item.deferRetry(now: now)
             XCTAssertEqual(item.nextRetryAt, now.addingTimeInterval(delay))
         }
+
+        func testPhotosNetworkFailuresRetryAndOldBlockedItemsResumeWithoutLosingData() {
+            for code in [3164, 3169, 3301] {
+                let error = NSError(domain: "PHPhotosErrorDomain", code: code)
+                XCTAssertTrue(BackupRetryPolicy.isTransient(error))
+                XCTAssertEqual(PhotosNetworkFailure.legacyCode(error.localizedDescription), code)
+                XCTAssertTrue(
+                    BackupPresentation.failure(error).contains(code == 3301 ? "retry automatically" : "iCloud"))
+            }
+            for error in [NSError(domain: "Other", code: 3164), NSError(domain: "PHPhotosErrorDomain", code: 3072)] {
+                XCTAssertFalse(BackupRetryPolicy.isTransient(error))
+            }
+            XCTAssertNil(PhotosNetworkFailure.legacyCode("PHPhotosErrorDomain error 31640."))
+            var item = record()
+            item.phase = .paused
+            item.receivedParts = [0]
+            item.requiresUserAction = true
+            item.error = NSError(domain: "PHPhotosErrorDomain", code: 3164).localizedDescription
+            var group = ResourceSetRecord(id: UUID(), libraryId: library, source: item.source, kind: "single")
+            group.requiresUserAction = true
+            group.error = item.error
+            var denied = record()
+            denied.requiresUserAction = true
+            denied.error = "Server returned 403."
+            var ledger = AccountLedger()
+            ledger.records = [item, denied]
+            ledger.resourceSets = [group]
+            XCTAssertTrue(ledger.resumePhotosNetworkFailures(now: now))
+            XCTAssertFalse(ledger.resumePhotosNetworkFailures(now: now))
+            XCTAssertEqual(ledger.records[0].source, item.source)
+            XCTAssertEqual(ledger.records[0].receivedParts, [0])
+            XCTAssertEqual(ledger.records[0].error, item.error)
+            XCTAssertEqual(ledger.records[0].requiresUserAction, false)
+            XCTAssertEqual(ledger.records[0].nextRetryAt, now)
+            XCTAssertEqual(ledger.resourceSets?[0].requiresUserAction, false)
+            XCTAssertEqual(ledger.records[1], denied)
+            XCTAssertEqual(
+                BackupItem(id: group.id, source: item.source, group: ledger.resourceSets?[0], records: []).status(
+                    active: false), "Waiting for iCloud")
+        }
+
+        func testPhotoProgressUsesAcknowledgedBytesAndRequiresWholeItemPublication() throws {
+            var item = record()
+            let group = ResourceSetRecord(id: UUID(), libraryId: library, source: item.source, kind: "single")
+            item.resourceSetId = group.id
+            item.resourceRole = "photo"
+            item.uniformTypeIdentifier = "public.jpeg"
+            item.receivedParts = [0, 0, 99]
+            var photo = BackupItem(id: group.id, source: group.source, group: group, records: [item])
+            XCTAssertEqual(photo.progress(chunkSize: 40), 0.4)
+            XCTAssertFalse(photo.isSaved)
+            item.phase = .ready
+            item.evidence = BackupEvidence(
+                id: item.id, sha256: item.sha256, size: item.size, available: true, createdAt: "")
+            photo = BackupItem(id: group.id, source: group.source, group: group, records: [item])
+            XCTAssertEqual(photo.progress(chunkSize: 40), 1)
+            XCTAssertFalse(photo.isSaved)
+            XCTAssertEqual(photo.status(active: true), "Finishing backup")
+            let intent = try group.intent(records: [item])
+            var published = group
+            published.manifest = ResourceManifest(
+                id: group.id, libraryId: library, kind: intent.kind, sourceRevision: intent.sourceRevision,
+                primaryAssetId: item.id, resources: intent.resources, createdAt: "")
+            XCTAssertTrue(BackupItem(id: group.id, source: group.source, group: published, records: [item]).isSaved)
+            XCTAssertFalse(BackupItem(id: group.id, source: group.source, group: published, records: []).isSaved)
+        }
+
+        func testGalleryRefreshLifecycleAndBackoffDoNotDependOnBackup() {
+            let epoch = UUID()
+            XCTAssertTrue(
+                GalleryRefreshTrigger(active: true, connected: true, ready: true, epoch: epoch, library: library)
+                    .enabled)
+            XCTAssertFalse(
+                GalleryRefreshTrigger(active: false, connected: true, ready: true, epoch: epoch, library: library)
+                    .enabled)
+            XCTAssertFalse(
+                GalleryRefreshTrigger(active: true, connected: false, ready: true, epoch: epoch, library: library)
+                    .enabled)
+            XCTAssertFalse(
+                GalleryRefreshTrigger(active: true, connected: true, ready: false, epoch: epoch, library: library)
+                    .enabled)
+            XCTAssertFalse(
+                GalleryRefreshTrigger(active: true, connected: true, ready: true, epoch: epoch, library: nil).enabled)
+            XCTAssertEqual([0, 1, 2, 3, 4, 5, 99].map(GalleryRefreshPolicy.delay), [15, 30, 60, 120, 240, 300, 300])
+            let old = GallerySnapshot(id: UUID(), revision: 4, accessGeneration: 2, expiresAt: "", totalCount: 7)
+            XCTAssertTrue(
+                GalleryRefreshPolicy.unchanged(
+                    old, GallerySnapshot(id: UUID(), revision: 4, accessGeneration: 2, expiresAt: "", totalCount: 7)))
+            XCTAssertFalse(
+                GalleryRefreshPolicy.unchanged(
+                    old, GallerySnapshot(id: old.id, revision: 5, accessGeneration: 2, expiresAt: "", totalCount: 8)))
+            XCTAssertFalse(
+                GalleryRefreshPolicy.unchanged(
+                    old, GallerySnapshot(id: old.id, revision: 4, accessGeneration: 3, expiresAt: "", totalCount: 7)))
+        }
         item.requiresUserAction = true
         XCTAssertEqual(
             try JSONDecoder().decode(UploadRecord.self, from: JSONEncoder().encode(item)).requiresUserAction, true)

@@ -16,6 +16,8 @@ final class AppModel {
     var gallery = GalleryWindow()
     var retainedGallery: RetainedGallery?
     var galleryIsStale = false
+    var galleryRefreshError: String?
+    var galleryAtTop = true
     var visibleAnchor: UUID?
     var scrollTarget: UUID?
     var timeline: [TimelineBucket] = []
@@ -42,6 +44,8 @@ final class AppModel {
     private var root: URL
     private var networkObserver: NSObjectProtocol?
     private var automaticTask: Task<Void, Never>?
+    private var automaticRunID: UUID?
+    var activeBackupItems: Set<UUID> = []
     private let retryWakeup = BackupRetryWakeup()
     private let preparation = BackupPreparation()
     private var backupAccessBlocked = false
@@ -73,6 +77,35 @@ final class AppModel {
     #endif
     var recentUploads: [UploadRecord] {
         Array(ledger.records.filter { $0.libraryId == ledger.selectedLibraryID }.suffix(100).reversed())
+    }
+    private var allBackupItems: [BackupItem] {
+        let records = ledger.records.filter { $0.libraryId == ledger.selectedLibraryID }
+        let grouped = Dictionary(grouping: records, by: \.resourceSetId)
+        let groups = (ledger.resourceSets ?? []).filter { $0.libraryId == ledger.selectedLibraryID }
+        let groupIDs = Set(groups.map(\.id))
+        var items = groups.map { BackupItem(id: $0.id, source: $0.source, group: $0, records: grouped[$0.id] ?? []) }
+        items += records.filter { $0.resourceSetId.map { !groupIDs.contains($0) } ?? true }
+            .map { BackupItem(id: $0.id, source: $0.source, group: nil, records: [$0]) }
+        return items
+    }
+    var backupItems: [BackupItem] {
+        Array(
+            allBackupItems.sorted {
+                if $0.isSaved != $1.isSaved { return !$0.isSaved }
+                if $0.isStopped != $1.isStopped { return $0.isStopped }
+                let first = $0.source.creationTime ?? $0.source.modificationTime
+                let second = $1.source.creationTime ?? $1.source.modificationTime
+                return first == second ? $0.id.uuidString < $1.id.uuidString : first > second
+            }.prefix(100))
+    }
+    var backupItemCounts: (saved: Int, remaining: Int) {
+        let items = allBackupItems
+        let saved = items.filter(\.isSaved).count
+        return (saved, items.count - saved)
+    }
+    func backupItem(_ id: UUID) -> BackupItem? { allBackupItems.first { $0.id == id } }
+    func isActive(_ item: BackupItem) -> Bool {
+        activeBackupItems.contains(item.id) || item.records.contains { activeBackupItems.contains($0.id) }
     }
     var cleanupCandidates: [UploadRecord] {
         ledger.records.filter { record in
@@ -157,6 +190,7 @@ final class AppModel {
         }
         let key = LedgerStore.accountKey(connection: connection, subject: subject)
         var loaded = try store.load(account: key)
+        if loaded.resumePhotosNetworkFailures() { try store.save(loaded, account: key) }
         if !offline, loaded.resumeLegacyPhotoKitPublications() {
             try store.save(loaded, account: key)
         }
@@ -167,6 +201,9 @@ final class AppModel {
             try store.save(loaded, account: key)
         }
         epoch = UUID()
+        activeBackupItems.removeAll()
+        galleryAtTop = true
+        galleryRefreshError = nil
         api?.invalidate()
         mediaGeneration = UUID()
         let boundary = epoch
@@ -285,6 +322,9 @@ final class AppModel {
         backupDiagnostic = nil
         backupAccessBlocked = false
         epoch = UUID()
+        activeBackupItems.removeAll()
+        galleryAtTop = true
+        galleryRefreshError = nil
         api?.invalidate()
         mediaGeneration = UUID()
         automaticTask?.cancel()
@@ -341,6 +381,9 @@ final class AppModel {
         backupAccessBlocked = false
         let previous = ledger
         epoch = UUID()
+        activeBackupItems.removeAll()
+        galleryAtTop = true
+        galleryRefreshError = nil
         isLoadingGallery = false
         ledger.selectedLibraryID = id
         ledger.scanAfter = nil
@@ -373,7 +416,7 @@ final class AppModel {
     }
     func loadGallery(
         reset: Bool = false, newest: Bool = false, before: GalleryCursor? = nil, allowRebase: Bool = true,
-        notifyErrors: Bool = true
+        notifyErrors: Bool = true, automatic: Bool = false
     )
         async
     {
@@ -396,12 +439,24 @@ final class AppModel {
                 }
                 try check(version)
                 let old = retainedGallery
+                if automatic, let old, !galleryIsStale,
+                    GalleryRefreshPolicy.unchanged(old.snapshot, target)
+                {
+                    var refreshed = old
+                    refreshed.snapshot = target
+                    refreshed.updatedAt = Date()
+                    if let store, let account { try store.saveGallery(refreshed, account: account) }
+                    retainedGallery = refreshed
+                    galleryRefreshError = nil
+                    return
+                }
+                let followNewest = newest || (automatic && galleryAtTop && old?.startsAtNewest != false)
                 var anchor =
-                    newest
+                    followNewest
                     ? nil
                     : old?.window.items.first(where: { $0.id == visibleAnchor }).map {
                         GalleryCursor(createdAt: $0.createdAt, id: $0.id)
-                    } ?? (newest ? nil : old?.anchor)
+                    } ?? (followNewest ? nil : old?.anchor)
                 if let old, old.snapshot.accessGeneration == target.accessGeneration,
                     old.snapshot.revision <= target.revision
                 {
@@ -445,20 +500,57 @@ final class AppModel {
                     clearGalleryAccess()
                 }
                 var window = GalleryWindow()
-                let cursor = before ?? anchor.map(GalleryDates.inclusiveAnchor)
+                let cursor: GalleryCursor?
+                if automatic, let old, old.snapshot.accessGeneration == target.accessGeneration {
+                    cursor =
+                        old.startsAtNewest != false
+                        ? nil
+                        : old.window.items.first.map {
+                            GalleryDates.inclusiveAnchor(GalleryCursor(createdAt: $0.createdAt, id: $0.id))
+                        }
+                } else {
+                    cursor = before ?? anchor.map(GalleryDates.inclusiveAnchor)
+                }
                 let page = try await api.assets(library: library, snapshot: target.id, cursor: cursor)
                 try check(version)
                 try window.append(page, libraryID: library)
+                if automatic, let old {
+                    for _ in 1..<6 {
+                        let containsAnchor =
+                            anchor == nil || window.items.contains { $0.id == (visibleAnchor ?? anchor?.id) }
+                        guard window.items.count < old.window.items.count || !containsAnchor,
+                            let next = window.nextCursor
+                        else { break }
+                        let older = try await api.assets(library: library, snapshot: target.id, cursor: next)
+                        try check(version)
+                        try window.append(older, libraryID: library)
+                    }
+                    if !galleryAtTop, let current = old.window.items.first(where: { $0.id == visibleAnchor }) {
+                        anchor = GalleryCursor(createdAt: current.createdAt, id: current.id)
+                    }
+                }
                 // Re-query a bounded window against the target, rather than pretending unseen delta
                 // upserts are a complete offscreen database. The retained snapshot owns that index.
                 candidate = RetainedGallery(
                     library: selectedLibrary ?? Library(id: library, name: "Library"),
-                    snapshot: target, window: window, anchor: anchor, updatedAt: Date())
+                    snapshot: target, window: window, anchor: anchor, updatedAt: Date(), startsAtNewest: cursor == nil)
+                if automatic, let anchor, !window.items.contains(where: { $0.id == anchor.id }) {
+                    let anchored = try await api.assets(
+                        library: library, snapshot: target.id, cursor: GalleryDates.inclusiveAnchor(anchor))
+                    try check(version)
+                    window.reset()
+                    try window.append(anchored, libraryID: library)
+                    candidate?.window = window
+                    candidate?.startsAtNewest = false
+                }
             } else if var current = candidate {
                 let page = try await api.assets(
                     library: library, snapshot: current.snapshot.id, cursor: current.window.nextCursor)
                 try check(version)
                 try current.window.append(page, libraryID: library)
+                if current.window.items.first?.id != candidate?.window.items.first?.id {
+                    current.startsAtNewest = false
+                }
                 current.updatedAt = Date()
                 candidate = current
             }
@@ -483,6 +575,7 @@ final class AppModel {
             retainedGallery = candidate
             gallery = candidate.window
             galleryIsStale = false
+            galleryRefreshError = nil
             scrollTarget = reset ? candidate.anchor?.id ?? candidate.window.items.first?.id : visibleAnchor
         } catch ClientError.http(410, _) where allowRebase {
             guard version == epoch, ledger.selectedLibraryID == library else { return }
@@ -490,11 +583,21 @@ final class AppModel {
             gallery.reset()
             isLoadingGallery = false
             await loadGallery(
-                reset: true, newest: newest, before: before, allowRebase: false, notifyErrors: notifyErrors)
+                reset: true, newest: newest, before: before, allowRebase: false, notifyErrors: notifyErrors,
+                automatic: automatic)
         } catch {
-            guard version == epoch, ledger.selectedLibraryID == library else { return }
+            guard version == epoch, ledger.selectedLibraryID == library, !Task.isCancelled,
+                !(error is CancellationError)
+            else { return }
             if Self.accessDenied(error) { clearGalleryAccess() } else { galleryIsStale = true }
-            if notifyErrors { handle(error) } else { handleBackupError(error) }
+            if automatic {
+                handle(error, notify: false)
+                galleryRefreshError = error.localizedDescription
+            } else if notifyErrors {
+                handle(error)
+            } else {
+                handleBackupError(error)
+            }
         }
     }
     static func isOffline(_ error: URLError) -> Bool {
@@ -513,6 +616,8 @@ final class AppModel {
         retainedGallery = nil
         timeline = []
         visibleAnchor = nil
+        galleryRefreshError = nil
+        galleryAtTop = true
         mediaGeneration = UUID()
         MediaCache.shared.clear()
         if let account, let store {
@@ -675,6 +780,7 @@ final class AppModel {
         if case ClientError.signedOut = error {
             retryWakeup.cancel()
             epoch = UUID()
+            activeBackupItems.removeAll()
             api?.invalidate()
             automaticTask?.cancel()
             automaticTask = nil
@@ -750,7 +856,7 @@ final class AppModel {
                 }
                 try checkBackup(version)
             }
-            await loadGallery(reset: true, notifyErrors: false)
+            await loadGallery(reset: true, notifyErrors: false, automatic: true)
         } catch {
             if version == epoch { handleBackupError(error) }
         }
@@ -761,13 +867,8 @@ final class AppModel {
         else { return }
         if ignoreBackoff { backupAccessBlocked = false }
         guard !backupAccessBlocked else { return }
-        guard NetworkPolicy.shared.isConnected,
-            ledger.settings.allowCellular || !NetworkPolicy.shared.isExpensive
-        else {
-            backupNotice =
-                NetworkPolicy.shared.isConnected
-                ? "Connect to Wi-Fi or allow cellular backup, then retry."
-                : "No network connection. Connect to the internet, then retry."
+        guard NetworkPolicy.shared.isConnected else {
+            backupNotice = "Waiting for a connection"
             scheduleRetry()
             return
         }
@@ -783,6 +884,36 @@ final class AppModel {
             scheduleRetry()
         }
         do {
+            let groupedRecords = Dictionary(grouping: ledger.records, by: \.resourceSetId)
+            let requestedGroup = retryItem.flatMap { id in ledger.records.first { $0.id == id }?.resourceSetId }
+            let complete = Array(
+                (ledger.resourceSets ?? []).lazy.filter { group in
+                    group.libraryId == self.ledger.selectedLibraryID && group.manifest == nil
+                        && (retryItem == nil || group.id == retryItem || group.id == requestedGroup)
+                        && (ignoreBackoff || group.requiresUserAction != true)
+                        && (ignoreBackoff || (group.nextRetryAt ?? .distantPast) <= Date())
+                        && (ignoreBackoff
+                            || !(groupedRecords[group.id] ?? []).contains {
+                                $0.requiresUserAction == true || ($0.nextRetryAt ?? .distantPast) > Date()
+                            })
+                        && group.verifiedResources(in: groupedRecords[group.id] ?? []) != nil
+                }.prefix(12))
+            let attemptedPublications = Set(complete.map(\.id))
+            try await BackupQueue.run(complete) { [self] group in
+                try checkBackup(version)
+                do { try await publishGroup(group.id, version: version) } catch {
+                    if version == epoch {
+                        try recordGroupFailure(group.id, error: error)
+                        handleBackupError(error)
+                    }
+                }
+                try checkBackup(version)
+            }
+            if let reason = NetworkPolicy.shared.backupWaitReason(cellular: ledger.settings.allowCellular) {
+                backupNotice = reason
+                if !complete.isEmpty { await loadGallery(reset: true, notifyErrors: false, automatic: true) }
+                return
+            }
             let tasks = await BackgroundTransfers.shared.activeTasks()
             for task in tasks {
                 guard task.taskDescription?.hasPrefix((account ?? "") + "/") == true else {
@@ -816,6 +947,7 @@ final class AppModel {
             }
             let groups = (ledger.resourceSets ?? []).filter({ group in
                 group.libraryId == ledger.selectedLibraryID && group.manifest == nil
+                    && !attemptedPublications.contains(group.id)
                     && (retryItem == nil || group.id == retryItem || group.id == retryGroupID)
                     && (ignoreBackoff || group.requiresUserAction != true)
                     && (ignoreBackoff || (group.nextRetryAt ?? .distantPast) <= Date())
@@ -869,7 +1001,7 @@ final class AppModel {
                     activity = "More accessible originals remain; the next scan will continue here."
                 }
             }
-            await loadGallery(reset: true, notifyErrors: false)
+            await loadGallery(reset: true, notifyErrors: false, automatic: true)
         } catch {
             if version == epoch { handleBackupError(error) }
         }
@@ -910,6 +1042,8 @@ final class AppModel {
             ledger.resourceSets?.append(group)
             try persist()
         }
+        activeBackupItems.insert(group.id)
+        defer { if version == epoch { activeBackupItems.remove(group.id) } }
         do {
             for (index, resource) in resources.enumerated() {
                 try check(version)
@@ -957,7 +1091,7 @@ final class AppModel {
                             "Exporting original \(resource.originalFilename). iCloud-only originals may need a download."
                         try await photos.export(
                             resource, to: file, maximum: remaining,
-                            allowNetwork: ledger.settings.allowCellular || !NetworkPolicy.shared.isExpensive)
+                            allowNetwork: NetworkPolicy.shared.allowsBackup(cellular: ledger.settings.allowCellular))
                         try check(version)
                         let hash = try await Task.detached { try Hashing.file(file) }.value
                         try check(version)
@@ -1021,6 +1155,8 @@ final class AppModel {
             let group = ledger.resourceSets?[index], group.manifest == nil
         else { return }
         activity = "Publishing complete \(group.kind) resource set…"
+        activeBackupItems.insert(id)
+        defer { if version == epoch { activeBackupItems.remove(id) } }
         let manifest = try await api.publish(group, records: ledger.records)
         try check(version)
         ledger.resourceSets?[index].manifest = manifest
@@ -1050,6 +1186,9 @@ final class AppModel {
         guard let store, let account, let api, let connection else { throw ClientError.signedOut }
         let client = UploadClient(api: api)
         var record = original
+        let activityID = record.id
+        activeBackupItems.insert(activityID)
+        defer { if version == epoch { activeBackupItems.remove(activityID) } }
         record.lastAttemptAt = Date()
         record.requiresUserAction = nil
         record.recoveryMessage = nil
@@ -1075,7 +1214,7 @@ final class AppModel {
                         try await photos.export(
                             photos.resources(asset)[record.resourceIndex], to: staged,
                             maximum: try exportBudget(store: store, maximum: record.size),
-                            allowNetwork: ledger.settings.allowCellular || !NetworkPolicy.shared.isExpensive)
+                            allowNetwork: NetworkPolicy.shared.allowsBackup(cellular: ledger.settings.allowCellular))
                     }
                     try check(version)
                 }
@@ -1282,12 +1421,19 @@ final class AppModel {
             selectedLibrary?.isReadOnly != true
         else { return }
         let version = epoch
+        let runID = UUID()
+        automaticRunID = runID
         automaticTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled, let self, self.epoch == version else { return }
+            guard let self else { return }
+            defer {
+                if self.automaticRunID == runID {
+                    self.automaticTask = nil
+                    self.automaticRunID = nil
+                }
+            }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard !Task.isCancelled, self.epoch == version else { return }
             await self.runBackup()
-            guard self.epoch == version else { return }
-            self.automaticTask = nil
         }
     }
     private func scheduleRetry() {
@@ -1297,9 +1443,7 @@ final class AppModel {
             let next = BackupRetryPolicy.nextAttempt(ledger: ledger, library: ledger.selectedLibraryID)
         else { return }
         let version = epoch
-        let networkAllowed =
-            NetworkPolicy.shared.isConnected
-            && (ledger.settings.allowCellular || !NetworkPolicy.shared.isExpensive)
+        let networkAllowed = NetworkPolicy.shared.allowsBackup(cellular: ledger.settings.allowCellular)
         let date = max(next, Date().addingTimeInterval(networkAllowed ? 2 : 30))
         retryWakeup.schedule(at: date) { [weak self] in
             guard let self, self.epoch == version, UIApplication.shared.applicationState == .active else { return }

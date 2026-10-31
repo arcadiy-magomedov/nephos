@@ -52,20 +52,7 @@ struct BackupStatusView: View {
         BackupProgress(ledger: model.ledger, library: model.ledger.selectedLibraryID)
     }
     var body: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle().stroke(NephosStyle.accent.opacity(0.15), lineWidth: 7)
-                Circle().trim(from: 0, to: progress.fraction)
-                    .stroke(NephosStyle.accent, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                VStack {
-                    Text("\(progress.verified)").font(.largeTitle.bold())
-                    Text("of \(progress.total) files saved").font(.caption).foregroundStyle(.secondary)
-                }
-            }.frame(width: 148, height: 148)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(progress.verified) of \(progress.total) files saved")
-                .accessibilityIdentifier("backup.progress")
+        VStack(alignment: .leading, spacing: 5) {
             Text(
                 model.ledger.settings.backupPaused == true
                     ? "Backup paused"
@@ -79,21 +66,15 @@ struct BackupStatusView: View {
                                     ? "Ready to back up"
                                     : progress.isComplete ? "Backup complete" : "Backup queued"
             )
-            .font(.title2.bold())
-            Text(
-                progress.failed > 0
-                    ? "\(progress.failed) items not finished. See the reasons below."
-                    : "\(progress.pending) files pending · \(progress.awaitingPublication) items finishing"
-            )
-            .font(.subheadline).foregroundStyle(.secondary)
-            if !NetworkPolicy.shared.isConnected {
-                Label("Waiting for a connection", systemImage: "wifi.slash")
-            } else if !model.ledger.settings.allowCellular {
-                Label("Wi-Fi only", systemImage: "wifi")
-            }
+            .font(.headline)
+            Text("\(model.backupItemCounts.saved) saved · \(model.backupItemCounts.remaining) remaining")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .accessibilityLabel("\(progress.verified) of \(progress.total) files saved")
+                .accessibilityIdentifier("backup.progress")
+            Text(model.ledger.settings.allowCellular ? "Wi-Fi and cellular" : "Wi-Fi only")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(24).frame(maxWidth: .infinity)
-        .background(NephosStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

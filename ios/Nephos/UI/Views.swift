@@ -62,11 +62,18 @@ struct RootView: View {
 
 struct GalleryView: View {
     @Bindable var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var datePicker = false
     @State private var filter: MediaFilter = .all
     @State private var selecting = false
     @State private var selected: Set<UUID> = []
     @State private var shareSelection: ShareSelection?
+    private var refreshTrigger: GalleryRefreshTrigger {
+        GalleryRefreshTrigger(
+            active: scenePhase == .active, connected: NetworkPolicy.shared.isConnected,
+            ready: model.signedIn && !model.needsReauthentication && !model.needsOnboarding,
+            epoch: model.epoch, library: model.ledger.selectedLibraryID)
+    }
     private var progress: BackupProgress {
         BackupProgress(ledger: model.ledger, library: model.ledger.selectedLibraryID)
     }
@@ -101,9 +108,11 @@ struct GalleryView: View {
                         Picker("Media type", selection: $filter) {
                             ForEach(MediaFilter.allCases) { Text($0.title).tag($0) }
                         }.pickerStyle(.segmented)
-                        if model.galleryIsStale {
+                        if model.galleryIsStale || model.galleryRefreshError != nil {
                             Label(
-                                "Showing the last saved gallery. Pull down to update.",
+                                NetworkPolicy.shared.isConnected
+                                    ? "Gallery updates are delayed. Retrying automatically."
+                                    : "Offline. The gallery will update when reconnected.",
                                 systemImage: "arrow.clockwise"
                             )
                             .font(.caption).foregroundStyle(.orange)
@@ -114,7 +123,8 @@ struct GalleryView: View {
                         {
                             ContentUnavailableView(
                                 "No matching media loaded", systemImage: "photo",
-                                description: Text("Refresh or load older items. Filters apply to the loaded window."))
+                                description: Text(
+                                    "New photos appear automatically. Try another filter or load older items."))
                         }
                         ForEach(MediaDay.groups(model.gallery.items, filter: filter)) { day in
                             VStack(alignment: .leading, spacing: 9) {
@@ -173,10 +183,10 @@ struct GalleryView: View {
                 }
                 .coordinateSpace(name: "gallery")
                 .onPreferenceChange(GalleryPositions.self) { positions in
-                    if let id = positions.filter({ $0.value >= -40 }).min(by: { $0.value < $1.value })?.key,
-                        model.visibleAnchor != id
-                    {
-                        model.rememberAnchor(id)
+                    let displayed = model.gallery.items.filter { filter.includes($0) }
+                    if let first = displayed.first(where: { positions[$0.id].map { $0 >= -40 } == true }) {
+                        model.galleryAtTop = first.id == displayed.first?.id
+                        if model.visibleAnchor != first.id { model.rememberAnchor(first.id) }
                     }
                 }
                 .onChange(of: model.gallery.items.map(\.id)) { _, _ in
@@ -194,6 +204,9 @@ struct GalleryView: View {
                             }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
                             Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
                             Button("Jump to date") { datePicker = true }.disabled(model.retainedGallery == nil)
+                            if let error = model.galleryRefreshError {
+                                Button("Update details") { model.message = error }
+                            }
                         } label: {
                             Label("Library actions", systemImage: "ellipsis.circle")
                         }
@@ -224,6 +237,17 @@ struct GalleryView: View {
                         await model.selectLibrary(library.id)
                     } else if !model.gallery.hasLoaded {
                         await model.loadGallery(reset: true)
+                    }
+                }
+                .task(id: refreshTrigger) {
+                    guard refreshTrigger.enabled else { return }
+                    var failures = 0
+                    while !Task.isCancelled {
+                        await model.loadGallery(reset: true, notifyErrors: false, automatic: true)
+                        failures = model.galleryRefreshError == nil ? 0 : failures + 1
+                        do {
+                            try await Task.sleep(for: .seconds(GalleryRefreshPolicy.delay(failures: failures)))
+                        } catch { return }
                     }
                 }
             }
@@ -662,190 +686,320 @@ struct FileShareView: UIViewControllerRepresentable {
 struct BackupView: View {
     @Bindable var model: AppModel
     @State private var picker = false
-    private func retryButton(_ id: UUID) -> some View {
-        Button("Retry this item") {
-            Task { await model.runBackup(ignoreBackoff: true, retryItem: id) }
-        }
-        .accessibilityIdentifier("backup.retry.\(id)")
-        .disabled(
-            model.isRunning || model.needsReauthentication || model.selectedLibrary == nil
-                || model.selectedLibrary?.isReadOnly == true || model.ledger.settings.backupPaused == true)
+    @State private var options = false
+    @State private var reviewCopiesAfterOptions = false
+    @State private var selectedItem: BackupItem?
+    @State private var selectAfterDetails = false
+    private var canBackUp: Bool {
+        model.selectedLibrary != nil && model.selectedLibrary?.isReadOnly != true
+            && !model.needsReauthentication && model.ledger.settings.backupPaused != true
     }
-    private var waitingItems: [ResourceSetRecord] {
-        Array(
-            (model.ledger.resourceSets ?? []).filter {
-                $0.libraryId == model.ledger.selectedLibraryID && $0.manifest == nil && $0.error != nil
-            }.suffix(100).reversed())
+    private func selectPhotos() {
+        Task {
+            await model.requestPhotos()
+            picker = true
+        }
     }
     var body: some View {
-        Group {
-            List {
-                Section {
-                    BackupStatusView(model: model).listRowInsets(EdgeInsets())
-                }.listRowBackground(Color.clear)
-                if let notice = model.backupNotice {
-                    Section {
-                        Label(notice, systemImage: "exclamationmark.triangle")
-                            .font(.callout).foregroundStyle(.orange)
-                    }
-                }
-                Section {
-                    Button(model.ledger.settings.backupPaused == true ? "Resume backup" : "Pause backup") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    BackupStatusView(model: model)
+                    Button {
                         Task { await model.setBackupPaused(model.ledger.settings.backupPaused != true) }
-                    }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
+                    } label: {
+                        Image(systemName: model.ledger.settings.backupPaused == true ? "play.fill" : "pause.fill")
+                            .frame(width: 44, height: 44)
+                            .background(.quaternary, in: Circle())
+                    }
+                    .accessibilityLabel(model.ledger.settings.backupPaused == true ? "Resume backup" : "Pause backup")
+                    .disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
                 }
-                Section {
-                    LibrarySelector(model: model)
-                    if model.needsReauthentication {
-                        Button("Session expired — sign in to resume") { Task { await model.login() } }
+                if let notice = model.backupNotice {
+                    Text(notice).font(.callout).foregroundStyle(.secondary)
+                }
+                if model.needsReauthentication {
+                    Button("Sign in to resume backup") { Task { await model.login() } }
+                }
+                if model.backupItems.isEmpty {
+                    ContentUnavailableView {
+                        Label("No photos queued", systemImage: "photo.on.rectangle")
+                    } description: {
+                        Text("Select photos with + or enable automatic backup in settings.")
                     }
-                    Text(model.photosStatus)
-                    Button("Photos access") { Task { await model.requestPhotos() } }
-                    Button("Select photos and videos") {
-                        Task {
-                            await model.requestPhotos()
-                            picker = true
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                        ForEach(model.backupItems) { item in
+                            Button {
+                                selectedItem = item
+                            } label: {
+                                BackupPhotoTile(item: item, model: model)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("backup.item.\(item.id)")
+                            .accessibilityLabel("\(item.name), \(item.status(active: model.isActive(item)))")
+                            .accessibilityHint("Show backup details")
                         }
-                    }.disabled(
-                        model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
-                            || model.isRunning || model.ledger.settings.backupPaused == true)
-                    Button("Back up now") {
-                        Task { await model.runBackup(ignoreBackoff: true) }
                     }
-                    .disabled(
-                        model.isRunning || model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
-                            || model.ledger.settings.backupPaused == true)
-                    if model.isRunning { ProgressView("Backing up…") }
+                    Text("Tap a photo for details").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }.padding(16)
+        }
+        .navigationTitle("Backup")
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Select photos and videos", systemImage: "plus", action: selectPhotos)
+                    .disabled(!canBackUp || model.isRunning)
+                Menu {
+                    Button("Backup settings", systemImage: "gearshape") { options = true }
+                    Button("Back up now", systemImage: "arrow.clockwise") {
+                        Task { await model.runBackup(ignoreBackoff: true) }
+                    }.disabled(!canBackUp || model.isRunning)
+                } label: {
+                    Label("Backup options", systemImage: "ellipsis")
+                }
+            }
+        }
+        .sheet(isPresented: $picker) {
+            NativePhotoPicker { identifiers, missing in
+                picker = false
+                if missing > 0 {
+                    model.message = "\(missing) selection(s) are not accessible in Photos and were not imported."
+                }
+                Task { await model.importSelected(identifiers) }
+            }
+        }
+        .sheet(
+            isPresented: $options,
+            onDismiss: {
+                if reviewCopiesAfterOptions {
+                    reviewCopiesAfterOptions = false
+                    model.checkCleanup()
+                }
+            },
+            content: {
+                BackupOptionsView(model: model) {
+                    reviewCopiesAfterOptions = true
+                    options = false
+                }
+            }
+        )
+        .sheet(
+            item: $selectedItem,
+            onDismiss: {
+                if selectAfterDetails {
+                    selectAfterDetails = false
+                    selectPhotos()
+                }
+            },
+            content: { item in
+                BackupItemDetails(model: model, id: item.id) { selectAfterDetails = true }
+            }
+        )
+    }
+}
+
+struct BackupPhotoThumbnail: View {
+    let source: SourceRevision
+    let photos: PhotosLibrary
+    @State private var image: UIImage?
+    @State private var failure: String?
+    var body: some View {
+        Color(.secondarySystemBackground)
+            .overlay {
+                if let image {
+                    GeometryReader { geometry in
+                        Image(uiImage: image).resizable().scaledToFill()
+                            .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                    }
+                    .accessibilityIdentifier("backup.thumbnail.loaded")
+                } else {
+                    Image(systemName: "photo").foregroundStyle(.secondary)
+                        .accessibilityLabel(failure ?? "Loading photo preview")
+                }
+            }
+            .task(id: "\(source.localIdentifier)/\(source.modificationTime)") {
+                image = nil
+                failure = nil
+                do {
+                    let loaded = try await photos.thumbnail(source.localIdentifier)
+                    try Task.checkCancellation()
+                    image = loaded
+                } catch {
+                    if !Task.isCancelled { failure = error.localizedDescription }
+                }
+            }
+            .onDisappear { image = nil }
+    }
+}
+
+struct BackupPhotoTile: View {
+    let item: BackupItem
+    let model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            BackupPhotoThumbnail(source: item.source, photos: model.photos)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    if model.isActive(item), !item.isSaved {
+                        ZStack {
+                            Circle().fill(.black.opacity(0.4))
+                            if let progress = item.progress(chunkSize: model.connection?.config.chunkSize ?? 0),
+                                progress < 1
+                            {
+                                Circle().stroke(.white.opacity(0.3), lineWidth: 3).padding(5)
+                                Circle().trim(from: 0, to: progress).stroke(
+                                    .white, style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                )
+                                .rotationEffect(.degrees(-90)).padding(5)
+                                Text("\(Int(progress * 100))%").font(.caption.bold()).foregroundStyle(.white)
+                            } else {
+                                ProgressView().tint(.white)
+                            }
+                        }.frame(width: 58, height: 58)
+                            .accessibilityIdentifier("backup.circular-progress")
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if item.isSaved || item.isStopped {
+                        Image(systemName: item.isSaved ? "checkmark" : "exclamationmark")
+                            .font(.caption.bold()).foregroundStyle(item.isSaved ? .green : .orange)
+                            .padding(7).background(.regularMaterial, in: Circle()).padding(8)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 13))
+            Text(item.status(active: model.isActive(item))).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+    }
+}
+
+struct BackupItemDetails: View {
+    let model: AppModel
+    let id: UUID
+    let selectCurrent: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    private var item: BackupItem? { model.backupItem(id) }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if let item {
+                    VStack(alignment: .leading, spacing: 20) {
+                        HStack(spacing: 15) {
+                            BackupPhotoThumbnail(source: item.source, photos: model.photos)
+                                .frame(width: 80, height: 80).clipShape(RoundedRectangle(cornerRadius: 12))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.status(active: model.isActive(item))).font(.headline)
+                                Text(item.name).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if item.diagnostic != nil || item.sourceChanged {
+                            Text(item.recovery).foregroundStyle(.secondary)
+                        } else {
+                            Text(
+                                item.isSaved
+                                    ? "The complete original is saved on your server."
+                                    : "This photo will finish automatically when backup can continue."
+                            )
+                            .foregroundStyle(.secondary)
+                        }
+                        if !item.isSaved {
+                            if PhotosNetworkFailure.legacyCode(item.diagnostic) == 3164
+                                && !model.ledger.settings.allowCellular
+                            {
+                                Button("Use cellular data") {
+                                    var settings = model.ledger.settings
+                                    settings.allowCellular = true
+                                    model.setSettings(settings)
+                                }.buttonStyle(.borderedProminent)
+                            }
+                            if item.sourceChanged {
+                                Button("Select current version") {
+                                    selectCurrent()
+                                    dismiss()
+                                }
+                                .disabled(model.isRunning || model.selectedLibrary?.isReadOnly == true)
+                            } else {
+                                Button("Retry this item") {
+                                    Task { await model.runBackup(ignoreBackoff: true, retryItem: id) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(
+                                    model.isRunning || model.needsReauthentication
+                                        || model.selectedLibrary?.isReadOnly == true
+                                        || model.ledger.settings.backupPaused == true)
+                            }
+                        }
+                        DisclosureGroup("Technical details") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Item: \(item.id)")
+                                if let error = item.diagnostic { Text(error) }
+                                if let retry = item.group?.nextRetryAt { Text("Next attempt: \(retry.formatted())") }
+                                ForEach(item.records) { record in
+                                    Text(
+                                        "\(record.fileName)\nUpload: \(record.id)\nState: \(record.phase.rawValue)\n\(record.receivedParts.count) parts acknowledged · \(ByteCountFormatter.string(fromByteCount: record.size, countStyle: .file))"
+                                    )
+                                    if let attempted = record.lastAttemptAt {
+                                        Text("Last attempt: \(attempted.formatted())")
+                                    }
+                                    if let retry = record.nextRetryAt { Text("Next attempt: \(retry.formatted())") }
+                                    if let error = record.error, error != item.diagnostic { Text(error) }
+                                }
+                            }.font(.caption).textSelection(.enabled)
+                        }.font(.callout)
+                    }.padding(24)
+                }
+            }
+            .navigationTitle("Photo backup").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+}
+
+struct BackupOptionsView: View {
+    let model: AppModel
+    let reviewCopies: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    private func setting(_ key: WritableKeyPath<BackupSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { model.ledger.settings[keyPath: key] },
+            set: {
+                var settings = model.ledger.settings
+                settings[keyPath: key] = $0
+                model.setSettings(settings)
+            })
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Library") { LibrarySelector(model: model) }
+                Section("Backup") {
+                    Toggle("Automatic backup", isOn: setting(\.automaticBackup))
+                    Toggle("Use cellular data", isOn: setting(\.allowCellular))
+                    Text("Low Data Mode is respected. Background execution is scheduled by iOS.").font(.caption)
+                }
+                Section("Photos access") {
+                    Text(model.photosStatus).font(.callout)
+                    Button("Photos access") { Task { await model.requestPhotos() } }
+                    Link("Open iOS Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
                 }
                 Section("Phone-space cleanup") {
-                    Text(
-                        "Review photos already saved to the server. Nothing is removed without your confirmation."
-                    )
-                    Button("Review verified phone copies", role: .destructive) { model.checkCleanup() }.disabled(
-                        model.isRunning)
+                    Text("Review verified copies. Nothing is removed without your confirmation.").font(.callout)
+                    Button("Review verified phone copies", role: .destructive) {
+                        if model.cleanupCandidates.isEmpty { model.checkCleanup() } else { reviewCopies() }
+                    }
+                    .disabled(model.isRunning)
                     if !model.cleanupReport.isEmpty { Text(model.cleanupReport).font(.caption) }
                 }
-                if !waitingItems.isEmpty {
-                    Section("Waiting items") {
-                        ForEach(waitingItems) { group in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(group.source.resourceNames.first ?? group.kind).font(.headline)
-                                Text(
-                                    group.requiresUserAction == true ? "Backup not finished" : "Waiting to retry"
-                                )
-                                .font(.caption).foregroundStyle(.orange)
-                                if group.requiresUserAction == true {
-                                    Text(
-                                        BackupPresentation.recovery(
-                                            saved: group.recoveryMessage, diagnostic: group.error)
-                                    )
-                                    .font(.callout)
-                                    retryButton(group.id)
-                                }
-                            }
-                        }
+                if let diagnostic = model.backupDiagnostic {
+                    Section {
+                        DisclosureGroup("Technical details") { Text(diagnostic).font(.caption).textSelection(.enabled) }
                     }
-                }
-                Section("Recent uploads") {
-                    if model.recentUploads.isEmpty { Text("No uploads yet.") }
-                    ForEach(model.recentUploads.filter { $0.libraryId == model.ledger.selectedLibraryID }) { record in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(record.fileName).font(.headline)
-                            Text(
-                                BackupPresentation.status(
-                                    record,
-                                    wholeItemPending: model.ledger.resourceSets?.contains {
-                                        $0.id == record.resourceSetId && $0.manifest == nil
-                                    } == true)
-                            ).font(.subheadline).foregroundStyle(.secondary)
-                            if record.phase == .sourceChanged {
-                                Text(
-                                    "The original changed or is no longer accessible. Select its current version in Photos."
-                                )
-                                .font(.callout)
-                                Button("Select current version") {
-                                    Task {
-                                        await model.requestPhotos()
-                                        picker = true
-                                    }
-                                }.disabled(model.isRunning || model.ledger.settings.backupPaused == true)
-                            } else if record.requiresUserAction == true || record.phase == .failed {
-                                Text(
-                                    BackupPresentation.recovery(saved: record.recoveryMessage, diagnostic: record.error)
-                                )
-                                .font(.callout)
-                                retryButton(record.resourceSetId ?? record.id)
-                            }
-                            if record.phase == .uploading, let chunkSize = model.connection?.config.chunkSize,
-                                record.size > 0
-                            {
-                                ProgressView(
-                                    value: Double(record.receivedParts.count),
-                                    total: Double(Chunking.count(size: record.size, chunkSize: chunkSize)))
-                            }
-                            Text(ByteCountFormatter.string(fromByteCount: record.size, countStyle: .file))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Section {
-                    DisclosureGroup("Details") {
-                        if !model.activity.isEmpty { Text(model.activity) }
-                        if let diagnostic = model.backupDiagnostic { Text(diagnostic).foregroundStyle(.red) }
-                        Text(
-                            "Temporary failures retry after 30 seconds, then 1, 2, 4 minutes, up to one hour. Back up now retries immediately. Access, certificate and invalid-source errors require attention."
-                        )
-                        Text(
-                            "Retries run while Nephos is active; iOS chooses background opportunities. Pausing stops new uploads, but an ongoing Photos export or server check may finish."
-                        )
-                        Text(
-                            "Counts cover queued original files in this library, not all Photos items. Live Photos and other compound items contain several files. Cleanup requires every original to be verified and a fresh retention hold."
-                        )
-                        ForEach(
-                            Array(
-                                (model.ledger.resourceSets ?? []).filter {
-                                    $0.libraryId == model.ledger.selectedLibraryID && $0.manifest == nil
-                                }.suffix(100))
-                        ) { group in
-                            VStack(alignment: .leading) {
-                                Text(group.source.resourceNames.first ?? group.kind).bold()
-                                Text(
-                                    "\(group.kind): \(group.source.resourceNames.count) required originals; publication pending"
-                                )
-                                if let error = group.error { Text(error).foregroundStyle(.red) }
-                                if let retry = group.nextRetryAt { Text("Next eligible attempt: \(retry.formatted())") }
-                            }
-                        }
-                        ForEach(model.recentUploads.filter { $0.libraryId == model.ledger.selectedLibraryID }) {
-                            record in
-                            VStack(alignment: .leading) {
-                                Text(record.fileName).bold()
-                                Text(
-                                    "State: \(record.phase.rawValue); \(record.receivedParts.count) parts acknowledged")
-                                if let error = record.error { Text(error).foregroundStyle(.red) }
-                                if let retry = record.nextRetryAt {
-                                    Text("Next eligible attempt: \(retry.formatted())")
-                                }
-                                if !record.source.cleanupSupported {
-                                    Text("This source is not eligible for phone cleanup.")
-                                }
-                                if let cleanup = record.cleanupState { Text("Photos removal: \(cleanup)") }
-                            }
-                        }
-                    }.font(.caption).textSelection(.enabled)
                 }
             }
-            .navigationTitle("Backup")
-            .sheet(isPresented: $picker) {
-                NativePhotoPicker { identifiers, missing in
-                    picker = false
-                    if missing > 0 {
-                        model.message =
-                            "\(missing) selection(s) did not provide an accessible Photos identifier. They were not imported or marked safe for removal."
-                    }
-                    Task { await model.importSelected(identifiers) }
-                }
-            }
+            .navigationTitle("Backup settings").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 }

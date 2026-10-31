@@ -57,8 +57,59 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                     model.ledger.settings.onboardingCompleted = true
                     model.ledger.settings.allowCellular = true
                     model.isLoadingGallery = true
+                    NetworkPolicy.shared.qualificationNetwork()
+                    model.photos.qualificationThumbnail = UIGraphicsImageRenderer(size: CGSize(width: 360, height: 360))
+                        .image { context in
+                            UIColor.systemTeal.setFill()
+                            context.fill(CGRect(x: 0, y: 0, width: 360, height: 360))
+                            UIColor.systemYellow.setFill()
+                            context.cgContext.fillEllipse(in: CGRect(x: 220, y: 40, width: 70, height: 70))
+                            UIColor.systemGreen.setFill()
+                            let mountain = UIBezierPath()
+                            mountain.move(to: CGPoint(x: 0, y: 360))
+                            mountain.addLine(to: CGPoint(x: 150, y: 110))
+                            mountain.addLine(to: CGPoint(x: 360, y: 360))
+                            mountain.close()
+                            mountain.fill()
+                        }
+                    if env["NEPHOS_UI_SCREEN"] == "backup-publication" {
+                        NetworkPolicy.shared.qualificationNetwork(constrained: true)
+                        var record = model.ledger.records[0]
+                        let group = ResourceSetRecord(
+                            id: UUID(), libraryId: library.id, source: record.source, kind: "single")
+                        record.resourceSetId = group.id
+                        record.resourceRole = "photo"
+                        record.uniformTypeIdentifier = "public.jpeg"
+                        record.phase = .ready
+                        record.evidence = BackupEvidence(
+                            id: record.id, sha256: record.sha256, size: record.size, available: true, createdAt: "")
+                        model.ledger.records[0] = record
+                        model.ledger.resourceSets = [group]
+                        model.ledger.records[0].nextRetryAt = Date().addingTimeInterval(300)
+                        await model.runBackup()
+                        guard model.ledger.resourceSets?[0].manifest == nil else {
+                            throw ClientError.invalid("Metadata publication bypassed a required original's backoff.")
+                        }
+                        model.ledger.records[0].nextRetryAt = nil
+                    }
+                    if env["NEPHOS_UI_SCREEN"] == "backup-gallery" {
+                        try await qualifyGallery(model)
+                        window.rootViewController = UIHostingController(
+                            rootView: QualificationGalleryHost(model: model))
+                        Task {
+                            try await Task.sleep(for: .seconds(3))
+                            BackupQualificationProtocol.setRevision(2)
+                        }
+                        try report(["ready": true, "screen": "backup-gallery", "realAPI": false])
+                        return
+                    }
                     window.rootViewController = UIHostingController(
                         rootView: NavigationStack { BackupView(model: model) })
+                    if env["NEPHOS_UI_SCREEN"] == "backup-startup" {
+                        model.scheduleAutomaticRun()
+                        try await Task.sleep(for: .milliseconds(100))
+                        await model.setBackupPaused(true)
+                    }
                     try report(["ready": true, "screen": env["NEPHOS_UI_SCREEN"]!, "realAPI": false])
                     return
                 }
@@ -149,12 +200,49 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         try JSONSerialization.data(withJSONObject: values).write(
             to: directory.appendingPathComponent("ui-report.json"), options: .atomic)
     }
+
+    private func qualifyGallery(_ model: AppModel) async throws {
+        func require(_ condition: Bool, _ message: String) throws {
+            guard condition else { throw ClientError.invalid("Gallery qualification: \(message)") }
+        }
+        model.ledger.records = []
+        model.libraries[0].isShared = true
+        model.ledger.settings.backupPaused = true
+        model.isLoadingGallery = false
+        await model.loadGallery(reset: true, newest: true)
+        for _ in 0..<3 { await model.loadGallery() }
+        try require(model.gallery.items.count == 200, "Initial four-page window was not loaded.")
+        let anchor = model.gallery.items[150].id
+        model.rememberAnchor(anchor)
+        model.galleryAtTop = false
+        BackupQualificationProtocol.setRevision(2)
+        await model.loadGallery(reset: true, automatic: true)
+        try require(
+            model.gallery.items.count == 200 && model.scrollTarget == anchor,
+            "Automatic refresh lost the loaded window or anchor.")
+        let requests = BackupQualificationProtocol.assetPageCount
+        await model.loadGallery(reset: true, automatic: true)
+        try require(
+            BackupQualificationProtocol.assetPageCount == requests && model.scrollTarget == anchor,
+            "Unchanged snapshot refetched pages or changed the anchor.")
+        model.galleryAtTop = true
+        BackupQualificationProtocol.setRevision(3)
+        await model.loadGallery(reset: true, automatic: true)
+        try require(model.scrollTarget == model.gallery.items.first?.id, "Newest view did not follow new media.")
+        model.retainedGallery = nil
+        model.gallery.reset()
+        model.visibleAnchor = nil
+        model.scrollTarget = nil
+        BackupQualificationProtocol.setRevision(1)
+    }
 }
 
 private final class BackupQualificationProtocol: URLProtocol {
     static let library = UUID()
     static let screen = ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"]
-    static let records: [UploadRecord] = (0..<(screen == "backup-parallel" ? 6 : screen == "backup-attention" ? 2 : 1))
+    static let records: [UploadRecord] =
+        (0..<(screen == "backup-parallel"
+        ? 6 : ["backup-attention", "backup-publication"].contains(screen ?? "") ? 2 : 1))
         .map {
             UploadRecord(
                 id: UUID(), libraryId: library, fileName: "retry-fixture-\($0).jpg", mediaType: "image/jpeg",
@@ -168,6 +256,27 @@ private final class BackupQualificationProtocol: URLProtocol {
     private static var attempts = 0
     private static var inFlight = 0
     private static var peak = 0
+    private static var revision: Int64 = 1
+    private static var pageCount = 0
+    static var assetPageCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return pageCount
+    }
+    static func setRevision(_ value: Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        revision = value
+    }
+    private static func galleryAsset(_ index: Int) -> Asset {
+        Asset(
+            id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))!,
+            libraryId: library,
+            fileName: index == 251 ? "returned-photo.jpg" : index == 250 ? "new-photo.jpg" : "gallery-\(index).jpg",
+            mediaType: "image/jpeg", size: 100, sha256: String(repeating: "a", count: 64),
+            createdAt: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_790_000_000 + Double(index))),
+            hasPreview: false)
+    }
     private var pending = false
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "backup-qualification.invalid"
@@ -177,7 +286,22 @@ private final class BackupQualificationProtocol: URLProtocol {
         do {
             let status: Int
             let data: Data
-            if request.url?.path == "/v1/uploads", request.httpMethod == "POST" {
+            if Self.screen == "backup-gallery" {
+                respond(status: 200, data: try galleryResponse())
+                return
+            } else if request.httpMethod == "PUT", request.url?.path.contains("/resource-sets/") == true {
+                let intent = try JSONDecoder().decode(ResourceSetIntent.self, from: requestData())
+                guard let component = request.url?.lastPathComponent, let id = UUID(uuidString: component) else {
+                    throw ClientError.invalid("Missing fixture set ID.")
+                }
+                respond(
+                    status: 200,
+                    data: try JSONEncoder().encode(
+                        ResourceManifest(
+                            id: id, libraryId: Self.library, kind: intent.kind, sourceRevision: intent.sourceRevision,
+                            primaryAssetId: intent.primaryAssetId, resources: intent.resources, createdAt: "")))
+                return
+            } else if request.url?.path == "/v1/uploads", request.httpMethod == "POST" {
                 let record = try requestedRecord()
                 Self.lock.lock()
                 Self.attempts += 1
@@ -219,7 +343,53 @@ private final class BackupQualificationProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: error)
         }
     }
-    private func requestedRecord() throws -> UploadRecord {
+    private func galleryResponse() throws -> Data {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        let encoder = JSONEncoder()
+        let path = request.url!.path
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if path.hasSuffix("/snapshots") {
+            return try encoder.encode(
+                GallerySnapshot(
+                    id: UUID(uuidString: String(format: "10000000-0000-0000-0000-%012d", Self.revision))!,
+                    revision: Self.revision, accessGeneration: 1, expiresAt: "2099-01-01T00:00:00Z",
+                    totalCount: 249 + Self.revision))
+        }
+        if path.hasSuffix("/assets") {
+            Self.pageCount += 1
+            let before = query.first { $0.name == "before" }?.value
+            let beforeID = query.first { $0.name == "beforeId" }?.value?.lowercased()
+            let assets = (0..<Int(249 + Self.revision)).reversed().map(Self.galleryAsset).filter {
+                before == nil || $0.createdAt < before!
+                    || ($0.createdAt == before && $0.id.uuidString.lowercased() < (beforeID ?? ""))
+            }
+            let items = Array(assets.prefix(50))
+            return try encoder.encode(
+                AssetPage(
+                    items: items,
+                    nextCursor: assets.count > 50
+                        ? items.last.map { GalleryCursor(createdAt: $0.createdAt, id: $0.id) } : nil))
+        }
+        if path.hasSuffix("/changes"), let after = query.first(where: { $0.name == "after" })?.value.flatMap(Int64.init)
+        {
+            return try encoder.encode(
+                GalleryChanges(
+                    fromRevision: after, toRevision: Self.revision, targetRevision: Self.revision, hasMore: false,
+                    changes: [
+                        GalleryRevision(
+                            revision: Self.revision,
+                            items: [
+                                GalleryChange(
+                                    operation: "upsert", assetId: Self.galleryAsset(250).id,
+                                    asset: Self.galleryAsset(250))
+                            ])
+                    ]))
+        }
+        if path.hasSuffix("/timeline") { return try encoder.encode(TimelinePage(items: [])) }
+        throw ClientError.http(404, "Fixture preview unavailable.")
+    }
+    private func requestData() throws -> Data {
         var body = request.httpBody ?? Data()
         if body.isEmpty, let stream = request.httpBodyStream {
             stream.open()
@@ -233,8 +403,11 @@ private final class BackupQualificationProtocol: URLProtocol {
                 guard body.count <= 65_536 else { throw ClientError.invalid("Fixture request body is too large.") }
             }
         }
+        return body
+    }
+    private func requestedRecord() throws -> UploadRecord {
         struct Identity: Decodable { let id: UUID }
-        let id = try JSONDecoder().decode(Identity.self, from: body).id
+        let id = try JSONDecoder().decode(Identity.self, from: requestData()).id
         guard let record = Self.records.first(where: { $0.id == id }) else {
             throw ClientError.invalid("Unknown fixture upload.")
         }
@@ -257,6 +430,22 @@ private final class BackupQualificationProtocol: URLProtocol {
         return true
     }
     override func stopLoading() { _ = endPending() }
+}
+
+private struct QualificationGalleryHost: View {
+    let model: AppModel
+    @State private var phase: ScenePhase = .active
+    var body: some View {
+        GalleryView(model: model)
+            .environment(\.scenePhase, phase)
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                phase = .inactive
+                BackupQualificationProtocol.setRevision(3)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                phase = .active
+            }
+    }
 }
 
 private struct QualificationScreen: View {

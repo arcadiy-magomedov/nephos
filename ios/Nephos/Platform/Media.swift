@@ -9,11 +9,32 @@ final class NetworkPolicy {
     static let shared = NetworkPolicy()
     private let monitor = NWPathMonitor()
     private(set) var isExpensive = true
+    private(set) var isConstrained = false
     private(set) var isConnected = false
+    #if UI_QUALIFICATION
+        func qualificationNetwork(constrained: Bool = false) {
+            precondition(Bundle.main.bundleIdentifier == "app.nephos.ui-qualification")
+            monitor.cancel()
+            monitor.pathUpdateHandler = nil
+            isConnected = true
+            isExpensive = false
+            isConstrained = constrained
+        }
+    #endif
+    func allowsBackup(cellular: Bool) -> Bool {
+        isConnected && !isConstrained && (cellular || !isExpensive)
+    }
+    func backupWaitReason(cellular: Bool) -> String? {
+        if !isConnected { return "Waiting for a connection" }
+        if isConstrained { return "Backup is waiting for Low Data Mode to be turned off." }
+        if isExpensive && !cellular { return "Waiting for Wi-Fi. Cellular backup is off." }
+        return nil
+    }
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
-                self?.isExpensive = path.isExpensive || path.isConstrained
+                self?.isExpensive = path.isExpensive
+                self?.isConstrained = path.isConstrained
                 self?.isConnected = path.status == .satisfied
             }
         }

@@ -182,6 +182,69 @@ struct BackupProgress {
     }
 }
 
+struct BackupItem: Identifiable, Sendable {
+    let id: UUID
+    let source: SourceRevision
+    let group: ResourceSetRecord?
+    let records: [UploadRecord]
+
+    var name: String { source.resourceNames.first ?? "Photo" }
+    var isSaved: Bool {
+        !records.isEmpty
+            && records.allSatisfy { $0.phase == .ready && $0.evidence?.available == true && $0.remoteRemoved != true }
+            && (group == nil || (group?.manifest != nil && group?.verifiedResources(in: records) != nil))
+    }
+    var sourceChanged: Bool { records.contains { $0.phase == .sourceChanged || $0.remoteRemoved == true } }
+    var isStopped: Bool {
+        group?.requiresUserAction == true || records.contains { $0.requiresUserAction == true || $0.phase == .failed }
+            || sourceChanged
+    }
+    var diagnostic: String? { group?.error ?? records.first(where: { $0.error != nil })?.error }
+    var recovery: String {
+        if sourceChanged {
+            return "The original changed or is no longer accessible. Select its current version in Photos."
+        }
+        return BackupPresentation.recovery(
+            saved: group?.recoveryMessage ?? records.first(where: { $0.recoveryMessage != nil })?.recoveryMessage,
+            diagnostic: diagnostic)
+    }
+    func progress(chunkSize: Int) -> Double? {
+        guard chunkSize > 0, records.count == source.resourceNames.count, !records.isEmpty else { return nil }
+        let total = records.reduce(0.0) { $0 + Double($1.size) }
+        guard total > 0 else { return nil }
+        let received = records.reduce(0.0) { sum, record in
+            if record.phase == .ready { return sum + Double(record.size) }
+            return sum
+                + Set(record.receivedParts).reduce(0.0) { bytes, index in
+                    guard index >= 0, index < Chunking.count(size: record.size, chunkSize: chunkSize) else {
+                        return bytes
+                    }
+                    return bytes + Double(min(Int64(chunkSize), record.size - Int64(index) * Int64(chunkSize)))
+                }
+        }
+        return min(1, received / total)
+    }
+    func status(active: Bool) -> String {
+        if isSaved { return "Saved" }
+        if sourceChanged { return "Original changed" }
+        if isStopped {
+            if diagnostic?.hasPrefix("Server returned 400.") == true { return "Server rejected" }
+            if diagnostic?.hasPrefix("Server returned 403.") == true { return "Access denied" }
+            return "Backup stopped"
+        }
+        if active {
+            if records.isEmpty { return "Preparing original" }
+            if records.allSatisfy({ $0.phase == .ready }) { return "Finishing backup" }
+            return "Uploading"
+        }
+        if let code = PhotosNetworkFailure.legacyCode(diagnostic) {
+            return code == 3164 ? "Waiting for iCloud" : code == 3169 ? "iCloud retry pending" : "Waiting to retry"
+        }
+        if diagnostic != nil { return "Waiting to retry" }
+        return "Queued"
+    }
+}
+
 enum BackupPresentation {
     static func status(_ record: UploadRecord, wholeItemPending: Bool = false) -> String {
         if record.remoteRemoved == true { return "Removed from server" }
@@ -201,6 +264,7 @@ enum BackupPresentation {
     }
 
     static func failure(_ error: Error) -> String {
+        if let code = PhotosNetworkFailure.code(error) { return PhotosNetworkFailure.message(code) }
         if case ClientError.signedOut = error { return "Sign in again to continue backup." }
         if case ClientError.http(403, _) = error { return "Upload access was denied. Check your library access." }
         if case ClientError.http(let status, _) = error {
@@ -234,6 +298,7 @@ enum BackupPresentation {
     }
 
     static func recovery(saved: String?, diagnostic: String?) -> String {
+        if let code = PhotosNetworkFailure.legacyCode(diagnostic) { return PhotosNetworkFailure.message(code) }
         if let saved { return saved }
         // Older ledgers kept only the formatted diagnostic, not recovery guidance.
         for status in [400, 403, 404, 409, 413, 422] {

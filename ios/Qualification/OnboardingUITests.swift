@@ -6,12 +6,8 @@ final class BackupUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
         app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-parallel"]
         app.launch()
-        let button = app.buttons["Back up now"]
-        XCTAssertTrue(button.waitForExistence(timeout: 15))
-        reveal(button, in: app)
-        button.tap()
+        startBackup(app)
         let complete = app.staticTexts["Backup complete"]
-        reveal(complete, in: app, upwards: false)
         XCTAssertTrue(complete.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertEqual(
             app.descendants(matching: .any).matching(identifier: "backup.progress").firstMatch.label,
@@ -23,9 +19,13 @@ final class BackupUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
         app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-attention"]
         app.launch()
+        let rejected = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "backup.item.", "Server rejected"))
+        XCTAssertTrue(rejected.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        let itemID = rejected.firstMatch.identifier
+        rejected.firstMatch.tap()
         let explanation = app.staticTexts.matching(
             identifier: "The server rejected this item. Update Nephos and the server, then retry.")
-        reveal(explanation.firstMatch, in: app)
         XCTAssertTrue(explanation.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Server returned")).count, 0)
         let retry = app.buttons.matching(NSPredicate(format: "label == %@", "Retry this item")).firstMatch
@@ -33,8 +33,10 @@ final class BackupUITests: XCTestCase {
         retry.tap()
         let saved = app.staticTexts["Saved"]
         XCTAssertTrue(saved.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Retry this item")).count, 1)
-        XCTAssertTrue(app.staticTexts["Backup stopped"].exists)
+        XCTAssertFalse(app.buttons["Retry this item"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons[itemID].label.contains("Saved"))
+        XCTAssertEqual(rejected.count, 1)
     }
 
     private func start() -> XCUIApplication {
@@ -42,12 +44,10 @@ final class BackupUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
         app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-retry"]
         app.launch()
-        let button = app.buttons["Back up now"]
-        XCTAssertTrue(button.waitForExistence(timeout: 15), app.debugDescription)
-        reveal(button, in: app)
-        button.tap()
-        let waiting = app.staticTexts["Waiting to retry"]
-        reveal(waiting, in: app)
+        startBackup(app)
+        let waiting = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "backup.item.", "Waiting to retry")
+        ).firstMatch
         XCTAssertTrue(waiting.waitForExistence(timeout: 10), app.debugDescription)
         return app
     }
@@ -57,7 +57,8 @@ final class BackupUITests: XCTestCase {
         let rawError = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Server returned 503"))
         XCTAssertEqual(rawError.count, 0)
         XCTAssertEqual(app.alerts.count, 0)
-        let details = app.buttons["Details"]
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "backup.item.")).firstMatch.tap()
+        let details = app.buttons["Technical details"]
         reveal(details, in: app)
         details.tap()
         reveal(rawError.firstMatch, in: app)
@@ -65,10 +66,10 @@ final class BackupUITests: XCTestCase {
         reveal(details, in: app, upwards: false)
         details.tap()
         XCTAssertEqual(rawError.count, 0)
-        reveal(app.staticTexts["Waiting to retry"], in: app, upwards: false)
         let saved = app.staticTexts["Saved"]
         XCTAssertTrue(saved.waitForExistence(timeout: 45), app.debugDescription)
         XCTAssertEqual(app.alerts.count, 0)
+        app.buttons["Done"].tap()
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "backup-retry-completed"
         screenshot.lifetime = .keepAlways
@@ -78,7 +79,6 @@ final class BackupUITests: XCTestCase {
     func testPauseCancelsDeadlineAndResumePreservesTheQueue() {
         let app = start()
         let pause = app.buttons["Pause backup"]
-        reveal(pause, in: app, upwards: false)
         pause.tap()
         XCTAssertTrue(app.staticTexts["Backup paused"].waitForExistence(timeout: 5))
         let progress = app.descendants(matching: .any).matching(identifier: "backup.progress").firstMatch
@@ -89,6 +89,56 @@ final class BackupUITests: XCTestCase {
         XCTAssertEqual(progress.label, "0 of 1 files saved")
         app.buttons["Resume backup"].tap()
         XCTAssertTrue(app.staticTexts["Backup complete"].waitForExistence(timeout: 15), app.debugDescription)
+    }
+
+    func testCancelDuringStartupCanResume() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-startup"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Resume backup"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Resume backup"].tap()
+        XCTAssertTrue(app.staticTexts["Backup complete"].waitForExistence(timeout: 15), app.debugDescription)
+    }
+
+    func testVerifiedPhotoPublishesEvenWhenLowDataModeBlocksOtherUploads() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-publication"]
+        app.launch()
+        startBackup(app)
+        let saved = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "backup.item.", "Saved"))
+        XCTAssertTrue(saved.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(
+            app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "backup.item.", "Queued")
+            ).count, 1)
+        XCTAssertTrue(app.staticTexts["Backup is waiting for Low Data Mode to be turned off."].exists)
+    }
+
+    func testGalleryRefreshesWithoutGestureAndWithBackupPausedAndReadOnlyLibrary() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-gallery"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 20), app.debugDescription)
+        let added = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "new-photo.jpg"))
+            .firstMatch
+        XCTAssertTrue(added.waitForExistence(timeout: 25), app.debugDescription)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let returned = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "returned-photo.jpg")
+        ).firstMatch
+        XCTAssertTrue(returned.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(app.alerts.count, 0)
+    }
+
+    private func startBackup(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Backup options"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Backup options"].tap()
+        app.buttons["Back up now"].tap()
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {

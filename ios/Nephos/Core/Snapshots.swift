@@ -54,6 +54,25 @@ struct RetainedGallery: Codable, Sendable {
     var window: GalleryWindow
     var anchor: GalleryCursor?
     var updatedAt: Date
+    var startsAtNewest: Bool?
+}
+
+struct GalleryRefreshTrigger: Hashable {
+    let active: Bool
+    let connected: Bool
+    let ready: Bool
+    let epoch: UUID
+    let library: UUID?
+    var enabled: Bool { active && connected && ready && library != nil }
+}
+
+enum GalleryRefreshPolicy {
+    static func delay(failures: Int) -> Double {
+        failures == 0 ? 15 : min(300, 15 * pow(2, Double(min(failures, 5))))
+    }
+    static func unchanged(_ old: GallerySnapshot, _ new: GallerySnapshot) -> Bool {
+        old.revision == new.revision && old.accessGeneration == new.accessGeneration
+    }
 }
 
 enum GalleryDates {

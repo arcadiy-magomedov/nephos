@@ -42,9 +42,33 @@ final class BackupPreparation {
     }
 }
 
+enum PhotosNetworkFailure {
+    static let codes = [3164, 3169, 3301]
+
+    static func code(_ error: Error) -> Int? {
+        let error = error as NSError
+        return error.domain == "PHPhotosErrorDomain" && codes.contains(error.code) ? error.code : nil
+    }
+
+    static func legacyCode(_ diagnostic: String?) -> Int? {
+        codes.first {
+            diagnostic?.range(of: "PHPhotosErrorDomain error \($0)(?![0-9])", options: .regularExpression) != nil
+        }
+    }
+
+    static func message(_ code: Int) -> String {
+        switch code {
+        case 3164: "The original is in iCloud. Backup will resume when your network settings allow it to download."
+        case 3169: "The original could not be downloaded from iCloud. It will retry automatically."
+        default: "Photos interrupted preparation of the original. It will retry automatically."
+        }
+    }
+}
+
 enum BackupRetryPolicy {
     static func isTransient(_ error: Error) -> Bool {
         if error is CancellationError { return true }
+        if PhotosNetworkFailure.code(error) != nil { return true }
         if case ClientError.http(let status, _) = error {
             return [408, 425, 429].contains(status) || (500...599).contains(status)
         }

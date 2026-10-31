@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import UIKit
 import UniformTypeIdentifiers
 
 final class ExportSink: @unchecked Sendable {
@@ -61,9 +62,84 @@ final class ExportSink: @unchecked Sendable {
 final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
     var onChange: (() -> Void)?
     private var observing = false
+    private let imageManager = PHCachingImageManager()
+    #if UI_QUALIFICATION
+        var qualificationThumbnail: UIImage?
+    #endif
+
+    func thumbnail(_ identifier: String) async throws -> UIImage {
+        #if UI_QUALIFICATION
+            if let qualificationThumbnail { return qualificationThumbnail }
+        #endif
+        guard authorization == .authorized || authorization == .limited else {
+            throw ClientError.invalid("Allow Photos access to see the original preview.")
+        }
+        guard let asset = asset(identifier) else {
+            throw ClientError.invalid("This original is no longer available on the iPhone.")
+        }
+        return try await PhotosThumbnailRequest(manager: imageManager).image(for: asset)
+    }
     override init() {
         super.init()
         refreshObservation()
+    }
+
+    @MainActor
+    private final class PhotosThumbnailRequest {
+        let manager: PHImageManager
+        private var requestID: PHImageRequestID?
+        private var continuation: CheckedContinuation<UIImage, Error>?
+        private var finished = false
+
+        init(manager: PHImageManager) { self.manager = manager }
+
+        func image(for asset: PHAsset) async throws -> UIImage {
+            try Task.checkCancellation()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    self.continuation = continuation
+                    let options = PHImageRequestOptions()
+                    options.isNetworkAccessAllowed = false
+                    options.deliveryMode = .highQualityFormat
+                    options.resizeMode = .fast
+                    requestID = manager.requestImage(
+                        for: asset, targetSize: CGSize(width: 360, height: 360), contentMode: .aspectFill,
+                        options: options
+                    ) { image, info in
+                        let error = info?[PHImageErrorKey] as? Error
+                        let cancelled = info?[PHImageCancelledKey] as? Bool == true
+                        let degraded = info?[PHImageResultIsDegradedKey] as? Bool == true
+                        Task { @MainActor in
+                            if cancelled {
+                                self.finish(.failure(CancellationError()))
+                            } else if let error {
+                                self.finish(.failure(error))
+                            } else if !degraded {
+                                if let image {
+                                    self.finish(.success(image))
+                                } else {
+                                    self.finish(
+                                        .failure(
+                                            ClientError.invalid("The photo preview is not available on this iPhone.")))
+                                }
+                            }
+                        }
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor in
+                    self.finish(.failure(CancellationError()))
+                    if let id = self.requestID { self.manager.cancelImageRequest(id) }
+                }
+            }
+        }
+
+        private func finish(_ result: Result<UIImage, Error>) {
+            guard !finished else { return }
+            finished = true
+            continuation?.resume(with: result)
+            continuation = nil
+        }
     }
     deinit { if observing { PHPhotoLibrary.shared().unregisterChangeObserver(self) } }
     func refreshObservation() {

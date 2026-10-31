@@ -103,6 +103,9 @@ struct NephosApp: App {
                 .onChange(of: NetworkPolicy.shared.isExpensive) { _, expensive in
                     if !expensive && scenePhase == .active { model.scheduleAutomaticRun() }
                 }
+                .onChange(of: NetworkPolicy.shared.isConstrained) { _, constrained in
+                    if !constrained && scenePhase == .active { model.scheduleAutomaticRun() }
+                }
         }
     }
 }

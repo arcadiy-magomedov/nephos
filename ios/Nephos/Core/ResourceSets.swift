@@ -123,6 +123,29 @@ struct ResourceSetRecord: Codable, Identifiable, Sendable {
 }
 
 extension AccountLedger {
+    mutating func resumePhotosNetworkFailures(now: Date = Date()) -> Bool {
+        var changed = false
+        for index in resourceSets?.indices ?? 0..<0 {
+            guard let group = resourceSets?[index], group.manifest == nil, group.requiresUserAction == true,
+                let code = PhotosNetworkFailure.legacyCode(group.error)
+            else { continue }
+            resourceSets?[index].requiresUserAction = false
+            resourceSets?[index].nextRetryAt = now
+            resourceSets?[index].recoveryMessage = PhotosNetworkFailure.message(code)
+            changed = true
+        }
+        for index in records.indices {
+            guard records[index].requiresUserAction == true,
+                let code = PhotosNetworkFailure.legacyCode(records[index].error)
+            else { continue }
+            records[index].requiresUserAction = false
+            records[index].nextRetryAt = now
+            records[index].recoveryMessage = PhotosNetworkFailure.message(code)
+            changed = true
+        }
+        return changed
+    }
+
     mutating func resumeLegacyPhotoKitPublications(now: Date = Date()) -> Bool {
         var changed = false
         for index in resourceSets?.indices ?? 0..<0 {

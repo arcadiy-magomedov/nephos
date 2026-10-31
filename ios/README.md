@@ -73,16 +73,19 @@ Existing English UI copy is retained; this is not a complete Russian localizatio
   outgoing grant revocation. Originals already downloaded cannot be revoked.
 - Viewer: sized previews on a black canvas, pinch/double-tap zoom, people
   inspection, explicit original export/restore and retention details.
-- Backup: concise saved-file counts and upload progress, persistent
-  pause/resume, existing permission/import/cleanup controls. Counts describe the
-  queued ledger, not an invented total of all Photos items. Pausing does not
-  interrupt already-running Photos preparation or server-side verification.
-  Raw server errors, part acknowledgements and resource-set details are collapsed
-  under **Details**; actionable failures remain visible without repeated upload
-  alert dialogs. Incomplete whole-item publication never appears as completed backup.
-  Stopped items explain the failure and recovery inline and have **Retry this item**;
-  this retries only that item, without bypassing backoff for other failures.
-  Older persisted HTTP errors also receive recovery guidance.
+- Backup: two-column local photo previews, circular per-photo upload progress,
+  compact saved/remaining photo counts and persistent pause/resume. Live Photos
+  and edited originals occupy one tile, not a separate row per sidecar.
+  Percentages count acknowledged bytes; preparation and final publication show
+  an indeterminate indicator. A checkmark requires the complete verified backup.
+  Counts describe the queued ledger, not an invented total of all Photos items.
+  The newest 100 tiles prioritize unfinished items. Thumbnails do not initiate
+  iCloud downloads; inaccessible local previews have a placeholder.
+  **+** opens Photos selection; **...** contains backup settings and **Back up now**.
+  Tap a photo for its status, recovery and **Retry this item**, which does not
+  bypass another item's backoff. Raw errors, identifiers and transfer details
+  stay collapsed under **Technical details**. Pause does not interrupt
+  already-running Photos preparation or server-side verification.
 
 The queue runs up to three independent uploads concurrently, including manual
 selection, automatic discovery and resumed queues. PhotoKit preparation remains
@@ -100,6 +103,13 @@ blocked rather than entering a retry loop.
 Gallery query encoding preserves literal plus signs, including positive UTC
 offsets in saved pagination anchors. A retained gallery is labelled as a saved
 copy rather than implying that every refresh failure is an authentication error.
+The visible, active gallery checks for changes on opening, foreground return and
+reconnection, then every 15 seconds. This is independent of automatic backup,
+pause and read-only sharing. Unchanged revisions avoid refetching asset pages.
+New photos appear at the newest view; older browsing retains its anchor and
+loaded window, bounded to 300 items. Historical/date windows remain historical.
+Failures keep cached metadata and use inline recovery with polling backoff up to
+five minutes, not repeated alerts. Media still requires current authorization.
 
 Temporary network failures, HTTP 408/425/429 and server 5xx responses retry with
 persisted exponential backoff: 30 seconds, 1/2/4 minutes, up to one hour.
@@ -109,6 +119,13 @@ bypasses backoff. Pause, sign-out, account/library changes, read-only access and
 network policy still gate work. Certificate, authorization and invalid-data
 failures do not automatically retry; their durable records remain available for
 review and manual retry. Reconciliation preserves already-acknowledged parts.
+PhotoKit network-required (3164), network-error (3169) and interrupted-operation
+(3301) failures also retry. An upgrade reopens previously blocked items with
+these errors without replacing their originals or acknowledged parts.
+Already-verified photo manifests can finish publishing over a connected network
+even when Wi-Fi-only or Low Data Mode blocks media transfer. These metadata
+requests do not enable cellular original downloads. Original transfer continues
+to respect the explicit cellular preference and Low Data Mode.
 This foreground timer is not an iOS background execution entitlement:
 background URLSession transfers and BGProcessing opportunities remain OS-controlled;
 continuous whole-queue progress while suspended has not been qualified on-device.
