@@ -382,19 +382,47 @@ Require authenticator user verification for passwordless login.
 
 Support multiple credentials, revocation, and a controlled recovery process.
 Reserve a stable HTTPS authentication domain and relying-party configuration.
-Future native clients use Authorization Code with PKCE; native passkey
-integration may additionally require platform/domain association configuration.
+Native clients perform registration and assertion through platform passkey APIs,
+not an invitation-link/browser workflow. Token issuance remains owned by the
+identity provider; any authorization-code handoff retains PKCE, nonce, exact
+client/redirect binding and the existing OIDC validation.
 
 The provider must demonstrate closed provisioning, passwordless enrollment,
 credential management, and recovery. Password login is disabled; there is no
 password fallback that weakens the passkey-only policy.
 
 An administrator-provisioned account starts disabled and can enroll only with an
-account-bound, short-lived, single-use activation ceremony. Activation is
-delivered through the account's pre-verified out-of-band channel; the secret is
-never returned by a public API or written to ordinary logs. The ceremony binds
-the intended account, origin/relying party, and expiry, and is invalidated on
-use, cancellation, or replacement.
+account-bound, short-lived, single-use activation ceremony:
+
+1. The user enters their email in the native app.
+2. The app asks for an enrollment PIN issued by an administrator in the private
+   console and conveyed after verifying the intended recipient. No invitation
+   email or link transfer between devices is required.
+3. Correct PIN verification authorizes only a bounded enrollment session, not
+   media access. The app requests a passkey through the OS Face ID/Touch ID sheet.
+4. Server verification of the passkey completes activation and normal sign-in.
+   Subsequent sign-ins use the passkey, not a reusable PIN.
+
+Use a cryptographically generated eight-digit PIN with a ten-minute lifetime,
+at most five verification attempts, atomic single-use consumption, and additional
+account/source rate limits. Only the issuing private-console response displays
+it; public APIs and ordinary logs never expose it. Store a protected verifier,
+not plaintext or an unkeyed digest of the low-entropy code. Replacement invalidates
+the previous code. Responses must not disclose whether an email is registered.
+Bind the enrollment session and each single-use challenge to the account, client,
+origin/relying party and expiry. Interrupted or cancelled OS prompts must not
+activate the account; explicit enrollment cancellation invalidates the session.
+Adding a credential to an active account follows recent-authentication/recovery
+rules below; an ordinary initial-enrollment PIN must not bypass them.
+
+For iOS native passkeys, deployment includes a stable RP domain declared in the
+signed app's `webcredentials` Associated Domains entitlement and a matching HTTPS
+`apple-app-site-association` file. An arbitrary server URL entered at runtime
+cannot grant this entitlement. Apple normally retrieves the file through its
+public CDN; private development domains require its explicit development-mode
+association setup. A local biometric app lock is not a replacement passkey.
+See [Apple's requirements](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys)
+and [domain association](https://developer.apple.com/documentation/xcode/supporting-associated-domains).
 
 Recovery uses two explicit paths:
 

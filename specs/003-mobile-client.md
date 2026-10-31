@@ -124,14 +124,24 @@ need an explicit supported trust-installation/rotation path.
 
 ### 3.3 C03 - Authentication
 
-Use OIDC Authorization Code with PKCE through the OS authentication session,
-not an embedded credential form. Honor the configured issuer, redirect binding,
-state, and nonce validation. There is no public registration or password fallback.
+Use native email and administrator-issued enrollment-PIN screens, followed by the
+OS passkey registration sheet as specified in backend R08. No invitation email,
+external browser page or transfer of links between devices is part of this journey.
+Subsequent sign-in uses the native passkey assertion sheet. The PIN grants only
+initial enrollment; it is not an account password or a reusable login mechanism.
+
+The identity provider still owns credentials and token issuance. Preserve issuer,
+audience, signature, lifetime, client binding, and nonce validation; any OAuth
+authorization-code handoff uses PKCE. There is no public registration or password fallback.
 Face ID/Touch ID and Android biometrics unlock credentials locally; biometric
 templates are not sent to the backend.
 
 Passkeys retain the backend's stable relying-party domain even when network
-routes change. Adding credentials or recovering an account uses backend R08/R09,
+routes change. iOS requires the RP's signed `webcredentials` entitlement and HTTPS
+app-site association; the deployment must qualify those prerequisites before
+claiming native enrollment works. Do not silently fall back to a browser or relabel
+a local Face ID lock as a passkey.
+Adding credentials or recovering an account uses backend R08/R09,
 not a client-specific bypass. An optional local app lock is separate from
 server authentication and cannot turn an expired session into valid authority.
 

@@ -150,6 +150,13 @@ remain release gates under R31.
   authentication for credential changes, global revocation of superseded
   credentials and sessions, and no disabled-account reactivation. Incomplete
   provisioning must remain disabled.
+- **Native enrollment:** Administrator-issued eight-digit PINs expire after ten
+  minutes and five failed attempts, with atomic consumption and account/source
+  rate limits. A correct PIN grants only enrollment, never media tokens before
+  passkey verification. Reject unknown-user enumeration, concurrent PIN replay,
+  account/client/RP substitution, and use of initial-enrollment PINs to replace
+  an active account's credentials. Protect low-entropy verifiers with a server
+  secret; never log or return PINs through public APIs.
 - **Implementation choices:** Provider, activation delivery integration, and
   first-administrator bootstrap must meet these contracts. Compromised recovery
   authority remains powerful.

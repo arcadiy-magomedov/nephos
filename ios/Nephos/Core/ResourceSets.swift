@@ -80,6 +80,7 @@ struct ResourceSetRecord: Codable, Identifiable, Sendable {
     var retention: ResourceSetRetention?
     var retryCount: Int?
     var nextRetryAt: Date?
+    var requiresUserAction: Bool?
 
     func intent(records: [UploadRecord]) throws -> ResourceSetIntent {
         let matching = records.filter { $0.resourceSetId == id }.sorted { $0.resourceIndex < $1.resourceIndex }

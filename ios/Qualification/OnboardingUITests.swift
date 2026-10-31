@@ -1,5 +1,72 @@
 import XCTest
 
+final class BackupUITests: XCTestCase {
+    private func start() -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-retry"]
+        app.launch()
+        let button = app.buttons["Back up now"]
+        XCTAssertTrue(button.waitForExistence(timeout: 15), app.debugDescription)
+        reveal(button, in: app)
+        button.tap()
+        let waiting = app.staticTexts["Waiting to retry"]
+        reveal(waiting, in: app)
+        XCTAssertTrue(waiting.waitForExistence(timeout: 10), app.debugDescription)
+        return app
+    }
+
+    func testManualQueueRetriesWithoutAnotherTriggerAndDetailsAreCollapsed() {
+        let app = start()
+        let rawError = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Server returned 503"))
+        XCTAssertEqual(rawError.count, 0)
+        XCTAssertEqual(app.alerts.count, 0)
+        let details = app.buttons["Details"]
+        reveal(details, in: app)
+        details.tap()
+        reveal(rawError.firstMatch, in: app)
+        XCTAssertTrue(rawError.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        reveal(details, in: app, upwards: false)
+        details.tap()
+        XCTAssertEqual(rawError.count, 0)
+        reveal(app.staticTexts["Waiting to retry"], in: app, upwards: false)
+        let saved = app.staticTexts["Saved"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 45), app.debugDescription)
+        XCTAssertEqual(app.alerts.count, 0)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "backup-retry-completed"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testPauseCancelsDeadlineAndResumePreservesTheQueue() {
+        let app = start()
+        let pause = app.buttons["Pause backup"]
+        reveal(pause, in: app, upwards: false)
+        pause.tap()
+        XCTAssertTrue(app.staticTexts["Backup paused"].waitForExistence(timeout: 5))
+        let progress = app.descendants(matching: .any).matching(identifier: "backup.progress").firstMatch
+        let premature = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "1 of 1 files saved"), object: progress)
+        premature.isInverted = true
+        wait(for: [premature], timeout: 35)
+        XCTAssertEqual(progress.label, "0 of 1 files saved")
+        app.buttons["Resume backup"].tap()
+        XCTAssertTrue(app.staticTexts["Backup complete"].waitForExistence(timeout: 15), app.debugDescription)
+    }
+
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
+        for _ in 0..<6 {
+            if element.exists, element.isHittable, element.frame.minY > 140,
+                element.frame.maxY < app.frame.height - 80
+            {
+                return
+            }
+            if upwards { app.swipeUp() } else { app.swipeDown() }
+        }
+    }
+}
+
 final class OnboardingUITests: XCTestCase {
     func testBonjourSelectionStillRequiresExplicitTrust() throws {
         let environment = ProcessInfo.processInfo.environment

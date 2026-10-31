@@ -1,5 +1,62 @@
 import Foundation
 
+enum BackupRetryPolicy {
+    static func isTransient(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if case ClientError.http(let status, _) = error {
+            return [408, 425, 429].contains(status) || (500...599).contains(status)
+        }
+        guard let error = error as? URLError else { return false }
+        return [
+            .cancelled, .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+            .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff, .dataNotAllowed,
+        ].contains(error.code)
+    }
+
+    static func nextAttempt(ledger: AccountLedger, library: UUID?, now: Date = Date()) -> Date? {
+        guard let library, ledger.settings.backupPaused != true else { return nil }
+        let records = ledger.records.filter { $0.libraryId == library }
+        var dates = records.filter { $0.needsTransfer && $0.requiresUserAction != true }
+            .map { $0.nextRetryAt ?? now }
+        let children = Dictionary(grouping: records, by: \.resourceSetId)
+        for group in ledger.resourceSets ?? []
+        where group.libraryId == library && group.manifest == nil && group.requiresUserAction != true {
+            let members = children[group.id] ?? []
+            guard
+                !members.contains(where: {
+                    $0.requiresUserAction == true || $0.phase == .sourceChanged || $0.remoteRemoved == true
+                })
+            else { continue }
+            // Publication must not bypass a required original's backoff.
+            dates.append(max(group.nextRetryAt ?? now, members.compactMap(\.nextRetryAt).max() ?? now))
+        }
+        return dates.min()
+    }
+}
+
+@MainActor
+final class BackupRetryWakeup {
+    private var task: Task<Void, Never>?
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    func schedule(at date: Date, perform: @escaping @MainActor () -> Void) {
+        cancel()
+        let delay = max(0, date.timeIntervalSinceNow)
+        task = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.task = nil
+            perform()
+        }
+    }
+
+    deinit { task?.cancel() }
+}
+
 @MainActor
 final class UploadClient {
     let api: API

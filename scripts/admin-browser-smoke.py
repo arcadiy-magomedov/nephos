@@ -2,8 +2,11 @@
 """Qualify the real operator browser flow. Never run against a production realm."""
 
 import argparse
+import json
+import os
 from pathlib import Path
 import secrets
+import subprocess
 import uuid
 
 from playwright.sync_api import sync_playwright, expect
@@ -14,7 +17,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://localhost:18082")
     parser.add_argument("--screenshots", type=Path)
+    parser.add_argument(
+        "--native-claims", type=Path, help="Write only verified fixture claims for native policy tests."
+    )
+    parser.add_argument("--console-container", help="Explicit development console container for native claim export.")
     args = parser.parse_args()
+    if args.native_claims and not args.console_container:
+        parser.error("--native-claims requires --console-container")
     base = args.base_url.rstrip("/")
     operator_url = smoke.IDENTITY + "/admin/realms/master/users"
     outsider = "admin-browser-" + uuid.uuid4().hex
@@ -74,6 +83,36 @@ def main():
             assert len(cookies) == 1 and cookies[0]["httpOnly"] and cookies[0]["sameSite"] == "Lax"
             assert smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"] not in cookies[0]["value"]
             old_cookies = context.cookies(base)
+            if args.native_claims:
+                program = """
+import json,sys
+from admin_web import app,store,provider,CLAIMS,ISSUER,CLIENT_ID
+with app.test_request_context():
+    key = 'nephos:admin:' + sys.stdin.read()
+    data = app.session_interface.serializer.decode(store.get(key))
+    initial = data['token']['userinfo']
+    token = provider.fetch_access_token(grant_type='refresh_token', refresh_token=data['token']['refresh_token'])
+    refreshed = provider.parse_id_token(token, nonce=None, claims_options=CLAIMS, leeway=30)
+    assert refreshed['sub'] == initial['sub']
+    assert 'nonce' not in refreshed or refreshed['nonce'] == initial['nonce']
+    data['token'] = {**token, 'userinfo': dict(refreshed)}
+    store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
+    fields = {'iss','aud','azp','sub','nonce','iat','exp','nbf'}
+    print(json.dumps({'issuer':ISSUER,'clientID':CLIENT_ID,
+        'initial':{k:v for k,v in initial.items() if k in fields},
+        'refreshed':{k:v for k,v in refreshed.items() if k in fields}}))
+"""
+                result = subprocess.run(
+                    ["docker", "exec", "-i", args.console_container, "python", "-c", program],
+                    input=cookies[0]["value"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                claims = json.loads(result.stdout)
+                descriptor = os.open(args.native_claims, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "w") as output:
+                    json.dump(claims, output)
             page.reload()
             expect(page.get_by_role("button", name="Sign out")).to_be_visible()
             if args.screenshots:

@@ -200,3 +200,10 @@ jobs:
               OBJROOT="$PWD/.derivedData/Build/Intermediates.noindex" \
               SYMROOT="$PWD/.derivedData/Build/Products" build
           done
+      - name: Native backup retry and pause acceptance
+        run: |
+          simulator="$(xcrun simctl list devices available -j | jq -er '
+            [.devices | to_entries[] | select(.key | contains("iOS"))
+              | .value[] | select(.name | startswith("iPhone")) | .udid][0]')"
+          xcrun simctl bootstatus "$simulator" -b
+          python3 ios/onboarding_qualification.py --backup --simulator "$simulator"

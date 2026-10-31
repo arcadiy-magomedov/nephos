@@ -60,28 +60,37 @@ struct BackupStatusView: View {
                     .rotationEffect(.degrees(-90))
                 VStack {
                     Text("\(progress.verified)").font(.largeTitle.bold())
-                    Text("of \(progress.total) resources").font(.caption).foregroundStyle(.secondary)
+                    Text("of \(progress.total) files saved").font(.caption).foregroundStyle(.secondary)
                 }
             }.frame(width: 148, height: 148)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(progress.verified) of \(progress.total) queued original resources verified")
+                .accessibilityLabel("\(progress.verified) of \(progress.total) files saved")
+                .accessibilityIdentifier("backup.progress")
             Text(
                 model.ledger.settings.backupPaused == true
                     ? "Backup paused"
-                    : model.isRunning ? "Saving originals" : progress.total == 0 ? "Ready to back up" : "Backup queue"
+                    : model.needsReauthentication
+                        ? "Sign in to continue"
+                        : model.isRunning
+                            ? "Backing up"
+                            : progress.failed > 0
+                                ? "Needs attention"
+                                : progress.total == 0
+                                    ? "Ready to back up"
+                                    : progress.isComplete ? "Backup complete" : "Backup queued"
             )
             .font(.title2.bold())
-            Text("\(progress.pending) pending · \(progress.failed) need attention")
-                .font(.subheadline).foregroundStyle(.secondary)
+            Text(
+                progress.pending == 0 && progress.awaitingPublication > 0
+                    ? "\(progress.awaitingPublication) items finishing · \(progress.failed) need attention"
+                    : "\(progress.pending) pending · \(progress.failed) need attention"
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
             if !NetworkPolicy.shared.isConnected {
                 Label("Waiting for a connection", systemImage: "wifi.slash")
             } else if !model.ledger.settings.allowCellular {
                 Label("Wi-Fi only", systemImage: "wifi")
             }
-            Text(
-                "Counts cover queued resources in this library, not every item in Photos. Compound items contain multiple resources."
-            )
-            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .padding(24).frame(maxWidth: .infinity)
         .background(NephosStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))

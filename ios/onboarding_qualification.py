@@ -174,12 +174,18 @@ def project(workspace):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulator", required=True)
-    parser.add_argument("--base-url", required=True)
-    parser.add_argument("--certificate-error-url", required=True)
+    parser.add_argument("--base-url", default="")
+    parser.add_argument("--certificate-error-url", default="")
+    parser.add_argument(
+        "--backup", action="store_true", help="Exercise foreground retries and backup UI with controlled responses."
+    )
     parser.add_argument("--discovery", action="store_true", help="Also require the base URL's real LAN announcement.")
     args = parser.parse_args()
+    if not args.backup and (not args.base_url or not args.certificate_error_url):
+        parser.error("Onboarding checks require --base-url and --certificate-error-url.")
     scratch = IOS / ".test-work"
     scratch.mkdir(exist_ok=True)
+    (IOS / ".logs").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="onboarding-ui-", dir=scratch) as directory:
         workspace = Path(directory)
         destination = project(workspace)
@@ -234,6 +240,7 @@ def main():
                     "xcodebuild",
                     "-quiet",
                     "test-without-building",
+                    "-only-testing:OnboardingUITests/" + ("BackupUITests" if args.backup else "OnboardingUITests"),
                     "-xctestrun",
                     str(runfile),
                     "-destination",

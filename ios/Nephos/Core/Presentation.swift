@@ -158,6 +158,8 @@ struct BackupProgress {
     let verified: Int
     let pending: Int
     let failed: Int
+    let awaitingPublication: Int
+    var isComplete: Bool { total > 0 && verified == total && failed == 0 && awaitingPublication == 0 }
     var fraction: Double { total == 0 ? 0 : Double(verified) / Double(total) }
 
     init(ledger: AccountLedger, library: UUID?) {
@@ -165,7 +167,44 @@ struct BackupProgress {
         total = records.count
         verified = records.filter { $0.phase == .ready && $0.evidence?.available == true }.count
         pending = records.filter(\.needsTransfer).count
-        failed = records.filter { $0.phase == .failed || $0.phase == .sourceChanged }.count
+        awaitingPublication =
+            (ledger.resourceSets ?? []).filter {
+                $0.libraryId == library && $0.manifest == nil
+            }.count
+        failed =
+            records.filter {
+                $0.phase == .failed || $0.phase == .sourceChanged || $0.requiresUserAction == true
+            }.count
+            + (ledger.resourceSets ?? []).filter { group in
+                group.libraryId == library && group.manifest == nil && group.requiresUserAction == true
+                    && !records.contains { $0.resourceSetId == group.id && $0.requiresUserAction == true }
+            }.count
+    }
+}
+
+enum BackupPresentation {
+    static func status(_ record: UploadRecord, wholeItemPending: Bool = false) -> String {
+        if record.remoteRemoved == true { return "Removed from server" }
+        if record.phase == .sourceChanged { return "Original changed — needs attention" }
+        if record.requiresUserAction == true { return "Needs attention" }
+        if record.error != nil, record.nextRetryAt != nil { return "Waiting to retry" }
+        switch record.phase {
+        case .queued: return "Waiting to upload"
+        case .uploading: return "Uploading"
+        case .verifying: return "Checking upload"
+        case .ready:
+            return record.evidence?.available == true
+                ? (wholeItemPending ? "Finishing backup" : "Saved") : "Checking upload"
+        case .paused: return "Waiting to resume"
+        case .failed, .sourceChanged: return "Needs attention"
+        }
+    }
+
+    static func failure(_ error: Error) -> String {
+        if case ClientError.signedOut = error { return "Sign in again to continue backup." }
+        if case ClientError.http(403, _) = error { return "Upload access was denied. Check your library access." }
+        if BackupRetryPolicy.isTransient(error) { return "Upload interrupted. It will retry automatically." }
+        return "Backup needs attention. Open Details to see the problem, then try again."
     }
 }
 

@@ -167,7 +167,7 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
             throw ClientError.invalid("OIDC response omitted the identity token.")
         }
         let subject = try await JWTVerifier.verify(
-            idToken, discovery: discovery, clientID: connection.config.clientId, nonce: nonce)
+            idToken, discovery: discovery, clientID: connection.config.clientId, purpose: .authorization(nonce: nonce))
         guard generation == expectedGeneration else { throw CancellationError() }
         let saved = Credentials(
             connection: connection, subject: subject, nonce: nonce, accessToken: tokens.access_token,
@@ -193,11 +193,9 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
                     ])
             } catch ClientError.http(400, _) { throw ClientError.signedOut }
             if let idToken = tokens.id_token {
-                let subject = try await JWTVerifier.verify(
-                    idToken, discovery: discovery, clientID: saved.connection.config.clientId, nonce: saved.nonce)
-                guard subject == saved.subject else {
-                    throw ClientError.invalid("Refresh changed the authenticated account.")
-                }
+                _ = try await JWTVerifier.verify(
+                    idToken, discovery: discovery, clientID: saved.connection.config.clientId,
+                    purpose: .refresh(nonce: saved.nonce, subject: saved.subject))
             }
             guard self.generation == expectedGeneration else { throw CancellationError() }
             var updated = saved
@@ -265,7 +263,9 @@ enum JWTVerifier {
         }
         return data
     }
-    static func verify(_ token: String, discovery: OIDCDiscovery, clientID: String, nonce: String) async throws
+    static func verify(
+        _ token: String, discovery: OIDCDiscovery, clientID: String, purpose: IdentityTokenClaims.Purpose
+    ) async throws
         -> String
     {
         let segments = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
@@ -299,18 +299,7 @@ enum JWTVerifier {
                 Data("\(segments[0]).\(segments[1])".utf8) as CFData, try decode(segments[2]) as CFData, nil),
             let claims = try JSONSerialization.jsonObject(with: decode(segments[1])) as? [String: Any]
         else { throw ClientError.invalid("Identity token signature is invalid.") }
-        let now = Date().timeIntervalSince1970
-        let audience = (claims["aud"] as? [String]) ?? (claims["aud"] as? String).map { [$0] } ?? []
-        guard claims["iss"] as? String == discovery.issuer, audience.contains(clientID),
-            audience.count == 1 || claims["azp"] as? String == clientID,
-            claims["azp"] == nil || claims["azp"] as? String == clientID,
-            claims["nonce"] as? String == nonce,
-            let expiry = claims["exp"] as? Double, expiry > now,
-            let issued = claims["iat"] as? Double, issued <= now + 30,
-            (claims["nbf"] as? Double ?? 0) <= now + 30,
-            let subject = claims["sub"] as? String, !subject.isEmpty
-        else { throw ClientError.invalid("Identity token issuer, audience, nonce, or lifetime validation failed.") }
-        return subject
+        return try IdentityTokenClaims.validate(claims, issuer: discovery.issuer, clientID: clientID, purpose: purpose)
     }
     private static func length(_ count: Int) -> Data {
         if count < 128 { return Data([UInt8(count)]) }

@@ -662,18 +662,28 @@ struct FileShareView: UIViewControllerRepresentable {
 struct BackupView: View {
     @Bindable var model: AppModel
     @State private var picker = false
+    private var waitingItems: [ResourceSetRecord] {
+        Array(
+            (model.ledger.resourceSets ?? []).filter {
+                $0.libraryId == model.ledger.selectedLibraryID && $0.manifest == nil && $0.error != nil
+            }.suffix(100).reversed())
+    }
     var body: some View {
         Group {
             List {
                 Section {
                     BackupStatusView(model: model).listRowInsets(EdgeInsets())
                 }.listRowBackground(Color.clear)
+                if let notice = model.backupNotice {
+                    Section {
+                        Label(notice, systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(.orange)
+                    }
+                }
                 Section {
                     Button(model.ledger.settings.backupPaused == true ? "Resume backup" : "Pause backup") {
                         Task { await model.setBackupPaused(model.ledger.settings.backupPaused != true) }
                     }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
-                    Text("Pausing stops new uploads. A current Photos export or server verification may finish.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
                     LibrarySelector(model: model)
@@ -681,7 +691,7 @@ struct BackupView: View {
                         Button("Session expired — sign in to resume") { Task { await model.login() } }
                     }
                     Text(model.photosStatus)
-                    Button("Grant / check Photos access") { Task { await model.requestPhotos() } }
+                    Button("Photos access") { Task { await model.requestPhotos() } }
                     Button("Select photos and videos") {
                         Task {
                             await model.requestPhotos()
@@ -690,83 +700,104 @@ struct BackupView: View {
                     }.disabled(
                         model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
                             || model.isRunning || model.ledger.settings.backupPaused == true)
-                    Button("Resume uploads / scan accessible Photos") {
+                    Button("Back up now") {
                         Task { await model.runBackup(ignoreBackoff: true) }
                     }
                     .disabled(
                         model.isRunning || model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
                             || model.ledger.settings.backupPaused == true)
-                    if model.isRunning { ProgressView(model.activity) }
-                    Text(
-                        "Uploads use originals, not thumbnails. Selected imports require Photos identity access. Cloud-only originals may download first. Wi-Fi is the default."
-                    ).font(.caption)
+                    if model.isRunning { ProgressView("Backing up…") }
                 }
                 Section("Phone-space cleanup") {
                     Text(
-                        "Only verified, unchanged, unedited single-resource photos/videos can proceed. Each removal requires a fresh server retention hold and your confirmation."
+                        "Review photos already saved to the server. Nothing is removed without your confirmation."
                     )
                     Button("Review verified phone copies", role: .destructive) { model.checkCleanup() }.disabled(
                         model.isRunning)
                     if !model.cleanupReport.isEmpty { Text(model.cleanupReport).font(.caption) }
                 }
-                Section("Whole Photos items") {
-                    ForEach(
-                        Array(
-                            (model.ledger.resourceSets ?? []).filter { $0.libraryId == model.ledger.selectedLibraryID }
-                                .suffix(100).reversed())
-                    ) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(group.source.resourceNames.first ?? group.kind).font(.headline)
-                            Text(
-                                group.manifest == nil
-                                    ? "Incomplete \(group.kind): required \(group.source.resourceNames.count) resources; cleanup blocked"
-                                    : "Complete \(group.kind): \(group.manifest?.resources.count ?? 0) verified originals published"
-                            )
-                            .font(.caption).foregroundStyle(group.manifest == nil ? .orange : .green)
-                            if let error = group.error { Text(error).font(.caption).foregroundStyle(.red) }
-                            if let retry = group.nextRetryAt {
-                                Text("Retry after \(retry.formatted()) or choose Resume.").font(.caption)
+                if !waitingItems.isEmpty {
+                    Section("Waiting items") {
+                        ForEach(waitingItems) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(group.source.resourceNames.first ?? group.kind).font(.headline)
+                                Text(
+                                    group.requiresUserAction == true ? "Needs attention" : "Waiting to retry"
+                                )
+                                .font(.caption).foregroundStyle(.orange)
                             }
                         }
                     }
                 }
-                Section("Recent uploads (\(model.ledger.records.count) tracked)") {
-                    if model.recentUploads.isEmpty { Text("No originals have been queued for this account.") }
+                Section("Recent uploads") {
+                    if model.recentUploads.isEmpty { Text("No uploads yet.") }
                     ForEach(model.recentUploads.filter { $0.libraryId == model.ledger.selectedLibraryID }) { record in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(record.fileName).font(.headline)
                             Text(
-                                "\(record.phase.rawValue) resource • \(ByteCountFormatter.string(fromByteCount: record.size, countStyle: .file))"
-                            )
+                                BackupPresentation.status(
+                                    record,
+                                    wholeItemPending: model.ledger.resourceSets?.contains {
+                                        $0.id == record.resourceSetId && $0.manifest == nil
+                                    } == true)
+                            ).font(.subheadline).foregroundStyle(.secondary)
                             if record.phase == .uploading, let chunkSize = model.connection?.config.chunkSize,
                                 record.size > 0
                             {
                                 ProgressView(
                                     value: Double(record.receivedParts.count),
                                     total: Double(Chunking.count(size: record.size, chunkSize: chunkSize)))
-                                Text("\(record.receivedParts.count) parts acknowledged by server").font(.caption)
                             }
-                            if let set = model.ledger.resourceSets?.first(where: { $0.id == record.resourceSetId }) {
-                                Text(
-                                    set.manifest == nil
-                                        ? "Whole item incomplete — publication pending"
-                                        : "Complete \(set.kind) set published"
-                                ).font(.caption).foregroundStyle(set.manifest == nil ? .orange : .green)
-                                if let error = set.error { Text(error).font(.caption).foregroundStyle(.red) }
-                            }
-                            if !record.source.cleanupSupported {
-                                Text(
-                                    "Cleanup blocked for compound/edited/unsupported sources. Complete originals can be exported from Gallery."
-                                ).font(.caption)
-                            }
-                            if record.remoteRemoved == true {
-                                Text("Removed remotely; this revision will not be automatically re-uploaded.").font(
-                                    .caption)
-                            }
-                            if let cleanup = record.cleanupState { Text("Photos removal: \(cleanup)").font(.caption) }
-                            if let error = record.error { Text(error).font(.caption).foregroundStyle(.red) }
+                            Text(ByteCountFormatter.string(fromByteCount: record.size, countStyle: .file))
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                }
+                Section {
+                    DisclosureGroup("Details") {
+                        if !model.activity.isEmpty { Text(model.activity) }
+                        if let diagnostic = model.backupDiagnostic { Text(diagnostic).foregroundStyle(.red) }
+                        Text(
+                            "Temporary failures retry after 30 seconds, then 1, 2, 4 minutes, up to one hour. Back up now retries immediately. Access, certificate and invalid-source errors require attention."
+                        )
+                        Text(
+                            "Retries run while Nephos is active; iOS chooses background opportunities. Pausing stops new uploads, but an ongoing Photos export or server check may finish."
+                        )
+                        Text(
+                            "Counts cover queued original files in this library, not all Photos items. Live Photos and other compound items contain several files. Cleanup requires every original to be verified and a fresh retention hold."
+                        )
+                        ForEach(
+                            Array(
+                                (model.ledger.resourceSets ?? []).filter {
+                                    $0.libraryId == model.ledger.selectedLibraryID && $0.manifest == nil
+                                }.suffix(100))
+                        ) { group in
+                            VStack(alignment: .leading) {
+                                Text(group.source.resourceNames.first ?? group.kind).bold()
+                                Text(
+                                    "\(group.kind): \(group.source.resourceNames.count) required originals; publication pending"
+                                )
+                                if let error = group.error { Text(error).foregroundStyle(.red) }
+                                if let retry = group.nextRetryAt { Text("Next eligible attempt: \(retry.formatted())") }
+                            }
+                        }
+                        ForEach(model.recentUploads.filter { $0.libraryId == model.ledger.selectedLibraryID }) {
+                            record in
+                            VStack(alignment: .leading) {
+                                Text(record.fileName).bold()
+                                Text(
+                                    "State: \(record.phase.rawValue); \(record.receivedParts.count) parts acknowledged")
+                                if let error = record.error { Text(error).foregroundStyle(.red) }
+                                if let retry = record.nextRetryAt {
+                                    Text("Next eligible attempt: \(retry.formatted())")
+                                }
+                                if !record.source.cleanupSupported {
+                                    Text("This source is not eligible for phone cleanup.")
+                                }
+                                if let cleanup = record.cleanupState { Text("Photos removal: \(cleanup)") }
+                            }
+                        }
+                    }.font(.caption).textSelection(.enabled)
                 }
             }
             .navigationTitle("Backup")

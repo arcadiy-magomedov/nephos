@@ -1,3 +1,4 @@
+import BackgroundTasks
 import SwiftUI
 import UIKit
 
@@ -16,6 +17,12 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"] == "backup-retry" {
+            let registered = BGTaskScheduler.shared.register(
+                forTaskWithIdentifier: AppModel.backgroundID, using: nil
+            ) { task in task.setTaskCompleted(success: false) }
+            precondition(registered, "The isolated backup host could not register its background task.")
+        }
         let window = UIWindow(frame: UIScreen.main.bounds)
         self.window = window
         window.rootViewController = UIHostingController(rootView: ProgressView("Connecting isolated test account…"))
@@ -23,6 +30,30 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         Task {
             do {
                 let env = ProcessInfo.processInfo.environment
+                if env["NEPHOS_UI_SCREEN"] == "backup-retry" {
+                    let configuration = URLSessionConfiguration.ephemeral
+                    configuration.protocolClasses = [BackupQualificationProtocol.self]
+                    let session = URLSession(configuration: configuration, delegate: HTTP.delegate, delegateQueue: nil)
+                    let library = Library(id: BackupQualificationProtocol.library, name: "Isolated retry fixture")
+                    let connection = Connection(
+                        baseURL: URL(string: "http://backup-qualification.invalid")!,
+                        config: ServerConfig(
+                            serverId: "fixture", issuer: "https://identity.invalid", clientId: "fixture",
+                            maxUploadBytes: 1000, chunkSize: 100), allowDevelopmentHTTP: true)
+                    let model = AppModel(
+                        qualificationAPI: API(
+                            connection: connection, auth: QualificationTokens("fixture-only"), session: session),
+                        subject: "retry-fixture", library: library)
+                    model.ledger.records = [BackupQualificationProtocol.record]
+                    model.ledger.settings.automaticBackup = false
+                    model.ledger.settings.onboardingCompleted = true
+                    model.ledger.settings.allowCellular = true
+                    model.isLoadingGallery = true
+                    window.rootViewController = UIHostingController(
+                        rootView: NavigationStack { BackupView(model: model) })
+                    try report(["ready": true, "screen": "backup-retry", "realAPI": false])
+                    return
+                }
                 if env["NEPHOS_UI_SCREEN"] == "onboarding-flow" {
                     let model = AppModel()
                     if env["NEPHOS_UI_SEED_LEGACY"] == "1" {
@@ -38,6 +69,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                             throw ClientError.invalid(
                                 "Could not persist the isolated legacy fixture: \(model.message ?? "unknown error")")
                         }
+
                         UserDefaults.standard.removeObject(forKey: "onboardingCheckedURL")
                     }
                     window.rootViewController = UIHostingController(
@@ -109,6 +141,57 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         try JSONSerialization.data(withJSONObject: values).write(
             to: directory.appendingPathComponent("ui-report.json"), options: .atomic)
     }
+}
+
+private final class BackupQualificationProtocol: URLProtocol {
+    static let library = UUID()
+    static let record = UploadRecord(
+        id: UUID(), libraryId: library, fileName: "retry-fixture.jpg", mediaType: "image/jpeg",
+        size: 100, sha256: String(repeating: "a", count: 64),
+        source: SourceRevision(
+            localIdentifier: "fixture", modificationTime: 0, resourceNames: ["retry-fixture.jpg"],
+            resourceTypes: [1], pixelWidth: 10, pixelHeight: 10, duration: 0, cleanupSupported: false),
+        resourceIndex: 0)
+    private static let lock = NSLock()
+    private static var attempts = 0
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "backup-qualification.invalid"
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let status: Int
+            let data: Data
+            if request.url?.path == "/v1/uploads", request.httpMethod == "POST" {
+                Self.lock.lock()
+                Self.attempts += 1
+                let attempt = Self.attempts
+                Self.lock.unlock()
+                status = attempt == 1 ? 503 : 200
+                data = try JSONEncoder().encode(
+                    UploadStatus(
+                        id: Self.record.id, state: "ready", chunkSize: 100, receivedParts: [0],
+                        assetId: Self.record.id, error: nil))
+            } else if request.url?.path.lowercased() == "/v1/assets/\(Self.record.id)/backup".lowercased() {
+                status = 200
+                data = try JSONEncoder().encode(
+                    BackupEvidence(
+                        id: Self.record.id, sha256: Self.record.sha256, size: Self.record.size,
+                        available: true, createdAt: "2026-10-31T00:00:00Z"))
+            } else {
+                throw ClientError.invalid("Unexpected qualification request: \(request.url?.path ?? "nil")")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json", "Content-Length": String(data.count)])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+    override func stopLoading() {}
 }
 
 private struct QualificationScreen: View {

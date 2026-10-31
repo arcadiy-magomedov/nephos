@@ -97,6 +97,12 @@ struct NephosApp: App {
                     }
                     if phase == .background { model.scheduleBackground() }
                 }
+                .onChange(of: NetworkPolicy.shared.isConnected) { _, connected in
+                    if connected && scenePhase == .active { model.scheduleAutomaticRun() }
+                }
+                .onChange(of: NetworkPolicy.shared.isExpensive) { _, expensive in
+                    if !expensive && scenePhase == .active { model.scheduleAutomaticRun() }
+                }
         }
     }
 }

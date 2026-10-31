@@ -1,4 +1,4 @@
-# Nephos native iOS MVP
+# Nephos native iOS
 
 Native SwiftUI/UIKit application, iOS 17+, using PhotoKit, AuthenticationServices,
 Security/Keychain, CryptoKit, URLSession, AVKit and BackgroundTasks. No external
@@ -15,6 +15,15 @@ Unreachable API/identity endpoints and untrusted certificates have inline recove
 guidance; a remote server advertising a loopback issuer is rejected before login.
 The issuer is displayed explicitly even when it differs from the API origin.
 TLS validation and the existing PKCE/nonce/issuer checks remain mandatory.
+The revised [native enrollment contract](../specs/003-mobile-client.md#33-c03---authentication)
+replaces invitation links with email, an administrator-issued one-time PIN and
+the platform passkey sheet. That replacement is **not implemented yet**: a stable
+RP domain, signed Associated Domains capability and HTTPS app-site association
+must be established first. The currently installed login still uses OIDC's system
+authentication session; the upload/session fixes below do not change that flow.
+Initial ID tokens require the authorization nonce. Refresh ID tokens may omit it
+(OIDC Core 12.2), but cannot change it or the account subject. Signature, issuer,
+audience and lifetime validation still apply before refreshed credentials are saved.
 
 **Find nearby servers** starts an optional Bonjour search on the first step.
 The host advertises `_nephos._tcp` with a versioned TXT record containing its
@@ -64,10 +73,25 @@ Existing English UI copy is retained; this is not a complete Russian localizatio
   outgoing grant revocation. Originals already downloaded cannot be revoked.
 - Viewer: sized previews on a black canvas, pinch/double-tap zoom, people
   inspection, explicit original export/restore and retention details.
-- Backup: verified-resource counts and acknowledged-part progress, persistent
+- Backup: concise saved-file counts and upload progress, persistent
   pause/resume, existing permission/import/cleanup controls. Counts describe the
   queued ledger, not an invented total of all Photos items. Pausing does not
   interrupt already-running Photos preparation or server-side verification.
+  Raw server errors, part acknowledgements and resource-set details are collapsed
+  under **Details**; actionable failures remain visible without repeated upload
+  alert dialogs. Incomplete whole-item publication never appears as completed backup.
+
+Temporary network failures, HTTP 408/425/429 and server 5xx responses retry with
+persisted exponential backoff: 30 seconds, 1/2/4 minutes, up to one hour.
+A cancellable deadline wakes the foreground queue even with automatic Photos
+discovery disabled, and drains remaining bounded batches. Manual **Back up now**
+bypasses backoff. Pause, sign-out, account/library changes, read-only access and
+network policy still gate work. Certificate, authorization and invalid-data
+failures do not automatically retry; their durable records remain available for
+review and manual retry. Reconciliation preserves already-acknowledged parts.
+This foreground timer is not an iOS background execution entitlement:
+background URLSession transfers and BGProcessing opportunities remain OS-controlled;
+continuous whole-queue progress while suspended has not been qualified on-device.
 
 People/sharing pages are bounded to 300 retained rows with explicit pagination
 and errors. Requests are fenced by account/library generation. No test login,
@@ -130,6 +154,15 @@ Run from `ios/`:
 
 ```sh
 swift test --scratch-path .build
+
+# With the local development administration stack and Playwright installed:
+# a disposable operator fixture exercises real OIDC refresh; only verified claim
+# fields (never bearer/refresh tokens) reach the production Swift claim validator.
+python3 run_identity_refresh_e2e.py
+
+# Actual BackupView/AppModel: controlled 503, automatic retry, collapsed errors,
+# pause past the deadline, and resume. Separate simulator app; no user media.
+python3 onboarding_qualification.py --backup --simulator <booted-simulator-UUID>
 
 # Signing-disabled simulator build; no developer team is needed.
 # Direct-target builds are independent of the selected Xcode destination.

@@ -206,6 +206,7 @@ struct UploadRecord: Codable, Identifiable, Equatable, Sendable {
     var cleanupState: String?
     var retryCount = 0
     var nextRetryAt: Date?
+    var requiresUserAction: Bool?
     var lastAttemptAt: Date?
     var capturedAt: String?
     var resourceSetId: UUID?
