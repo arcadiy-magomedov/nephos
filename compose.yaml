@@ -189,6 +189,8 @@ services:
       <<: *app-environment
       ConnectionStrings__Storage: Host=postgres;Database=storage;Username=storage_app;Password=${STORAGE_APP_PASSWORD:?Required}
       Storage__Root: /data/media
+      Services__Derivatives: http://image-derivatives:8091
+    networks: [default, image-private]
     volumes: ["media:/data"]
     depends_on:
       migrate-storage: {condition: service_completed_successfully}
@@ -206,6 +208,7 @@ services:
       <<: *app-environment
       ConnectionStrings__Storage: Host=postgres;Database=storage;Username=storage_app;Password=${STORAGE_APP_PASSWORD}
       Storage__Root: /data/media
+      Services__Derivatives: http://image-derivatives:8091
       Worker__Enabled: "true"
       Broker__Username: storage-publisher
       Broker__Password: ${BROKER_PUBLISHER_PASSWORD}
@@ -214,12 +217,31 @@ services:
       migrate-storage: {condition: service_completed_successfully}
       volume-init: {condition: service_completed_successfully}
       broker-init: {condition: service_completed_successfully}
+      image-derivatives: {condition: service_healthy}
+    networks: [default, image-private]
     read_only: true
     tmpfs: ["/tmp"]
     mem_limit: 512m
     cpus: 1.0
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+
+  image-derivatives:
+    build: {context: ., dockerfile: face-inference/Dockerfile, target: image-tools}
+    environment:
+      DERIVATIVE_KEY: ${SERVICE_KEY:?Required}
+    networks: [image-private]
+    read_only: true
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 32
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health',timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   gateway:
     image: nginx:1.28-alpine
@@ -277,6 +299,10 @@ services:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     mem_limit: 384m
+
+networks:
+  image-private:
+    internal: true
 
 volumes:
   postgres:

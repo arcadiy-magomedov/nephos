@@ -43,6 +43,7 @@ final class AppModel {
     private var galleryLoadID = UUID()
 
     var selectedLibrary: Library? { libraries.first { $0.id == ledger.selectedLibraryID } }
+    var subject: String? { activeAuth?.subject }
     var recentUploads: [UploadRecord] { Array(ledger.records.suffix(100).reversed()) }
     var cleanupCandidates: [UploadRecord] {
         ledger.records.filter { record in

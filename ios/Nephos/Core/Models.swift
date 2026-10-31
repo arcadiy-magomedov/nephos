@@ -66,6 +66,8 @@ enum URLPolicy {
 struct Library: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
+    var isShared: Bool?
+    var isReadOnly: Bool { isShared == true }
 }
 struct LibraryPage: Codable, Sendable {
     let items: [Library]
@@ -81,6 +83,7 @@ struct Asset: Codable, Identifiable, Equatable, Sendable {
     let createdAt: String
     let hasPreview: Bool
     var resourceSetId: UUID?
+    var sharedBy: String?
     var isVideo: Bool { mediaType.hasPrefix("video/") }
 }
 struct GalleryCursor: Codable, Equatable, Sendable {

@@ -6,6 +6,13 @@ public static class AssetEndpoints
 {
     public static void MapAssets(this WebApplication app)
     {
+        app.MapGet("/v1/assets/{id:guid}", async (Guid id, HttpContext context, IAssetRepository repository, CancellationToken token) =>
+        {
+            var subject = context.User.FindFirst("sub")?.Value;
+            var asset = subject is null ? null : await repository.FindAsync(subject, id, token);
+            context.Response.Headers.CacheControl = "private, no-store";
+            return asset is null ? Results.NotFound() : Results.Ok(asset);
+        }).RequireAuthorization();
         app.MapGet("/v1/config", (IConfiguration configuration) => Results.Ok(new
         {
             serverId = configuration["Platform:ServerId"] ?? "nephos-development",
@@ -43,7 +50,7 @@ public static class AssetEndpoints
             return Results.Ok(new { items = await repository.TimelineAsync(subject, id, year, month, token) });
         }).RequireAuthorization();
         app.MapMethods("/v1/assets/{id:guid}/{kind}", ["GET", "HEAD", "POST"], async (
-            Guid id, string kind, HttpContext context, IAssetRepository repository,
+            Guid id, string kind, int? size, HttpContext context, IAssetRepository repository,
             IHttpClientFactory clients, IConfiguration configuration, CancellationToken token) =>
         {
             if (kind is not ("original" or "preview" or "backup" or "retention") ||
@@ -59,8 +66,14 @@ public static class AssetEndpoints
                 context.Response.StatusCode = 404;
                 return;
             }
+            if (kind == "preview" && !PreviewSizes.Supports(size ?? 512))
+            {
+                await Results.Problem(statusCode: 400, title: "Preview size must be 512, 1280 or 2560.").ExecuteAsync(context);
+                return;
+            }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method),
-                $"{configuration["Services:Storage"]}/internal/assets/{id}/{kind}");
+                $"{configuration["Services:Storage"]}/internal/assets/{id}/{kind}" +
+                (kind == "preview" ? $"?size={size ?? 512}" : ""));
             request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
             foreach (var header in new[] { "Range", "If-Range", "If-None-Match" })
                 if (context.Request.Headers.TryGetValue(header, out var value))

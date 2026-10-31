@@ -140,6 +140,8 @@ def account():
                 "--",
                 "/data/media/blobs/" + digest[:2] + "/" + digest,
                 "/data/media/previews/" + digest + ".jpg",
+                "/data/media/previews/" + digest + ".1280.jpg",
+                "/data/media/previews/" + digest + ".2560.jpg",
             )
         smoke.wait(
             "identity available for fixture cleanup",

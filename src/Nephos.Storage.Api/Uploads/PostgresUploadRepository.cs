@@ -237,7 +237,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
         try
         {
             var hash = await volume.AssembleAsync(upload, token);
-            var preview = await volume.CreatePreviewAsync(hash, token);
+            var preview = await volume.CreatePreviewAsync(hash, upload.MediaType, token);
             await StoreAsync(connection, transaction, upload, hash, preview, token);
         }
         catch (UploadConflictException exception)

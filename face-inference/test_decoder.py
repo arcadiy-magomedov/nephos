@@ -200,8 +200,8 @@ class HeifDecoderTests(unittest.TestCase):
     def test_header_pixel_limit_precedes_pixel_allocation(self):
         data = bytearray(self.data)
         index = data.index(b"ispe")
-        data[index + 8 : index + 16] = struct.pack(">II", 8000, 5000)
-        self.assertGreater(8000 * 5000, MAX_PIXELS)
+        data[index + 8 : index + 16] = struct.pack(">II", 9000, 8000)
+        self.assertGreater(9000 * 8000, MAX_PIXELS)
         with patch("pillow_heif.as_plugin.HeifImageFile.load", side_effect=AssertionError("pixels decoded")):
             with self.assertRaisesRegex(ImageRejected, "^pixel_limit$"):
                 decode_rgb(bytes(data))

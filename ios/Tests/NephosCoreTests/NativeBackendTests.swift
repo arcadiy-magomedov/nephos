@@ -254,5 +254,41 @@ final class NativeBackendTests: XCTestCase {
         print(
             "PASS native XCTest: hidden partial sets, atomic complete publication, canonical dedup references, full-resource retrieval/retention, delta catch-up and disk snapshot restore"
         )
+        guard let previewID = environment["NEPHOS_E2E_PREVIEW_UPLOAD"].flatMap(UUID.init(uuidString:)),
+            let previewPath = environment["NEPHOS_E2E_PREVIEW_FILE"]
+        else { throw ClientError.invalid("Missing registered native preview fixture.") }
+        let previewFile = URL(fileURLWithPath: previewPath)
+        let previewHash = try Hashing.file(previewFile)
+        var photo = UploadRecord(
+            id: previewID, libraryId: libraryID, fileName: "preview-fixture.png", mediaType: "image/png",
+            size: previewHash.size, sha256: previewHash.sha256,
+            source: SourceRevision(
+                localIdentifier: "native-preview-fixture", modificationTime: 1,
+                resourceNames: ["preview-fixture.png"], resourceTypes: [1],
+                pixelWidth: 2, pixelHeight: 2, duration: 0, cleanupSupported: false),
+            resourceIndex: 0)
+        let photoIntent = try await client.begin(photo)
+        try photo.reconcile(photoIntent, chunkSize: config.chunkSize)
+        try await client.sendPart(photo, index: 0, file: previewFile, using: UploadClient.foregroundPart)
+        let photoComplete = try await client.complete(photo.id)
+        try photo.reconcile(photoComplete, chunkSize: config.chunkSize)
+        let photoDeadline = Date().addingTimeInterval(60)
+        while photo.phase == .verifying && Date() < photoDeadline {
+            try await Task.sleep(for: .seconds(1))
+            let status = try await client.status(photo.id)
+            try photo.reconcile(status, chunkSize: config.chunkSize)
+        }
+        XCTAssertEqual(photo.phase, .ready)
+        for size in PreviewSize.allCases {
+            let request = try await api.previewRequest(photo.committedAssetID, size: size)
+            let bytes = try await HTTP.data(request, maximum: 8 * 1024 * 1024, session: api.session)
+            XCTAssertEqual(Array(bytes.prefix(2)), [0xff, 0xd8])
+            XCTAssertNotEqual(Hashing.sha256(bytes), previewHash.sha256)
+        }
+        let untouched = try await HTTP.data(client.originalRequest(photo.committedAssetID), maximum: 1024)
+        XCTAssertEqual(Hashing.sha256(untouched), previewHash.sha256)
+        print(
+            "PASS native XCTest: all three authenticated JPEG preview sizes; explicit original export remains byte-exact"
+        )
     }
 }

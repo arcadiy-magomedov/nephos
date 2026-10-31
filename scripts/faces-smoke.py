@@ -518,6 +518,52 @@ def main():
                 oriented_face = face_for(owner, oriented["id"])
                 assert oriented_face["personId"] == identities[fixtures[0]["label"]]
                 assert (oriented_face["imageWidth"], oriented_face["imageHeight"]) == (470, 640)
+                large = upload(owner, library, uploads, heic_bytes["obama-2009-48mp"], "large-48mp.heic", "image/heic")
+                automatic_jobs(owner, [large])
+                large_face = face_for(owner, large["id"])
+                assert (large_face["imageWidth"], large_face["imageHeight"]) == (6048, 8064)
+                assert large_face["personId"] == identities[fixtures[0]["label"]]
+                preview_sizes = {}
+                for side in (512, 1280, 2560):
+                    path = f"/v1/assets/{large['id']}/preview?size={side}"
+                    preview, headers = media["raw"](path, owner)
+                    assert preview[:2] == b"\xff\xd8" and headers["Content-Type"] == "image/jpeg"
+                    assert len(preview) < len(heic_bytes["obama-2009-48mp"])
+                    assert media["raw"](path, owner)[0] == preview
+                    request(API + path, token=outsider, expected=404)
+                    preview_sizes[str(side)] = len(preview)
+                assert len(set(preview_sizes.values())) == 3
+                request(API + f"/v1/assets/{large['id']}/preview?size=99999", token=owner, expected=400)
+                assert (
+                    media["raw"]("/v1/assets/" + large["id"] + "/original", owner)[0] == heic_bytes["obama-2009-48mp"]
+                )
+                assert request(API + "/v1/assets/" + large["id"], token=owner)["sha256"] == large["sha256"]
+                request(API + "/v1/assets/" + large["id"], token=outsider, expected=404)
+                subprocess.run(
+                    COMPOSE + ["stop", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
+                )
+                try:
+                    deferred_preview = upload(
+                        owner,
+                        library,
+                        uploads,
+                        heic_bytes["obama-2009-orientation-2"],
+                        "renderer-outage.heic",
+                        "image/heic",
+                    )
+                    request(API + f"/v1/assets/{deferred_preview['id']}/preview?size=2560", token=owner, expected=503)
+                finally:
+                    subprocess.run(
+                        COMPOSE + ["start", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
+                    )
+                smoke.wait(
+                    "previously unavailable preview is generated on demand after renderer recovery",
+                    lambda: media["raw"](f"/v1/assets/{deferred_preview['id']}/preview?size=2560", owner),
+                )
+                assert (
+                    media["raw"]("/v1/assets/" + deferred_preview["id"] + "/original", owner)[0]
+                    == heic_bytes["obama-2009-orientation-2"]
+                )
                 report["heic"] = {
                     "generatedFromAttributedPortraits": True,
                     "cameraOriginalPortraits": False,
@@ -528,6 +574,10 @@ def main():
                     "uprightDimensionsAndBoxes": True,
                     "orientation6ThroughFullPipeline": True,
                     "fixtures": [heic_fixtures[row["id"]] for row in fixtures],
+                    "largeOriginalDimensions": [6048, 8064],
+                    "largeOriginalBytes": len(heic_bytes["obama-2009-48mp"]),
+                    "previewBytesBySize": preview_sizes,
+                    "rendererOutageDoesNotBlockBackup": True,
                 }
                 print(
                     "PASS: HEIC/HEIF originals auto-index into existing named JPEG identities without rewriting bytes"

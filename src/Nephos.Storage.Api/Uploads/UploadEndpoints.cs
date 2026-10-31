@@ -97,20 +97,26 @@ public static class UploadEndpoints
                 assurance = "single-volume-no-independent-backup"
             });
         });
-        app.MapMethods("/internal/assets/{id:guid}/{kind}", ["GET", "HEAD"], async (Guid id, string kind,
+        app.MapMethods("/internal/assets/{id:guid}/{kind}", ["GET", "HEAD"], async (Guid id, string kind, int? size,
             HttpContext context, IConfiguration config, IUploadRepository repository, IVolumeStore volume, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config)) return Results.Unauthorized();
             if (kind is not ("original" or "preview")) return Results.NotFound();
+            var side = size ?? 512;
+            if (kind == "preview" && !PreviewSizes.Supports(side))
+                return Results.Problem(statusCode: 400, title: "Preview size must be 512, 1280 or 2560.");
             var upload = await repository.FindAsync(id, token);
-            if (upload is not { State: "stored", Sha256: not null } || (kind == "preview" && !upload.HasPreview))
+            if (upload is not { State: "stored", Sha256: not null })
                 return Results.NotFound();
-            var path = kind == "preview" ? volume.PreviewPath(upload.Sha256) : volume.OriginalPath(upload.Sha256);
+            var path = kind == "preview" ? volume.PreviewPath(upload.Sha256, side) : volume.OriginalPath(upload.Sha256);
+            if (kind == "preview" && !File.Exists(path) &&
+                !await volume.CreatePreviewAsync(upload.Sha256, upload.MediaType, token, side))
+                return Results.Problem(statusCode: 503, title: "Preview is unavailable. The original has not been modified.");
             if (!File.Exists(path)) return Results.Problem(statusCode: 503, title: "Original storage is unavailable.");
             context.Response.Headers.CacheControl = "private, no-store";
             return Results.File(path, kind == "preview" ? "image/jpeg" : upload.MediaType,
                 kind == "preview" ? null : upload.FileName, enableRangeProcessing: true,
-                entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{upload.Sha256}-{kind}\""));
+                entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{upload.Sha256}-{kind}{(kind == "preview" ? "-" + side : "")}\""));
         });
     }
 

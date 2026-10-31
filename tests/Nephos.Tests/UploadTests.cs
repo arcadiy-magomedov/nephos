@@ -1,6 +1,8 @@
 extern alias storage;
 
 using System.Security.Cryptography;
+using System.Net;
+using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nephos.ServiceDefaults;
@@ -20,7 +22,62 @@ public sealed class UploadTests : IDisposable
     {
         Directory.CreateDirectory(root);
         volume = new VolumeStore(new ConfigurationBuilder().AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Storage:Root"] = root }).Build(), NullLogger<VolumeStore>.Instance);
+            new Dictionary<string, string?> { ["Storage:Root"] = root }).Build(), NullLogger<VolumeStore>.Instance, new Clients());
+    }
+    private sealed class Clients(HttpClient? client = null) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => client ?? new();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Derivatives_are_hash_bound_and_cache_each_fixed_size_without_modifying_original(bool matchingHash)
+    {
+        byte[] original = [1, 2, 3, 4];
+        var hash = Convert.ToHexStringLower(SHA256.HashData(original));
+        var path = volume.OriginalPath(hash);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, original);
+        using var handler = new Renderer(matchingHash ? hash : new string('0', 64));
+        using var http = new HttpClient(handler);
+        var renderer = new VolumeStore(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Storage:Root"] = root,
+            ["Services:Derivatives"] = "http://renderer",
+            ["Services:Key"] = "test-only-derivative-key"
+        }).Build(), NullLogger<VolumeStore>.Instance, new Clients(http));
+        Assert.Equal(matchingHash, await renderer.CreatePreviewAsync(hash, "image/heic", default, 2560));
+        Assert.Equal(original, await File.ReadAllBytesAsync(path));
+        foreach (var size in PreviewSizes.All)
+            Assert.Equal(matchingHash, File.Exists(renderer.PreviewPath(hash, size)));
+        if (matchingHash)
+        {
+            Assert.True(await renderer.CreatePreviewAsync(hash, "image/heic", default, 1280));
+            Assert.Equal(1, handler.Calls);
+        }
+        Assert.Throws<ArgumentOutOfRangeException>(() => renderer.PreviewPath(hash, 9999));
+    }
+
+    private sealed class Renderer(string hash) : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Calls++;
+            Assert.Equal("http://renderer/render", request.RequestUri!.AbsoluteUri);
+            Assert.Equal(new byte[] { 1, 2, 3, 4 }, await request.Content!.ReadAsByteArrayAsync(token));
+            return new(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    sourceSha256 = hash,
+                    width = 6048,
+                    height = 8064,
+                    variants = PreviewSizes.All.ToDictionary(size => size.ToString(), _ => new byte[] { 0xff, 0xd8, 0xff, 0xd9 })
+                })
+            };
+        }
     }
 
     [Theory]

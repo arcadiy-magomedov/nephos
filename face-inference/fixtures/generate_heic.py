@@ -68,6 +68,13 @@ def generate():
             "Original dimensions, EXIF-normalized RGB, HEVC quality 90 4:2:0; derived codec fixture.",
         )
         if source["id"] == "obama-2009":
+            with ImageOps.pad(upright, (6048, 8064), method=Image.Resampling.LANCZOS) as large:
+                save(
+                    large,
+                    source,
+                    "obama-2009-48mp.heic",
+                    "Upscaled and padded to 6048x8064 (48.77MP); synthetic resolution fixture, NOT a camera capture.",
+                )
             upright.thumbnail((640, 640))
             for orientation in range(1, 9):
                 stored = upright if orientation == 1 else upright.transpose(INVERSE_ORIENTATION[orientation])

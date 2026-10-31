@@ -26,7 +26,7 @@ public static class Clustering
         if (job.PipelineVersion != Pipeline.Version || result.ModelVersion != Pipeline.Model ||
             result.PreprocessVersion != Pipeline.Preprocess || result.SourceSha256 != job.SourceSha256 ||
             result.CoordinateSpace != "exif-normalized" || result.Width <= 0 || result.Height <= 0 ||
-            (long)result.Width * result.Height > 32_000_000 || result.Faces.Length > 64)
+            (long)result.Width * result.Height > 64_000_000 || result.Faces.Length > 64)
             throw new InvalidDataException("invalid_provenance");
         foreach (var face in result.Faces)
         {

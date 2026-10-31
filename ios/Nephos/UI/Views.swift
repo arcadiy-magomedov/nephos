@@ -321,7 +321,7 @@ struct AssetTile: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(asset.isVideo ? "Video" : "Photo"), \(asset.fileName)")
         .task(id: "\(model.account ?? "")/\(asset.id)") {
-            guard asset.hasPreview, let api = model.api, let account = model.account else { return }
+            guard let api = model.api, let account = model.account else { return }
             do {
                 let loaded = try await MediaCache.shared.preview(asset, api: api, account: account)
                 guard model.account == account else { return }
@@ -366,10 +366,10 @@ struct OriginalView: View {
                 VideoPlayer(player: player)
             } else if let failure {
                 ContentUnavailableView(
-                    "Cannot display original", systemImage: "exclamationmark.triangle", description: Text(failure))
+                    "Preview unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
                 Button("Retry") { retry += 1 }
             } else {
-                ProgressView("Downloading and verifying original…")
+                ProgressView("Loading preview…")
             }
             Text("\(asset.fileName) • \(ByteCountFormatter.string(fromByteCount: asset.size, countStyle: .file))").font(
                 .caption
@@ -378,6 +378,9 @@ struct OriginalView: View {
                 Text(
                     "Authenticated, bounded range playback. Export verifies the complete SHA-256; playback alone is not backup evidence."
                 ).font(.caption2)
+            } else {
+                Text("Viewing a resized preview. Export or restore to retrieve the unchanged original.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             if let manifest {
                 Text("\(manifest.kind) • \(manifest.resources.count) original resource(s)").font(.caption)
@@ -437,13 +440,12 @@ struct OriginalView: View {
                     item.preferredForwardBufferDuration = 5
                     player = AVPlayer(playerItem: item)
                 } else {
-                    let downloaded = try await MediaCache.original(asset, api: api, directory: model.viewerDirectory())
-                    guard version == model.epoch else {
-                        try? FileManager.default.removeItem(at: downloaded)
-                        return
-                    }
-                    file = downloaded
-                    image = try MediaCache.image(downloaded)
+                    guard let account = model.account else { throw ClientError.signedOut }
+                    let pixels = max(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
+                    let preview = try await MediaCache.shared.preview(
+                        asset, api: api, account: account, size: pixels <= 1280 ? .screen : .detail)
+                    guard version == model.epoch else { return }
+                    image = preview
                 }
             } catch {
                 if !(error is CancellationError) { failure = error.localizedDescription }

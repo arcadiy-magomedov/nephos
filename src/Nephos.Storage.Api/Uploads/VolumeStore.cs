@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
+using System.Net;
+using System.Text.Json;
 using Nephos.ServiceDefaults;
 
 namespace Nephos.Storage.Api.Uploads;
@@ -10,20 +12,24 @@ public interface IVolumeStore
 {
     Task<string> SavePartAsync(Guid id, int part, Stream source, int size, CancellationToken token);
     Task<string> AssembleAsync(Upload upload, CancellationToken token);
-    Task<bool> CreatePreviewAsync(string hash, CancellationToken token);
+    Task<bool> CreatePreviewAsync(string hash, string mediaType, CancellationToken token, int size = 512);
     string OriginalPath(string hash);
-    string PreviewPath(string hash);
+    string PreviewPath(string hash, int size = 512);
     void RemoveStaging(Guid id);
     bool HasSpace(long bytes);
 }
 
-public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStore> logger) : IVolumeStore
+public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStore> logger, IHttpClientFactory clients) : IVolumeStore
 {
     private readonly string root = Path.GetFullPath(configuration["Storage:Root"]
         ?? throw new InvalidOperationException("Storage:Root is required."));
 
     public string OriginalPath(string hash) => Path.Combine(root, "blobs", hash[..2], hash);
-    public string PreviewPath(string hash) => Path.Combine(root, "previews", hash + ".jpg");
+    public string PreviewPath(string hash, int size = 512)
+    {
+        if (!PreviewSizes.Supports(size)) throw new ArgumentOutOfRangeException(nameof(size));
+        return Path.Combine(root, "previews", hash + (size == 512 ? "" : "." + size) + ".jpg");
+    }
     private string Staging(Guid id) => Path.Combine(root, "staging", id.ToString("N"));
     public bool HasSpace(long bytes) => new DriveInfo(root).AvailableFreeSpace > bytes + 1024L * 1024 * 1024;
 
@@ -113,11 +119,13 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         return digest;
     }
 
-    public async Task<bool> CreatePreviewAsync(string hash, CancellationToken token)
+    public async Task<bool> CreatePreviewAsync(string hash, string mediaType, CancellationToken token, int size = 512)
     {
-        var destination = PreviewPath(hash);
+        var destination = PreviewPath(hash, size);
         if (File.Exists(destination)) return true;
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (mediaType is "image/jpeg" or "image/png" or "image/webp" or "image/heic" or "image/heif")
+            return await RenderImagesAsync(hash, token);
         var temporary = destination + "." + Guid.NewGuid().ToString("N") + ".jpg";
         try
         {
@@ -132,7 +140,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             };
             foreach (var argument in new[] { "-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe",
                 "-format_whitelist", "mov,png_pipe,jpeg_pipe,webp_pipe,gif",
-                "-threads", "1", "-i", OriginalPath(hash), "-frames:v", "1", "-vf", "scale=512:512:force_original_aspect_ratio=decrease",
+                "-threads", "1", "-i", OriginalPath(hash), "-frames:v", "1", "-vf", $"scale={size}:{size}:force_original_aspect_ratio=decrease",
                 "-threads", "1", "-y", temporary })
                 process.StartInfo.ArgumentList.Add(argument);
             process.Start();
@@ -159,6 +167,81 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             return true;
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private sealed record Derivatives(string SourceSha256, int Width, int Height, Dictionary<string, byte[]> Variants);
+
+    private async Task<bool> RenderImagesAsync(string hash, CancellationToken token)
+    {
+        const int maximumResponse = 12 * 1024 * 1024;
+        var endpoint = configuration["Services:Derivatives"];
+        if (string.IsNullOrEmpty(endpoint))
+        {
+            logger.LogWarning("Image derivative service is not configured; original remains available");
+            return false;
+        }
+        try
+        {
+            await using var original = File.OpenRead(OriginalPath(hash));
+            if (original.Length > 20 * 1024 * 1024)
+            {
+                logger.LogWarning("Image exceeds the derivative input budget; original remains available");
+                return false;
+            }
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint + "/render");
+            request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
+            request.Content = new StreamContent(original);
+            request.Content.Headers.ContentLength = original.Length;
+            request.Content.Headers.ContentType = new("application/octet-stream");
+            using var response = await clients.CreateClient("derivatives").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.RequestEntityTooLarge)
+            {
+                logger.LogWarning("Image derivative rejected an unsupported, corrupt or oversized image");
+                return false;
+            }
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength > maximumResponse) throw new IOException("Derivative response exceeds budget.");
+            await using var input = await response.Content.ReadAsStreamAsync(token);
+            using var output = new MemoryStream();
+            var buffer = new byte[65536];
+            int read;
+            while ((read = await input.ReadAsync(buffer, token)) > 0)
+            {
+                if (output.Length + read > maximumResponse) throw new IOException("Derivative response exceeds budget.");
+                output.Write(buffer, 0, read);
+            }
+            var result = JsonSerializer.Deserialize<Derivatives>(output.ToArray(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (result is null || result.SourceSha256 != hash || result.Width <= 0 || result.Height <= 0 ||
+                (long)result.Width * result.Height > 64_000_000 || result.Variants is null ||
+                result.Variants.Count != PreviewSizes.All.Length ||
+                PreviewSizes.All.Any(side => !result.Variants.TryGetValue(side.ToString(), out var bytes) ||
+                    bytes is not { Length: >= 4 and <= 8 * 1024 * 1024 } || bytes[0] != 0xff || bytes[1] != 0xd8))
+                throw new IOException("Invalid derivative provenance or variant response.");
+            foreach (var side in PreviewSizes.All)
+            {
+                var path = PreviewPath(hash, side);
+                if (File.Exists(path)) continue;
+                var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    await File.WriteAllBytesAsync(temporary, result.Variants[side.ToString()], token);
+                    try { File.Move(temporary, path); }
+                    catch (IOException) when (File.Exists(path))
+                    {
+                        logger.LogDebug("An immutable preview variant was already published concurrently");
+                    }
+                }
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            }
+            return true;
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or JsonException ||
+            error is OperationCanceledException && !token.IsCancellationRequested)
+        {
+            logger.LogWarning("Image derivatives unavailable ({ErrorType}); original is retained and preview requests may retry",
+                error.GetType().Name);
+            return false;
+        }
     }
 
     public void RemoveStaging(Guid id)

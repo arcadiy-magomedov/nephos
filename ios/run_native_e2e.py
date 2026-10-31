@@ -37,6 +37,10 @@ def main():
             uploads.append(upload)
             resource_uploads = [str(uuid.uuid4()) for _ in range(4)]
             uploads.extend(resource_uploads)
+            preview_upload = str(uuid.uuid4())
+            uploads.append(preview_upload)
+            preview_file = workspace / "preview-fixture.png"
+            preview_file.write_bytes(fixture["png"]())
             environment = os.environ.copy()
             environment.update(
                 {
@@ -49,6 +53,8 @@ def main():
                     "NEPHOS_E2E_RESOURCE_UPLOADS": ",".join(resource_uploads),
                     "NEPHOS_E2E_WORKSPACE": str(workspace),
                     "NEPHOS_E2E_REQUIRE_RETENTION": "1",
+                    "NEPHOS_E2E_PREVIEW_UPLOAD": preview_upload,
+                    "NEPHOS_E2E_PREVIEW_FILE": str(preview_file),
                 }
             )
             try:

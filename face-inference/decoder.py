@@ -3,11 +3,13 @@
 import io
 import warnings
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 MAX_BYTES = 20 * 1024 * 1024
-MAX_PIXELS = 32_000_000
+MAX_PIXELS = 64_000_000
+LEGACY_PIXELS = 32_000_000
+ANALYSIS_MAX_SIDE = 4096
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 register_heif_opener(decode_threads=1, thumbnails=False, depth_images=False, aux_images=False)
 
@@ -52,6 +54,11 @@ def _check_heif_container(data):
 
 
 def decode_rgb(data):
+    image, _ = decode_working_rgb(data)
+    return image
+
+
+def decode_working_rgb(data, preview_side=None):
     if not data or len(data) > MAX_BYTES:
         raise ImageRejected("payload_limit")
     if data[4:8] == b"ftyp":
@@ -70,10 +77,25 @@ def decode_rgb(data):
             # libheif applies HEIF irot/imir; the plugin clears descriptive EXIF
             # orientation so this cannot rotate HEIF twice. Other formats retain
             # their existing EXIF/RGB path, including no ICC-to-sRGB transform.
-            image = ImageOps.exif_transpose(original).convert("RGB")
-            if image.width * image.height > MAX_PIXELS:
+            ImageOps.exif_transpose(original, in_place=True)
+            dimensions = original.size
+            if original.width * original.height > MAX_PIXELS:
                 raise ImageRejected("pixel_limit")
-            return image
+            # Preserve existing embeddings for previously supported inputs. Larger
+            # originals get a bounded alignment canvas before any NumPy/OpenCV copy.
+            side = preview_side or (ANALYSIS_MAX_SIDE if original.width * original.height > LEGACY_PIXELS else None)
+            if side is not None:
+                original.thumbnail((side, side), Image.Resampling.LANCZOS, reducing_gap=3.0)
+            if preview_side is not None and original.info.get("icc_profile"):
+                try:
+                    profile = ImageCms.ImageCmsProfile(io.BytesIO(original.info["icc_profile"]))
+                    display = ImageCms.profileToProfile(
+                        original, profile, ImageCms.createProfile("sRGB"), outputMode="RGB"
+                    )
+                except (ImageCms.PyCMSError, OSError, ValueError):
+                    raise ImageRejected("unsupported_color_profile") from None
+                return display, dimensions
+            return original.convert("RGB"), dimensions
     except ImageRejected:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):

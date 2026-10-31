@@ -34,11 +34,11 @@ final class MediaCache {
         generation = UUID()
         images.removeAllObjects()
     }
-    func preview(_ asset: Asset, api: API, account: String) async throws -> UIImage {
-        let key = "\(account)/\(asset.libraryId)/\(asset.id)" as NSString
+    func preview(_ asset: Asset, api: API, account: String, size: PreviewSize = .thumbnail) async throws -> UIImage {
+        let key = "\(account)/\(asset.libraryId)/\(asset.id)/\(size.rawValue)" as NSString
         if let cached = images.object(forKey: key) { return cached }
         let boundary = generation
-        let request = try await api.request("v1/assets/\(asset.id)/preview")
+        let request = try await api.previewRequest(asset.id, size: size)
         let bytes = try await HTTP.data(request, maximum: 8 * 1024 * 1024, session: api.session)
         try Task.checkCancellation()
         guard boundary == generation else { throw CancellationError() }
@@ -47,7 +47,7 @@ final class MediaCache {
                 source, 0,
                 [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 360,
+                    kCGImageSourceThumbnailMaxPixelSize: size.rawValue,
                     kCGImageSourceCreateThumbnailWithTransform: true,
                 ] as CFDictionary)
         else { throw ClientError.invalid("Preview format is unsupported.") }

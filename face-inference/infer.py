@@ -10,7 +10,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 import cv2
 import numpy as np
-from decoder import ImageRejected, MAX_BYTES, decode_rgb
+from decoder import ImageRejected, MAX_BYTES, decode_working_rgb
 
 MODEL_VERSION = "yunet-2023mar-sface-2021dec-8f2383e4-0ba9fbfa"
 PREPROCESS_VERSION = "exif-rgb-max1280-align5-v1"
@@ -26,7 +26,9 @@ def analyze(data):
     for model in manifest["models"]:
         if hashlib.sha256((root / "models" / model["file"]).read_bytes()).hexdigest() != model["sha256"]:
             raise RuntimeError("model_integrity")
-    image = np.array(decode_rgb(data))[:, :, ::-1].copy()
+    working, original_dimensions = decode_working_rgb(data)
+    image = np.array(working)[:, :, ::-1].copy()
+    working.close()
     height, width = image.shape[:2]
     scale = min(1.0, 1280 / max(width, height))
     small = cv2.resize(image, (round(width * scale), round(height * scale)))
@@ -70,8 +72,8 @@ def analyze(data):
         "modelVersion": MODEL_VERSION,
         "preprocessVersion": PREPROCESS_VERSION,
         "sourceSha256": hashlib.sha256(data).hexdigest(),
-        "width": width,
-        "height": height,
+        "width": original_dimensions[0],
+        "height": original_dimensions[1],
         "coordinateSpace": "exif-normalized",
         "faces": faces,
     }

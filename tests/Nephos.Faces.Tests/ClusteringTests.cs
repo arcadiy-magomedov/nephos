@@ -24,6 +24,8 @@ public sealed class ClusteringTests
         var face = new Detection(0.1, 0.1, 0.4, 0.4, 0.99, "usable", vector);
         var result = new InferenceResult(Pipeline.Model, Pipeline.Preprocess, job.SourceSha256, 200, 300, "exif-normalized", [face]);
         Clustering.Validate(result, job);
+        Clustering.Validate(result with { Width = 6048, Height = 8064 }, job);
+        Assert.Throws<InvalidDataException>(() => Clustering.Validate(result with { Width = 9000, Height = 8000 }, job));
         Assert.Throws<InvalidDataException>(() => Clustering.Validate(result with { ModelVersion = "other" }, job));
         Assert.Throws<InvalidDataException>(() => Clustering.Validate(result with { SourceSha256 = new string('b', 64) }, job));
         Assert.Throws<InvalidDataException>(() => Clustering.Validate(result with { Faces = [face with { X = 0.9 }] }, job));

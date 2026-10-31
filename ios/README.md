@@ -88,6 +88,12 @@ The native Swift fixture-backed integration result below is separate evidence.
 Neither establishes physical-device passkey/Photos/background-transfer/removal
 behavior, production signing, or App Store readiness.
 
+**Preview update, 2026-10-31:** the native HTTP integration passed in 14.658 seconds,
+including all three authenticated preview sizes and byte-exact explicit original
+export. The 21 deterministic tests and Debug/Release simulator builds pass; the
+ad-hoc signed app was installed and launched on the existing simulator. This is
+not a claim of UI-driven authenticated or physical-device acceptance.
+
 ### Opt-in native Swift backend XCTest
 
 `NativeBackendTests` compiles alongside the deterministic tests but skips unless
@@ -212,7 +218,10 @@ restoration fixture.
    picker, or independently enable automatic backup in Settings.
 6. Resume reconciles stable upload IDs and the server's received parts before
    sending missing chunks. Completed originals appear in the actual gallery.
-   Open a photo to download, SHA-256-check and view its original. Videos use
+   The grid requests 512-pixel previews; opening a photo requests a 1280/2560-pixel
+   preview appropriate to the screen, never the original as an automatic fallback.
+   Preview cache entries are isolated by account, asset and size, and remain bounded.
+   If a preview is unavailable, retry or explicitly export the original. Videos use
    authenticated bounded range playback. Use **Export all originals** to verify
    every resource and save files plus a manifest, or **Save back to Photos** for
    supported unedited resource combinations.

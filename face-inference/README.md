@@ -161,8 +161,8 @@ the API without erasing their audit history.
 ## Limits and honest scope
 
 Accepted originals: single-frame **JPEG, PNG, WebP and HEVC-coded HEIC/HEIF**,
-≤20 MiB, ≤32 million pixels, ≤64 detections. This includes ordinary 12/24-MP
-iPhone HEIC originals within those limits, not 48-MP originals. There is no
+≤20 MiB, ≤64 million pixels, ≤64 detections. This includes 12/24/48-MP
+iPhone HEIC originals within those limits. There is no
 client-side conversion requirement: inference decodes an in-memory copy and
 returns the SHA-256 of the unchanged original upload.
 Animated images, HEIF sequences, multiple independent top-level images,
@@ -178,7 +178,14 @@ replace passkeys, or make biometric authentication decisions.
 
 EXIF transpose happens before detection/alignment; boxes are relative to the
 upright full-resolution image (`exif-normalized`). Detection downsizes to a
-maximum dimension of 1280; SFace aligns from the full decoded upright image.
+maximum dimension of 1280; SFace receives an aligned face crop, not the entire original.
+For newly supported images above 32 million pixels, the decoded RGB canvas is
+first capped at 4096 pixels on its longest edge, before NumPy/OpenCV allocation.
+Returned width/height describe the upright original, while normalized coordinates
+map directly back to it. Inputs within the previous supported range keep their
+existing alignment preprocessing, avoiding invalidation of stored embeddings or
+manual identities. Migration `faces/004` retries previously failed inference jobs
+once; successfully completed annotations/corrections are not reset.
 For HEIF, libheif first applies container `irot`/`imir` transforms and grid
 assembly; pillow-heif clears descriptive EXIF orientation to prevent applying
 the same rotation twice. EXIF-only rotation without HEIF transforms is not
@@ -193,8 +200,10 @@ for JPEG or HEIF. Native HEVC YCbCr conversion supplies RGB samples; ICC/P3
 profile values are not reinterpreted with a new color-management pipeline.
 10/12-bit samples are reduced to 8-bit by the decoder; this is **not HDR tone
 mapping** and auxiliary gain maps are not applied. Wide-gamut/HDR accuracy is
-not qualified. Both frozen model and preprocessing versions remain unchanged
-because this adds a new codec without changing existing image preprocessing.
+not qualified. Both frozen model and preprocessing versions remain unchanged:
+previously supported inputs retain the same numerical pipeline; the new large-image
+canvas extends a previously rejected input domain. Existing completed annotations
+are neither recalculated nor erased.
 Any future color-management or tone-mapping change needs a coordinated
 preprocessing-version bump and reprocessing policy.
 
@@ -268,6 +277,31 @@ is used instead to avoid the wheel's encoder license. See
 distinct from wheel availability.
 
 ## Reproducible verification
+
+The base Compose deployment also runs `image-derivatives`, a separate private,
+read-only renderer built from this Dockerfile's `image-tools` stage, without model
+weights. It shares the checked codec/EXIF decoder but has its own one-request
+admission limit, killable child and 1.5-GiB container. It emits stripped-metadata
+JPEG previews with maximum dimensions 512, 1280 and 2560, without upscaling.
+Display previews convert embedded ICC profiles to sRGB before stripping metadata;
+invalid profiles are rejected explicitly. This display-only conversion does not
+change the legacy ML RGB convention or imply HDR/gain-map tone mapping.
+Storage binds responses to the original SHA-256 and caches fixed variants
+atomically. Public `GET /v1/assets/{id}/preview?size=512|1280|2560` applies live
+Library authorization; omitting size retains the 512 contract. Unsupported sizes
+fail with 400. Old/missing variants are created on demand. Renderer outages never
+replace or invalidate originals; previews fail explicitly and may be retried.
+The existing `hasPreview` field is a publication-time hint, not a permanent
+negative capability: clients may request a missing variant even when it is false.
+Video/GIF preview frames retain the bounded ffmpeg path.
+
+On 2026-10-31, the generated 6048x8064 HEIC fixture (8,217,272 bytes on local
+arm64) passed actual uploaded-file processing and matched its existing named
+JPEG identity. In isolated production-limited Linux arm64 containers, peak child
+RSS was 416,848 KiB for inference and 390,612 KiB for rendering. Both completed
+within their 45-second deadlines. This upscaled attributed portrait proves the
+large-image path, not 48-Mp physical-camera/HDR quality. Full native camera
+qualification and broader accuracy evaluation remain separate.
 
 ```sh
 python3 -m venv face-inference/.venv

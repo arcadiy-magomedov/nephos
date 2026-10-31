@@ -55,7 +55,13 @@ JPEG/PNG/WebP/HEIC/HEIF still images, not video. HEIC is decoded only inside the
 bounded analysis service; the phone uploads its original and the stored bytes,
 hash and download format stay unchanged. Existing eligible HEIC/HEIF primaries
 are queued by Library migration `006`; `scripts/faces-backfill.py` can safely
-repeat discovery. The 20 MiB / 32-million-pixel analysis limits still apply.
+repeat discovery. Analysis accepts up to 20 MiB / 64 million pixels, including
+48-Mp HEIC. Above the previous 32-Mp boundary, a temporary image capped at 4096
+pixels is prepared before OpenCV; face boxes remain normalized against the
+upright original. Existing supported-image embeddings and labels are preserved.
+The private `image-derivatives` service generates 512/1280/2560-pixel JPEG
+previews. iOS grids and photo viewing use previews, not original downloads;
+originals are fetched explicitly for export/restore (video playback uses bounded ranges).
 See the iOS documentation for supported resource restoration and
 device-only acceptance checks; a simulator build does not certify Face ID,
 background scheduling, or Photos deletion.
