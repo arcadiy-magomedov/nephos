@@ -8,12 +8,32 @@ Core invariants also form a dependency-free Swift package.
 
 ## Native design and social journeys
 
-The proposed first-launch wizard is available in
-[`design/ios/onboarding.html`](../design/ios/onboarding.html). It is an interactive
-design prototype, **not yet wired into the native app**: server and issuer
-preflight, explicit trust, system-browser sign-in, library selection and optional
-Photos backup are separate steps. It includes unreachable-server, loopback-issuer
-and untrusted-certificate states, plus limited/denied Photos access.
+The [approved first-launch wizard](../design/ios/onboarding.html) is now native
+SwiftUI. Server/issuer preflight, explicit trust, system-browser sign-in, library
+selection, optional Photos access and a final confirmation are separate steps.
+Unreachable API/identity endpoints and untrusted certificates have inline recovery
+guidance; a remote server advertising a loopback issuer is rejected before login.
+The issuer is displayed explicitly even when it differs from the API origin.
+TLS validation and the existing PKCE/nonce/issuer checks remain mandatory.
+
+The validated server-address draft survives restart even if TLS or discovery
+fails. Change server signs out and removes the old approved connection, without
+deleting account upload ledgers or staged originals. A saved remote server with a
+localhost issuer cannot resume directly into sign-in. Every replacement requires
+a successful preflight and explicit approval; failed checks never reuse a previous
+proposal. Authenticated setup choices are
+saved in the account-isolated ledger; interrupted setup resumes without enabling
+backup. Completing browse-only setup does not request Photos access. Shared
+libraries cannot be upload targets; denied/limited Photos access is handled
+without enabling cleanup. Automatic backup stays gated until setup is complete.
+Existing accounts with a selected library or queued resources keep their setup
+and are not forced through the new-account wizard after an update.
+
+For local HTTPS, install the operator-provided CA on the iPhone and separately
+enable full trust in Settings > General > About > Certificate Trust Settings.
+Use the certificate's hostname, not an arbitrary IP address. App signing trust
+and HTTPS certificate trust are separate. Account creation remains an
+administrator operation; installing the app does not create a Nephos account.
 
 The approved [design board](../design/ios/screens.html) is implemented using
 native SwiftUI controls (including the host iOS version's navigation/tab-bar
@@ -65,9 +85,30 @@ behind `UI_QUALIFICATION`, which is absent from Debug/Release app builds.
 Screenshots under `.logs/design-ui/` are **native views using real fixture API
 data**, not proof of user-driven passkey login or physical-device acceptance.
 
-The local design acceptance passed 27 deterministic tests, real native social
+The local design acceptance covers deterministic core tests, real native social
 API integration, and Debug/Release simulator compilation. The existing original
 upload/restore acceptance and physical-device boundaries below still apply.
+Wizard qualification additionally exercised real OIDC preflight and persisted
+browse-only completion, rendered all six native steps, and built signed
+Debug/Release device binaries. Development updates are installed in place,
+without uninstalling the app. This is not a claim that a human
+passkey login, background Photos upload or deletion has been accepted on-device.
+
+For interactive regression through the actual production onboarding controls,
+use an isolated XCTest application (not the installed production bundle):
+
+```sh
+python3 onboarding_qualification.py --simulator <booted-simulator-UUID> \
+  --base-url https://server-hostname:port \
+  --certificate-error-url https://address-not-covered-by-certificate:port
+```
+
+The simulator must trust the development CA. The test seeds an old IP/localhost
+connection, drives failed TLS checks, draft persistence, server replacement,
+approval/relaunch, the real system sign-in page and cancellation. It does not
+simulate Face ID or silently trust certificates. The disposable app and its
+generated Xcode project are removed afterward; personal signing settings are
+untouched.
 
 ## Build and verification
 
@@ -77,7 +118,7 @@ Run from `ios/`:
 swift test --scratch-path .build
 
 # Signing-disabled simulator build; no developer team is needed.
-# -target intentionally avoids this machine's unavailable 26.5 scheme destination.
+# Direct-target builds are independent of the selected Xcode destination.
 xcodebuild -project Nephos.xcodeproj -target Nephos \
   -configuration Debug -sdk iphonesimulator \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \

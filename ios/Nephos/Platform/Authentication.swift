@@ -84,6 +84,10 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
     var subject: String? { credentials?.subject }
     init(credentials: Credentials? = nil) { self.credentials = credentials }
 
+    static func isCancelled(_ error: Error) -> Bool {
+        error is CancellationError || (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+    }
+
     static func discovery(_ connection: Connection) async throws -> OIDCDiscovery {
         let issuer = try URLPolicy.validate(connection.config.issuer, allowDevelopmentHTTP: developmentHTTP(connection))
         let doc = try await HTTP.json(

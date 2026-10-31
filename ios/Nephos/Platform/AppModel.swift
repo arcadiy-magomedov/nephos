@@ -43,6 +43,7 @@ final class AppModel {
     private var galleryLoadID = UUID()
 
     var selectedLibrary: Library? { libraries.first { $0.id == ledger.selectedLibraryID } }
+    var needsOnboarding: Bool { signedIn && ledger.settings.onboardingCompleted == false }
     var subject: String? {
         #if UI_QUALIFICATION
             return qualificationSubject ?? activeAuth?.subject
@@ -148,7 +149,13 @@ final class AppModel {
             )
         }
         let key = LedgerStore.accountKey(connection: connection, subject: subject)
-        let loaded = try store.load(account: key)
+        var loaded = try store.load(account: key)
+        if loaded.settings.onboardingCompleted == nil {
+            loaded.settings.onboardingCompleted = OnboardingPolicy.completed(
+                settings: loaded.settings, selectedLibrary: loaded.selectedLibraryID,
+                hasResources: !loaded.records.isEmpty || loaded.resourceSets?.isEmpty == false)
+            try store.save(loaded, account: key)
+        }
         epoch = UUID()
         api?.invalidate()
         mediaGeneration = UUID()
@@ -190,7 +197,9 @@ final class AppModel {
             if ledger.selectedLibraryID != nil { await loadGallery(reset: true) }
         }
     }
-    func probe(url: String, allowHTTP: Bool) async {
+    func probe(url: String, allowHTTP: Bool) async throws {
+        proposedConnection = nil
+        let version = epoch
         do {
             #if DEBUG
                 let allowDevelopmentHTTP = allowHTTP
@@ -203,9 +212,22 @@ final class AppModel {
                 config.chunkSize == 4_194_304, config.maxUploadBytes > 0,
                 config.maxUploadBytes <= 8_589_934_592
             else { throw ClientError.invalid("The server advertised an unsupported upload/authentication contract.") }
-            _ = try URLPolicy.validate(config.issuer, allowDevelopmentHTTP: allowDevelopmentHTTP)
-            proposedConnection = Connection(baseURL: base, config: config, allowDevelopmentHTTP: allowDevelopmentHTTP)
-        } catch { handle(error) }
+            let candidate = Connection(baseURL: base, config: config, allowDevelopmentHTTP: allowDevelopmentHTTP)
+            do {
+                let issuer = try URLPolicy.validate(config.issuer, allowDevelopmentHTTP: allowDevelopmentHTTP)
+                try OnboardingPolicy.validateIssuer(issuer, server: base)
+                _ = try await AuthSession.discovery(candidate)
+            } catch {
+                if Task.isCancelled { throw CancellationError() }
+                throw OnboardingFailure(error, identity: true, address: config.issuer)
+            }
+            try Task.checkCancellation()
+            guard version == epoch else { throw CancellationError() }
+            proposedConnection = candidate
+        } catch {
+            if error is CancellationError { throw error }
+            throw OnboardingFailure(error)
+        }
     }
     func approveConnection() async {
         guard let proposedConnection else { return }
@@ -217,8 +239,18 @@ final class AppModel {
             self.proposedConnection = nil
         } catch { handle(error) }
     }
-    func login() async {
-        guard let connection, !isSigningIn else { return }
+    func beginServerChange() async throws {
+        try await signOut()
+        let file = root.appendingPathComponent("connection.json")
+        if FileManager.default.fileExists(atPath: file.path) {
+            try FileManager.default.removeItem(at: file)
+        }
+        connection = nil
+        proposedConnection = nil
+    }
+    @discardableResult
+    func login() async -> Bool {
+        guard let connection, !isSigningIn else { return false }
         isSigningIn = true
         defer { isSigningIn = false }
         do {
@@ -228,8 +260,13 @@ final class AppModel {
             try await session.login(connection: connection)
             try await establish(session)
             scheduleAutomaticRun()
-        } catch { handle(error) }
-        activity = ""
+            activity = ""
+            return true
+        } catch {
+            activity = ""
+            if !AuthSession.isCancelled(error) { handle(error) }
+            return false
+        }
     }
     func signOut() async throws {
         epoch = UUID()
@@ -279,15 +316,18 @@ final class AppModel {
             gallery.reset()
         }
     }
-    func selectLibrary(_ id: UUID) async {
-        guard libraries.contains(where: { $0.id == id }), !isRunning else { return }
+    @discardableResult
+    func selectLibrary(_ id: UUID) async -> Bool {
+        guard libraries.contains(where: { $0.id == id }), !isRunning else { return false }
+        let previous = ledger
         epoch = UUID()
         isLoadingGallery = false
         ledger.selectedLibraryID = id
         ledger.scanAfter = nil
         do { try persist() } catch {
+            ledger = previous
             handle(error)
-            return
+            return false
         }
         MediaCache.shared.clear()
         mediaGeneration = UUID()
@@ -309,6 +349,7 @@ final class AppModel {
         }
         await loadGallery(reset: true)
         scheduleAutomaticRun()
+        return true
     }
     func loadGallery(reset: Bool = false, newest: Bool = false, before: GalleryCursor? = nil, allowRebase: Bool = true)
         async
@@ -503,6 +544,45 @@ final class AppModel {
         if settings.automaticBackup { scheduleAutomaticRun() }
         scheduleBackground()
     }
+    func saveOnboarding(_ draft: OnboardingDraft) throws {
+        guard needsOnboarding, libraries.contains(where: { $0.id == draft.libraryID }) else {
+            throw ClientError.invalid("Select an accessible library before continuing.")
+        }
+        let previous = ledger.onboarding
+        ledger.onboarding = draft
+        do { try persist() } catch {
+            ledger.onboarding = previous
+            throw error
+        }
+    }
+    func completeOnboarding(library id: UUID, backup: Bool, allowCellular: Bool) async throws {
+        try await loadLibraries(reset: true)
+        while !libraries.contains(where: { $0.id == id }), libraryCursor != nil {
+            try await loadLibraries()
+        }
+        guard let account, signedIn, !needsReauthentication,
+            let library = libraries.first(where: { $0.id == id })
+        else { throw ClientError.invalid("Select an accessible library before continuing.") }
+        guard !backup || (!library.isReadOnly && [.authorized, .limited].contains(photos.authorization)) else {
+            throw ClientError.invalid(
+                "Backup needs your own library and Photos permission. You can continue in browse-only mode.")
+        }
+        guard await selectLibrary(id), self.account == account, signedIn, !needsReauthentication else {
+            throw ClientError.invalid("Library selection failed or the account changed. Try again.")
+        }
+        let previous = ledger.settings
+        ledger.settings.automaticBackup = backup
+        ledger.settings.automaticCleanup = false
+        ledger.settings.allowCellular = allowCellular
+        ledger.settings.backupPaused = false
+        ledger.settings.onboardingCompleted = true
+        do { try persist() } catch {
+            ledger.settings = previous
+            throw error
+        }
+        if backup { scheduleAutomaticRun() }
+        scheduleBackground()
+    }
     func setBackupPaused(_ paused: Bool) async {
         var settings = ledger.settings
         settings.backupPaused = paused
@@ -627,7 +707,7 @@ final class AppModel {
         } catch { handle(error) }
     }
     func runBackup(ignoreBackoff: Bool = false) async {
-        guard !isRunning, signedIn, !needsReauthentication, selectedLibrary != nil,
+        guard !isRunning, signedIn, !needsReauthentication, !needsOnboarding, selectedLibrary != nil,
             selectedLibrary?.isReadOnly != true, ledger.settings.backupPaused != true
         else { return }
         isRunning = true
@@ -1058,7 +1138,8 @@ final class AppModel {
             "\(removed) item(s) removed from Photos. iCloud/shared-library deletion can propagate. Recently Deleted may still use space. Server originals were retained, not independently replicated."
     }
     func scheduleAutomaticRun() {
-        guard signedIn, !needsReauthentication, automaticTask == nil, ledger.settings.backupPaused != true,
+        guard signedIn, !needsReauthentication, !needsOnboarding, automaticTask == nil,
+            ledger.settings.backupPaused != true,
             selectedLibrary?.isReadOnly != true
         else { return }
         automaticTask = Task { [weak self] in
@@ -1070,7 +1151,7 @@ final class AppModel {
     }
     static let backgroundID = "app.nephos.ios.backup"
     func scheduleBackground() {
-        guard signedIn, ledger.settings.backupPaused != true, selectedLibrary?.isReadOnly != true,
+        guard signedIn, !needsOnboarding, ledger.settings.backupPaused != true, selectedLibrary?.isReadOnly != true,
             ledger.settings.automaticBackup || ledger.records.contains(where: \.needsTransfer)
         else {
             return

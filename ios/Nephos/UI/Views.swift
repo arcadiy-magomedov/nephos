@@ -7,7 +7,7 @@ struct RootView: View {
     @State private var tab = 0
     var body: some View {
         Group {
-            if model.signedIn {
+            if model.signedIn && !model.needsOnboarding && !model.needsReauthentication {
                 TabView(selection: $tab) {
                     GalleryView(model: model)
                         .tabItem { Label("Photos", systemImage: "square.grid.2x2") }.tag(0)
@@ -21,7 +21,7 @@ struct RootView: View {
                 .id(model.mediaGeneration)
                 .onChange(of: model.mediaGeneration) { _, _ in tab = 0 }
             } else {
-                ConnectionView(model: model)
+                OnboardingView(model: model)
             }
         }
         .alert("Nephos", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
@@ -55,78 +55,6 @@ struct RootView: View {
                 }
                 .navigationTitle("Confirm removal")
                 .toolbar { Button("Cancel") { model.showCleanupConfirmation = false } }
-            }
-        }
-    }
-}
-
-struct ConnectionView: View {
-    @Bindable var model: AppModel
-    @State private var url = ""
-    @State private var allowHTTP = false
-    @State private var busy = false
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Label("Your originals. Your server.", systemImage: "cloud").font(.title2)
-                    Text(
-                        "Sign in with an administrator-provisioned account. Passkeys are handled by your identity provider in Apple's system browser; no password or passkey is collected by Nephos."
-                    )
-                }
-                if let connection = model.connection {
-                    Section("Approved server") {
-                        Text(connection.baseURL.absoluteString).textSelection(.enabled)
-                        LabeledContent("Server ID", value: connection.config.serverId)
-                        Text("Issuer: \(connection.config.issuer)").font(.caption).textSelection(.enabled)
-                        Button("Sign in with passkey / known account") {
-                            busy = true
-                            Task {
-                                await model.login()
-                                busy = false
-                            }
-                        }.disabled(busy)
-                    }
-                }
-                Section("Configure server") {
-                    TextField("https://photos.example.com", text: $url)
-                        .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    #if DEBUG
-                        Toggle("Allow local development HTTP", isOn: $allowHTTP)
-                        Text(
-                            "DEBUG only. Sends credentials/media without encryption on explicitly selected localhost/private IPv4/.local networks. Never use real private media on an untrusted LAN."
-                        ).font(.caption)
-                    #endif
-                    Button("Check server") {
-                        busy = true
-                        Task {
-                            await model.probe(url: url, allowHTTP: allowHTTP)
-                            busy = false
-                        }
-                    }.disabled(busy || url.isEmpty)
-                }
-                if let proposed = model.proposedConnection {
-                    Section("Trust this server and issuer?") {
-                        Text(proposed.baseURL.absoluteString)
-                        Text("Identity: \(proposed.config.serverId)")
-                        Text("Sign-in issuer: \(proposed.config.issuer)")
-                        Text(
-                            "Confirm these values with your operator. Server discovery does not establish trust. Changing a server signs out and keeps prior account upload staging isolated."
-                        ).font(.caption)
-                        Button("Approve server") { Task { await model.approveConnection() } }
-                        Button("Cancel", role: .cancel) { model.proposedConnection = nil }
-                    }
-                }
-                if busy { ProgressView(model.activity.isEmpty ? "Checking…" : model.activity) }
-            }
-            .navigationTitle("Nephos")
-            .toolbar {
-                NavigationLink {
-                    AppearanceSettingsView()
-                } label: {
-                    Label("Appearance", systemImage: "circle.lefthalf.filled")
-                }
             }
         }
     }

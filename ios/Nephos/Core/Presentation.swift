@@ -1,6 +1,72 @@
 import CoreGraphics
 import Foundation
 
+struct OnboardingDraft: Codable, Equatable, Sendable {
+    var libraryID: UUID
+    var backup: Bool
+    var allowCellular: Bool
+    var ready: Bool
+}
+
+enum OnboardingPolicy {
+    static func requiresServerReview(_ connection: Connection, draftURL: String) -> Bool {
+        guard draftURL == connection.baseURL.absoluteString, let issuer = URL(string: connection.config.issuer) else {
+            return true
+        }
+        return isLoopback(issuer.host ?? "") && !isLoopback(connection.baseURL.host ?? "")
+    }
+
+    static func isLoopback(_ host: String) -> Bool {
+        let host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return host == "localhost" || host.hasSuffix(".localhost") || host == "::1" || host.hasPrefix("127.")
+    }
+
+    static func validateIssuer(_ issuer: URL, server: URL) throws {
+        if isLoopback(issuer.host ?? ""), !isLoopback(server.host ?? "") {
+            throw ClientError.invalid(
+                "The sign-in address points to localhost, which means this device, not your server. Ask the administrator to correct the public OIDC issuer."
+            )
+        }
+    }
+
+    static func completed(settings: BackupSettings, selectedLibrary: UUID?, hasResources: Bool) -> Bool {
+        settings.onboardingCompleted ?? (selectedLibrary != nil || hasResources)
+    }
+}
+
+struct OnboardingFailure: LocalizedError {
+    let title: String
+    let guidance: String
+    let detail: String
+    let address: String?
+    var errorDescription: String? { "\(title). \(guidance) \(detail)" }
+
+    init(_ error: Error, identity: Bool = false, address: String? = nil) {
+        if let existing = error as? OnboardingFailure {
+            self = existing
+            return
+        }
+        detail = error.localizedDescription
+        self.address = address
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                .serverCertificateNotYetValid, .secureConnectionFailed:
+                title = "Certificate not trusted"
+                guidance =
+                    "Check the server address. For a local development server, install and trust the certificate provided by your administrator in iOS Settings. Certificate checks cannot be skipped."
+            default:
+                title = identity ? "Sign-in server unavailable" : "Server unavailable"
+                guidance =
+                    "Check the address, Wi-Fi or VPN, and the Local Network permission in iPhone Settings. A connection failure alone does not identify the cause."
+            }
+        } else {
+            title = identity ? "Check the sign-in address" : "Server check failed"
+            guidance = "Review the details below or contact your server administrator."
+        }
+    }
+}
+
 extension GalleryDates {
     static func parse(_ value: String) -> Date? {
         let precise = ISO8601DateFormatter()

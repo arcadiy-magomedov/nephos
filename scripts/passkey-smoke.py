@@ -5,6 +5,7 @@ import base64
 import hashlib
 import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
 import re
 import secrets
 import threading
@@ -30,6 +31,7 @@ class Callback(BaseHTTPRequestHandler):
 
 
 def main():
+    issuer = smoke.request(smoke.API + "/v1/config")["issuer"]
     base = "http://localhost:18082"
     auth = "admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"]
     admin_url = smoke.IDENTITY + "/admin/realms/nephos"
@@ -39,7 +41,8 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Callback)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    callback = f"http://127.0.0.1:{server.server_port}/callback"
+    callback_host = os.environ.get("NEPHOS_PASSKEY_CALLBACK_HOST", "127.0.0.1")
+    callback = f"http://{callback_host}:{server.server_port}/callback"
     subject = client = None
 
     def submit(values):
@@ -96,7 +99,11 @@ def main():
         )
         client = smoke.request(admin_url + "/clients?clientId=" + username, token=smoke.admin_token())[0]["id"]
         with sync_playwright() as runtime:
-            browser = runtime.chromium.launch(headless=True)
+            browser = (
+                runtime.chromium.connect_over_cdp(os.environ["NEPHOS_PASSKEY_BROWSER_CDP"])
+                if os.environ.get("NEPHOS_PASSKEY_BROWSER_CDP")
+                else runtime.chromium.launch(headless=True)
+            )
             context = browser.new_context()
             page = context.new_page()
             page.set_default_timeout(15000)
@@ -134,8 +141,8 @@ def main():
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
             state = secrets.token_urlsafe(24)
             page.goto(
-                smoke.IDENTITY
-                + "/realms/nephos/protocol/openid-connect/auth?"
+                issuer
+                + "/protocol/openid-connect/auth?"
                 + urllib.parse.urlencode(
                     {
                         "client_id": username,

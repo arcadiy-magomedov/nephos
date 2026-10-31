@@ -94,6 +94,12 @@ def capture(simulator, app, environment):
             ("backup", "light"),
             ("sharing", "dark"),
             ("share", "light"),
+            ("onboarding-0", "light"),
+            ("onboarding-1", "dark"),
+            ("onboarding-2", "light"),
+            ("onboarding-3", "dark"),
+            ("onboarding-4", "light"),
+            ("onboarding-5", "dark"),
         ]:
             report.unlink(missing_ok=True)
             env = os.environ.copy()
@@ -113,7 +119,7 @@ def capture(simulator, app, environment):
                 raise RuntimeError(result["error"])
             time.sleep(3)
             command("xcrun", "simctl", "io", simulator, "screenshot", str(output / f"{screen}-{theme}.png"))
-        print("Captured eleven native screens using production views and a real disposable account.")
+        print("Captured seventeen native screens using production views and a real disposable account.")
     finally:
         command("xcrun", "simctl", "terminate", simulator, BUNDLE)
         command("xcrun", "simctl", "uninstall", simulator, BUNDLE)

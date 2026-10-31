@@ -23,6 +23,28 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         Task {
             do {
                 let env = ProcessInfo.processInfo.environment
+                if env["NEPHOS_UI_SCREEN"] == "onboarding-flow" {
+                    let model = AppModel()
+                    if env["NEPHOS_UI_SEED_LEGACY"] == "1" {
+                        let old = Connection(
+                            baseURL: URL(string: "http://192.168.1.10:18080")!,
+                            config: ServerConfig(
+                                serverId: "legacy-fixture", issuer: "http://localhost:18081/realms/nephos",
+                                clientId: "nephos-ios", maxUploadBytes: 8_589_934_592, chunkSize: 4_194_304),
+                            allowDevelopmentHTTP: true)
+                        model.proposedConnection = old
+                        await model.approveConnection()
+                        guard model.connection == old else {
+                            throw ClientError.invalid(
+                                "Could not persist the isolated legacy fixture: \(model.message ?? "unknown error")")
+                        }
+                        UserDefaults.standard.removeObject(forKey: "onboardingCheckedURL")
+                    }
+                    window.rootViewController = UIHostingController(
+                        rootView: RootView(model: model).modifier(AppAppearanceModifier()))
+                    try report(["ready": true, "screen": "onboarding-flow"])
+                    return
+                }
                 guard let token = env["NEPHOS_E2E_BEARER"],
                     let subject = env["NEPHOS_E2E_SUBJECT"],
                     let libraryID = env["NEPHOS_E2E_LIBRARY"].flatMap(UUID.init(uuidString:)),
@@ -30,7 +52,8 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         UUID(uuidString: String($0))
                     })
                 else { throw ClientError.invalid("The qualification account is incomplete.") }
-                let base = URL(string: "http://localhost:18080")!
+                let base = try URLPolicy.validate(
+                    env["NEPHOS_UI_BASE_URL"] ?? "http://localhost:18080", allowDevelopmentHTTP: true)
                 let config = try await HTTP.json(
                     ServerConfig.self, HTTP.request(base.appendingPathComponent("v1/config")))
                 let api = API(
@@ -52,6 +75,21 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                 }
                 let person = try await api.person(personID)
                 let screen = env["NEPHOS_UI_SCREEN"] ?? "gallery"
+                if screen.hasPrefix("onboarding-") {
+                    model.ledger.settings.onboardingCompleted = false
+                    try await model.probe(url: base.absoluteString, allowHTTP: true)
+                    guard model.proposedConnection?.config == config else {
+                        throw ClientError.invalid("Preflight changed the real fixture identity.")
+                    }
+                    let draft = OnboardingDraft(libraryID: library.id, backup: false, allowCellular: false, ready: true)
+                    try model.saveOnboarding(draft)
+                    if screen == "onboarding-5" {
+                        try await model.completeOnboarding(library: library.id, backup: false, allowCellular: false)
+                        guard !model.needsOnboarding, !model.ledger.settings.automaticBackup,
+                            !model.ledger.settings.automaticCleanup
+                        else { throw ClientError.invalid("Browse-only setup enabled background backup or cleanup.") }
+                    }
+                }
                 UserDefaults.standard.set(env["NEPHOS_UI_THEME"] ?? "system", forKey: "appearance")
                 window.rootViewController = UIHostingController(
                     rootView: QualificationScreen(model: model, asset: asset, person: person, screen: screen)
@@ -81,6 +119,8 @@ private struct QualificationScreen: View {
     var body: some View {
         Group {
             switch screen {
+            case "onboarding-0", "onboarding-1", "onboarding-2", "onboarding-3", "onboarding-4", "onboarding-5":
+                OnboardingView(qualificationModel: model, step: Int(screen.suffix(1))!)
             case "people": NavigationStack { PeopleView(model: model) }
             case "history": NavigationStack { CorrectionsView(model: model) }
             case "person": NavigationStack { PersonView(model: model, person: person) }

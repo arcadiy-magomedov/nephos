@@ -7,6 +7,7 @@ struct AccountLedger: Codable, Sendable {
     var records: [UploadRecord] = []
     var scanAfter: String?
     var resourceSets: [ResourceSetRecord]?
+    var onboarding: OnboardingDraft?
 }
 
 struct LedgerStore: Sendable {

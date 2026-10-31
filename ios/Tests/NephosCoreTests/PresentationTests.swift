@@ -5,6 +5,65 @@ import XCTest
 @testable import NephosCore
 
 final class PresentationTests: XCTestCase {
+    func testChangedDraftAndOldLoopbackIssuerCannotReuseApprovedServer() {
+        let old = Connection(
+            baseURL: URL(string: "http://192.168.1.10:18080")!,
+            config: ServerConfig(
+                serverId: "fixture", issuer: "http://localhost:18081/realms/nephos",
+                clientId: "nephos-ios", maxUploadBytes: 100, chunkSize: 4_194_304),
+            allowDevelopmentHTTP: true)
+        XCTAssertTrue(OnboardingPolicy.requiresServerReview(old, draftURL: old.baseURL.absoluteString))
+        let current = Connection(
+            baseURL: URL(string: "https://photos.example.net")!,
+            config: ServerConfig(
+                serverId: "fixture", issuer: "https://photos.example.net/realms/nephos",
+                clientId: "nephos-ios", maxUploadBytes: 100, chunkSize: 4_194_304),
+            allowDevelopmentHTTP: false)
+        XCTAssertFalse(OnboardingPolicy.requiresServerReview(current, draftURL: current.baseURL.absoluteString))
+        XCTAssertTrue(OnboardingPolicy.requiresServerReview(current, draftURL: "https://other.example.net"))
+    }
+
+    func testOnboardingPreservesLegacyAccountsAndExplicitIncompleteState() throws {
+        let settings = BackupSettings()
+        XCTAssertFalse(OnboardingPolicy.completed(settings: settings, selectedLibrary: nil, hasResources: false))
+        XCTAssertTrue(OnboardingPolicy.completed(settings: settings, selectedLibrary: UUID(), hasResources: false))
+        XCTAssertTrue(OnboardingPolicy.completed(settings: settings, selectedLibrary: nil, hasResources: true))
+        var incomplete = settings
+        incomplete.onboardingCompleted = false
+        XCTAssertFalse(OnboardingPolicy.completed(settings: incomplete, selectedLibrary: UUID(), hasResources: true))
+        var ledger = AccountLedger()
+        ledger.settings = incomplete
+        ledger.onboarding = OnboardingDraft(libraryID: UUID(), backup: true, allowCellular: false, ready: false)
+        let decoded = try JSONDecoder().decode(AccountLedger.self, from: JSONEncoder().encode(ledger))
+        XCTAssertEqual(decoded.onboarding, ledger.onboarding)
+        XCTAssertEqual(decoded.settings.onboardingCompleted, false)
+        XCTAssertFalse(decoded.settings.automaticBackup)
+        XCTAssertFalse(decoded.settings.automaticCleanup)
+    }
+
+    func testOnboardingRejectsRemoteServersAdvertisingLoopbackIdentity() throws {
+        let server = URL(string: "https://photos.example.net")!
+        for host in ["localhost", "auth.localhost", "127.0.0.1", "127.2.3.4", "[::1]"] {
+            XCTAssertThrowsError(
+                try OnboardingPolicy.validateIssuer(URL(string: "https://\(host)/realms/nephos")!, server: server))
+        }
+        XCTAssertNoThrow(
+            try OnboardingPolicy.validateIssuer(URL(string: "https://auth.example.net/realms/nephos")!, server: server))
+        XCTAssertNoThrow(
+            try OnboardingPolicy.validateIssuer(
+                URL(string: "http://localhost:18081")!, server: URL(string: "http://localhost:18080")!))
+    }
+
+    func testOnboardingDistinguishesCertificateAndIdentityFailures() {
+        XCTAssertEqual(OnboardingFailure(URLError(.serverCertificateUntrusted)).title, "Certificate not trusted")
+        XCTAssertEqual(OnboardingFailure(URLError(.cannotConnectToHost)).title, "Server unavailable")
+        XCTAssertEqual(
+            OnboardingFailure(URLError(.cannotConnectToHost), identity: true).title, "Sign-in server unavailable")
+        let failure = OnboardingFailure(ClientError.invalid("Bad issuer"), identity: true)
+        XCTAssertEqual(OnboardingFailure(failure).title, failure.title)
+        XCTAssertEqual(OnboardingFailure(failure).detail, "Bad issuer")
+    }
+
     private func asset(_ date: String, type: String = "image/heic", shared: String? = nil) -> Asset {
         Asset(
             id: UUID(), libraryId: UUID(), fileName: "fixture.heic", mediaType: type, size: 100,

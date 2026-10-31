@@ -139,6 +139,7 @@ struct BackupSettings: Codable, Equatable, Sendable {
     var allowCellular = false
     var cleanupWarningsAcknowledged = false
     var backupPaused: Bool?
+    var onboardingCompleted: Bool?
 }
 
 enum UploadPhase: String, Codable, Sendable {
