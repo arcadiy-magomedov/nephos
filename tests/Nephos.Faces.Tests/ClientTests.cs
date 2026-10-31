@@ -29,7 +29,7 @@ public sealed class ClientTests
         var source = PersistenceTests.Source(owner);
         var client = new AnalysisSourceClient(new Factory(request =>
         {
-            Assert.Equal($"/internal/analysis/owners/{owner}/assets/{source.Id}", request.RequestUri!.AbsolutePath);
+            Assert.Equal($"/internal/v1/analysis/owners/{owner}/assets/{source.Id}", request.RequestUri!.AbsolutePath);
             Assert.Equal(new string('s', 64), request.Headers.GetValues("X-Nephos-Service-Key").Single());
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(source with { Subject = "other" }) };
         }), Config);
@@ -43,7 +43,7 @@ public sealed class ClientTests
         var source = PersistenceTests.Source("owner") with { Size = bytes.Length, Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)) };
         var client = new AnalysisSourceClient(new Factory(request =>
         {
-            Assert.Equal($"/internal/assets/{source.Id}/original", request.RequestUri!.AbsolutePath);
+            Assert.Equal($"/internal/v1/assets/{source.Id}/original", request.RequestUri!.AbsolutePath);
             return new(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
         }), Config);
         Assert.Equal(bytes, await client.OriginalAsync(source, default));

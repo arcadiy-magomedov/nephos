@@ -188,7 +188,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
                 logger.LogWarning("Image exceeds the derivative input budget; original remains available");
                 return false;
             }
-            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint + "/render");
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint + "/v1/render");
             request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
             request.Content = new StreamContent(original);
             request.Content.Headers.ContentLength = original.Length;

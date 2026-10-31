@@ -69,7 +69,7 @@ public static class UploadEndpoints
             await repository.CancelAsync(id, token);
             return Results.NoContent();
         });
-        app.MapGet("/internal/assets/{id:guid}/backup", async (Guid id, HttpContext context, IConfiguration config,
+        app.MapInternalV1("/assets/{id:guid}/backup", ["GET"], async (Guid id, HttpContext context, IConfiguration config,
             IUploadRepository repository, IVolumeStore volume, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config)) return Results.Unauthorized();
@@ -79,7 +79,7 @@ public static class UploadEndpoints
             if (!file.Exists || file.Length != upload.Size) return Results.Problem(statusCode: 503, title: "Original storage is unavailable.");
             return Results.Ok(new { id, upload.Sha256, upload.Size, available = true, upload.CreatedAt });
         });
-        app.MapPost("/internal/assets/{id:guid}/retention", async (Guid id, HttpContext context, IConfiguration config,
+        app.MapInternalV1("/assets/{id:guid}/retention", ["POST"], async (Guid id, HttpContext context, IConfiguration config,
             IUploadRepository repository, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config)) return Results.Unauthorized();
@@ -97,7 +97,7 @@ public static class UploadEndpoints
                 assurance = "single-volume-no-independent-backup"
             });
         });
-        app.MapMethods("/internal/assets/{id:guid}/{kind}", ["GET", "HEAD"], async (Guid id, string kind, int? size,
+        app.MapInternalV1("/assets/{id:guid}/{kind}", ["GET", "HEAD"], async (Guid id, string kind, int? size,
             HttpContext context, IConfiguration config, IUploadRepository repository, IVolumeStore volume, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config)) return Results.Unauthorized();

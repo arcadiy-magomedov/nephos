@@ -36,7 +36,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.connection.settimeout(15)
-        if self.path != "/infer" or not hmac.compare_digest(self.headers.get("X-Nephos-Inference-Key", ""), key):
+        if self.path not in ("/v1/infer", "/infer") or not hmac.compare_digest(
+            self.headers.get("X-Nephos-Inference-Key", ""), key
+        ):
             self.reply(403, b"{}")
             return
         try:

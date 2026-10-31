@@ -1,3 +1,5 @@
+using Nephos.ServiceDefaults;
+
 namespace Nephos.Faces.Api;
 
 public static class FaceEndpoints
@@ -26,7 +28,7 @@ public static class FaceEndpoints
             var job = await r.EnqueueAsync(Owner(c), source, ct);
             return Results.Accepted($"/v1/faces/jobs/{job.Id}", new { job.Id, job.AssetId, job.Status, job.PipelineVersion });
         });
-        app.MapPost("/internal/faces/jobs", async (EnqueueRequest request, HttpContext c, IConfiguration config,
+        app.MapInternalV1("/faces/jobs", ["POST"], async (EnqueueRequest request, HttpContext c, IConfiguration config,
             IAnalysisSourceClient access, IFaceRepository r, CancellationToken ct) =>
         {
             if (!ServiceAuthentication.Valid(c, config)) return Results.Unauthorized();

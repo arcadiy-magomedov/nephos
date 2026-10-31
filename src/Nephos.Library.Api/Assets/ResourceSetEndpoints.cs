@@ -33,7 +33,7 @@ public static class ResourceSetEndpoints
             foreach (var resource in manifest.Resources)
             {
                 using var request = new HttpRequestMessage(HttpMethod.Post,
-                    $"{configuration["Services:Storage"]}/internal/assets/{resource.AssetId}/retention");
+                    $"{configuration["Services:Storage"]}/internal/v1/assets/{resource.AssetId}/retention");
                 request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
                 using var response = await clients.CreateClient("storage").SendAsync(request, token);
                 response.EnsureSuccessStatusCode();

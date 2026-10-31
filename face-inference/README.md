@@ -36,7 +36,7 @@ the Storage service key**. The Library and gateway now implement these contracts
 1. `GET /v1/analysis/access`, normal JWT, **204** only for a currently enabled
    platform member, **403** otherwise. Faces forwards the original bearer token
    on *every* public request (there is no authorization cache).
-2. `GET /internal/analysis/owners/{subject}/assets/{assetId}`,
+2. `GET /internal/v1/analysis/owners/{subject}/assets/{assetId}`,
    `X-Nephos-Service-Key`, **200**
    `{ "id": UUID, "libraryId": UUID, "subject": string, "mediaType": string,
       "size": integer, "sha256": lowercase_hex }`
@@ -45,11 +45,11 @@ the Storage service key**. The Library and gateway now implement these contracts
    equals subject. It must be visible, not trashed, not pending, and a committed
    primary image rather than a hidden companion. Return **404** otherwise.
    The face worker checks this both before reading and before committing results.
-3. Optional `GET /internal/analysis/owners/{subject}/access` with the service key
+3. Optional `GET /internal/v1/analysis/owners/{subject}/access` with the service key
    can expose a standalone enabled check. Faces currently does not need it:
    the source authorization endpoint must perform that check itself.
 4. On committed Library asset visibility, durably publish/retry
-   `POST http://faces-api:8080/internal/faces/jobs`,
+   `POST http://faces-api:8080/internal/v1/faces/jobs`,
    `X-Nephos-Service-Key`, JSON `{ "assetId": UUID, "subject": uploaded_by }`.
    **202** means a durable idempotent face job exists; **404** means currently
    ineligible and must not break Library publication; transient failures should
@@ -65,9 +65,12 @@ the Storage service key**. The Library and gateway now implement these contracts
 6. Route `/v1/faces/` to `faces-api:8080` in the gateway. Never expose
    `/internal/`, PostgreSQL or `face-inference:8090`.
 
-The unchanged Storage peer endpoint is
-`GET /internal/assets/{assetId}/original` with `X-Nephos-Service-Key`.
+The Storage peer endpoint is
+`GET /internal/v1/assets/{assetId}/original` with `X-Nephos-Service-Key`.
 There is no arbitrary path/URL input to either face API or inference.
+Private image processing uses `/v1/infer` and `/v1/render`. Historical paths
+remain aliases of v1 only; see [API compatibility](../specs/005-api-compatibility.md)
+for coordinated deployment and future major-version rules.
 
 ## Start without disturbing the existing stack
 

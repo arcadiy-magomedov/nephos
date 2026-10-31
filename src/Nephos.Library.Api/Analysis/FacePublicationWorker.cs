@@ -11,7 +11,7 @@ public sealed class FacePublicationWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var destination = new Uri(new Uri(configuration["Services:Faces"]
-            ?? throw new InvalidOperationException("Services:Faces is required.")), "/internal/faces/jobs");
+            ?? throw new InvalidOperationException("Services:Faces is required.")), "/internal/v1/faces/jobs");
         while (!stoppingToken.IsCancellationRequested)
         {
             try

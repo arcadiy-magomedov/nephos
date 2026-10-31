@@ -72,7 +72,7 @@ public static class AssetEndpoints
                 return;
             }
             using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method),
-                $"{configuration["Services:Storage"]}/internal/assets/{id}/{kind}" +
+                $"{configuration["Services:Storage"]}/internal/v1/assets/{id}/{kind}" +
                 (kind == "preview" ? $"?size={size ?? 512}" : ""));
             request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
             foreach (var header in new[] { "Range", "If-Range", "If-None-Match" })

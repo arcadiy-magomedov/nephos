@@ -32,7 +32,7 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
 
     public async Task<AnalysisSource?> SourceAsync(string owner, Guid assetId, CancellationToken ct)
     {
-        using var request = Internal(HttpMethod.Get, $"/internal/analysis/owners/{Uri.EscapeDataString(owner)}/assets/{assetId}");
+        using var request = Internal(HttpMethod.Get, $"/internal/v1/analysis/owners/{Uri.EscapeDataString(owner)}/assets/{assetId}");
         using var response = await factory.CreateClient("library").SendAsync(request, ct);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized) return null;
         response.EnsureSuccessStatusCode();
@@ -46,7 +46,7 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
 
     public async Task<byte[]> OriginalAsync(AnalysisSource source, CancellationToken ct)
     {
-        using var request = Internal(HttpMethod.Get, $"/internal/assets/{source.Id}/original");
+        using var request = Internal(HttpMethod.Get, $"/internal/v1/assets/{source.Id}/original");
         using var response = await factory.CreateClient("storage").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > Pipeline.MaxBytes) throw new InvalidDataException("payload_limit");
@@ -76,7 +76,7 @@ public sealed class InferenceClient(IHttpClientFactory factory, IConfiguration c
 {
     public async Task<InferenceResult> AnalyzeAsync(byte[] bytes, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/infer");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/infer");
         request.Headers.Add("X-Nephos-Inference-Key", configuration["Inference:Key"]);
         request.Content = new ByteArrayContent(bytes);
         request.Content.Headers.ContentType = new("application/octet-stream");

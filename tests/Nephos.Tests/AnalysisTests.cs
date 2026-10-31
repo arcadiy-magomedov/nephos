@@ -21,13 +21,15 @@ public sealed class AnalysisTests
         Assert.Equal(expected, response.StatusCode);
     }
 
-    [Fact]
-    public async Task Source_requires_peer_key_and_exact_authorized_subject()
+    [Theory]
+    [InlineData("/internal")]
+    [InlineData("/internal/v1")]
+    public async Task Source_requires_peer_key_and_exact_authorized_subject(string prefix)
     {
         await using var factory = new ApiFactory();
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
-        var path = $"/internal/analysis/owners/known/assets/{factory.Analysis.AssetId}";
+        var path = $"{prefix}/analysis/owners/known/assets/{factory.Analysis.AssetId}";
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path)).StatusCode);
         Assert.Equal(0, factory.Analysis.Reads);
         client.DefaultRequestHeaders.Add("X-Nephos-Service-Key", ApiFactory.InternalKey);
@@ -35,7 +37,7 @@ public sealed class AnalysisTests
         Assert.NotNull(source);
         Assert.Equal("known", source.Subject);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(
-            $"/internal/analysis/owners/other/assets/{factory.Analysis.AssetId}")).StatusCode);
+            $"{prefix}/analysis/owners/other/assets/{factory.Analysis.AssetId}")).StatusCode);
     }
 
     [Theory]
@@ -75,7 +77,7 @@ public sealed class AnalysisTests
         public Payload? Body { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            Assert.Equal("http://faces-api:8080/internal/faces/jobs", request.RequestUri?.ToString());
+            Assert.Equal("http://faces-api:8080/internal/v1/faces/jobs", request.RequestUri?.ToString());
             Assert.Equal(ApiFactory.InternalKey, Assert.Single(request.Headers.GetValues("X-Nephos-Service-Key")));
             Body = await request.Content!.ReadFromJsonAsync<Payload>(token);
             if (status is null) throw new HttpRequestException("Synthetic unavailable peer");

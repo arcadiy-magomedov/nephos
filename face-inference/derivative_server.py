@@ -33,7 +33,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.connection.settimeout(15)
         supplied = self.headers.get("X-Nephos-Service-Key", "")
-        if self.path != "/render" or not hmac.compare_digest(supplied.encode(), key.encode()):
+        if self.path not in ("/v1/render", "/render") or not hmac.compare_digest(supplied.encode(), key.encode()):
             self.reply(403, b"{}")
             return
         try:

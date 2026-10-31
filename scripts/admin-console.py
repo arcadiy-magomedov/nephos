@@ -72,7 +72,7 @@ class Console(BaseHTTPRequestHandler):
     def page(self, message=""):
         token = admin_token()
         users = call(IDENTITY + "/admin/realms/nephos/users?max=1000", token=token)
-        state = call(LIBRARY + "/internal/admin/state", service=True)
+        state = call(LIBRARY + "/internal/v1/admin/state", service=True)
         principal_state = {p["subject"]: p["enabled"] for p in state["principals"]}
         options = "".join(
             f'<option value="{html.escape(u["id"])}">{html.escape(u["username"])}</option>' for u in users
@@ -167,12 +167,12 @@ class Console(BaseHTTPRequestHandler):
                 )
                 subject = users[0]["id"]
                 call(
-                    LIBRARY + "/internal/admin/principals",
+                    LIBRARY + "/internal/v1/admin/principals",
                     {"subject": subject, "enabled": True, "displayName": username, "discoverable": True},
                     service=True,
                 )
                 call(
-                    LIBRARY + "/internal/admin/libraries",
+                    LIBRARY + "/internal/v1/admin/libraries",
                     {"id": str(uuid.uuid4()), "name": username + "'s library", "subject": subject},
                     service=True,
                 )
@@ -188,14 +188,14 @@ class Console(BaseHTTPRequestHandler):
                 message = "Single-use passkey enrollment link sent; expires in 15 minutes. Treat mailbox access as enrollment authority."
             elif action == "access":
                 call(
-                    LIBRARY + "/internal/admin/principals",
+                    LIBRARY + "/internal/v1/admin/principals",
                     {"subject": str(uuid.UUID(form["subject"])), "enabled": form.get("enabled") == "yes"},
                     service=True,
                 )
                 message = "Platform membership updated."
             elif action == "library":
                 call(
-                    LIBRARY + "/internal/admin/libraries",
+                    LIBRARY + "/internal/v1/admin/libraries",
                     {"id": str(uuid.uuid4()), "name": form["name"], "subject": str(uuid.UUID(form["subject"]))},
                     service=True,
                 )
@@ -203,13 +203,13 @@ class Console(BaseHTTPRequestHandler):
             elif action == "directory":
                 subject = str(uuid.UUID(form["subject"]))
                 identity = call(IDENTITY + "/admin/realms/nephos/users/" + subject, token=token)
-                state = call(LIBRARY + "/internal/admin/state", service=True)
+                state = call(LIBRARY + "/internal/v1/admin/state", service=True)
                 principal = next((p for p in state["principals"] if p["subject"] == subject), None)
                 if principal is None:
                     self.send_error(409, "Provision platform access before publishing this user in the directory.")
                     return
                 call(
-                    LIBRARY + "/internal/admin/principals",
+                    LIBRARY + "/internal/v1/admin/principals",
                     {
                         "subject": subject,
                         "enabled": principal["enabled"],

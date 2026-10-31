@@ -10,9 +10,9 @@ public static class AdministrationEndpoints
 {
     public static void MapAdministration(this WebApplication app)
     {
-        app.MapGet("/internal/admin/state", async (HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
+        app.MapInternalV1("/admin/state", ["GET"], async (HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
             MediaProtocol.IsInternal(context, config, "Administration:Key") ? Results.Ok(await repository.ReadAsync(token)) : Results.Unauthorized());
-        app.MapPost("/internal/admin/principals", async (PrincipalUpdate update, HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
+        app.MapInternalV1("/admin/principals", ["POST"], async (PrincipalUpdate update, HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config, "Administration:Key")) return Results.Unauthorized();
             if (!Guid.TryParse(update.Subject, out _) || update.DisplayName is { Length: > 200 } ||
@@ -21,7 +21,7 @@ public static class AdministrationEndpoints
             await repository.SetPrincipalAsync(update, token);
             return Results.NoContent();
         });
-        app.MapPost("/internal/admin/libraries", async (LibraryCreate input, HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
+        app.MapInternalV1("/admin/libraries", ["POST"], async (LibraryCreate input, HttpContext context, IConfiguration config, IAdministrationRepository repository, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config, "Administration:Key")) return Results.Unauthorized();
             if (input.Id == Guid.Empty || !Guid.TryParse(input.Subject, out _) || string.IsNullOrWhiteSpace(input.Name) || input.Name.Length > 200)

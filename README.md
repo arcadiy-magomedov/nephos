@@ -10,6 +10,8 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
 
 ## What is implemented
 
+- Explicit [API major-version contracts](specs/005-api-compatibility.md):
+  public `/v1`, private `/internal/v1`, and v1-pinned legacy peer aliases.
 - Known-user Keycloak authentication; real JWT validation and immediate platform
   disablement checks. No public registration or application password grant.
 - A separate, localhost-only administration console for known users, personal

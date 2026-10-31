@@ -65,7 +65,7 @@ public sealed class UploadTests : IDisposable
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Calls++;
-            Assert.Equal("http://renderer/render", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("http://renderer/v1/render", request.RequestUri!.AbsoluteUri);
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, await request.Content!.ReadAsByteArrayAsync(token));
             return new(HttpStatusCode.OK)
             {

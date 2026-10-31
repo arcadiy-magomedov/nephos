@@ -15,7 +15,7 @@ public static class AnalysisEndpoints
                 ? Results.NoContent() : Results.Forbid();
         }).RequireAuthorization();
 
-        app.MapGet("/internal/analysis/owners/{subject}/assets/{assetId:guid}", async (
+        app.MapInternalV1("/analysis/owners/{subject}/assets/{assetId:guid}", ["GET"], async (
             string subject, Guid assetId, HttpContext context, IConfiguration configuration,
             IAnalysisRepository repository, CancellationToken token) =>
         {
