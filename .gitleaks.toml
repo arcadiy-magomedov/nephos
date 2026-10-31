@@ -8,4 +8,4 @@ description = "Literal internal job route in documentation/tests, not an API cre
 condition = "AND"
 paths = ['''face-inference/README\.md$''', '''tests/Nephos\.Tests/AnalysisTests\.cs$''']
 regexTarget = "secret"
-regexes = ['''^8080/internal/faces/jobs$''']
+regexes = ['''^8080/internal/(v1/)?faces/jobs$''']
