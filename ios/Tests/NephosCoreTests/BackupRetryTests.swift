@@ -104,7 +104,86 @@ final class BackupRetryTests: XCTestCase {
         item.deferRetry(now: now)
         XCTAssertEqual(BackupPresentation.status(item), "Waiting to retry")
         item.requiresUserAction = true
-        XCTAssertEqual(BackupPresentation.status(item), "Needs attention")
+        XCTAssertEqual(BackupPresentation.status(item), "Backup stopped")
+    }
+
+    func testFailuresExplainRecoveryWithoutExposingRawDiagnostics() throws {
+        XCTAssertTrue(BackupPresentation.failure(ClientError.http(400, "raw")).contains("server rejected"))
+        XCTAssertFalse(BackupPresentation.failure(ClientError.http(400, "raw")).contains("automatically"))
+        XCTAssertTrue(BackupPresentation.failure(ClientError.http(413, "")).contains("size limit"))
+        XCTAssertTrue(BackupPresentation.failure(URLError(.serverCertificateUntrusted)).contains("certificate"))
+        XCTAssertTrue(BackupPresentation.failure(CocoaError(.fileWriteOutOfSpace)).contains("Free some space"))
+        XCTAssertEqual(
+            BackupPresentation.recovery(
+                saved: nil, diagnostic: "Server returned 400. Try again when the server is available."),
+            BackupPresentation.failure(ClientError.http(400, "")))
+        var item = record()
+        item.recoveryMessage = BackupPresentation.failure(ClientError.http(400, ""))
+        let restored = try JSONDecoder().decode(UploadRecord.self, from: JSONEncoder().encode(item))
+        XCTAssertEqual(restored.recoveryMessage, item.recoveryMessage)
+        XCTAssertEqual(BackupPresentation.recovery(saved: "Specific recovery", diagnostic: "raw"), "Specific recovery")
+    }
+
+    @MainActor
+    func testQueueOverlapsThreeJobsAndDrainsEveryItem() async throws {
+        var active = 0
+        var peak = 0
+        var completed: Set<Int> = []
+        try await BackupQueue.run(Array(0..<8)) { item in
+            active += 1
+            peak = max(peak, active)
+            defer { active -= 1 }
+            try await Task.sleep(for: .milliseconds(20))
+            completed.insert(item)
+        }
+        XCTAssertEqual(peak, 3)
+        XCTAssertEqual(active, 0)
+        XCTAssertEqual(completed, Set(0..<8))
+    }
+
+    @MainActor
+    func testFatalQueueFailureCancelsWorkersAndDoesNotStartMoreItems() async {
+        var started = 0
+        var active = 0
+        do {
+            try await BackupQueue.run(Array(0..<8)) { item in
+                started += 1
+                active += 1
+                defer { active -= 1 }
+                if item == 0 {
+                    try await Task.sleep(for: .milliseconds(20))
+                    throw ClientError.http(403, "Access revoked")
+                }
+                try await Task.sleep(for: .seconds(10))
+            }
+            XCTFail("Fatal errors must propagate")
+        } catch {
+            XCTAssertEqual(started, 3)
+            XCTAssertEqual(active, 0)
+        }
+    }
+
+    @MainActor
+    func testPreparationRemainsSerialAndReleasesItsSlotAfterFailure() async throws {
+        let preparation = BackupPreparation()
+        var active = 0
+        var peak = 0
+        var completed = 0
+        try await BackupQueue.run(Array(0..<6)) { item in
+            do {
+                try await preparation.run {
+                    active += 1
+                    peak = max(peak, active)
+                    defer { active -= 1 }
+                    try await Task.sleep(for: .milliseconds(10))
+                    if item == 0 { throw ClientError.invalid("Export failed") }
+                    completed += 1
+                }
+            } catch ClientError.invalid {}
+        }
+        XCTAssertEqual(peak, 1)
+        XCTAssertEqual(active, 0)
+        XCTAssertEqual(completed, 5)
     }
 
     @MainActor

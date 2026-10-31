@@ -103,8 +103,8 @@ struct GalleryView: View {
                         }.pickerStyle(.segmented)
                         if model.galleryIsStale {
                             Label(
-                                "Offline or refresh failed — cached metadata may be stale. Media needs current authorization.",
-                                systemImage: "wifi.slash"
+                                "Showing the last saved gallery. Pull down to update.",
+                                systemImage: "arrow.clockwise"
                             )
                             .font(.caption).foregroundStyle(.orange)
                         }
@@ -662,6 +662,15 @@ struct FileShareView: UIViewControllerRepresentable {
 struct BackupView: View {
     @Bindable var model: AppModel
     @State private var picker = false
+    private func retryButton(_ id: UUID) -> some View {
+        Button("Retry this item") {
+            Task { await model.runBackup(ignoreBackoff: true, retryItem: id) }
+        }
+        .accessibilityIdentifier("backup.retry.\(id)")
+        .disabled(
+            model.isRunning || model.needsReauthentication || model.selectedLibrary == nil
+                || model.selectedLibrary?.isReadOnly == true || model.ledger.settings.backupPaused == true)
+    }
     private var waitingItems: [ResourceSetRecord] {
         Array(
             (model.ledger.resourceSets ?? []).filter {
@@ -722,9 +731,17 @@ struct BackupView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(group.source.resourceNames.first ?? group.kind).font(.headline)
                                 Text(
-                                    group.requiresUserAction == true ? "Needs attention" : "Waiting to retry"
+                                    group.requiresUserAction == true ? "Backup not finished" : "Waiting to retry"
                                 )
                                 .font(.caption).foregroundStyle(.orange)
+                                if group.requiresUserAction == true {
+                                    Text(
+                                        BackupPresentation.recovery(
+                                            saved: group.recoveryMessage, diagnostic: group.error)
+                                    )
+                                    .font(.callout)
+                                    retryButton(group.id)
+                                }
                             }
                         }
                     }
@@ -741,6 +758,24 @@ struct BackupView: View {
                                         $0.id == record.resourceSetId && $0.manifest == nil
                                     } == true)
                             ).font(.subheadline).foregroundStyle(.secondary)
+                            if record.phase == .sourceChanged {
+                                Text(
+                                    "The original changed or is no longer accessible. Select its current version in Photos."
+                                )
+                                .font(.callout)
+                                Button("Select current version") {
+                                    Task {
+                                        await model.requestPhotos()
+                                        picker = true
+                                    }
+                                }.disabled(model.isRunning || model.ledger.settings.backupPaused == true)
+                            } else if record.requiresUserAction == true || record.phase == .failed {
+                                Text(
+                                    BackupPresentation.recovery(saved: record.recoveryMessage, diagnostic: record.error)
+                                )
+                                .font(.callout)
+                                retryButton(record.resourceSetId ?? record.id)
+                            }
                             if record.phase == .uploading, let chunkSize = model.connection?.config.chunkSize,
                                 record.size > 0
                             {

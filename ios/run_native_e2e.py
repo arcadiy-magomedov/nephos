@@ -35,7 +35,7 @@ def main():
             upload = str(uuid.uuid4())
             # Register the ID before Swift runs, including assertion/timeout failure cleanup.
             uploads.append(upload)
-            resource_uploads = [str(uuid.uuid4()) for _ in range(4)]
+            resource_uploads = [str(uuid.uuid4()) for _ in range(8)]
             uploads.extend(resource_uploads)
             preview_upload = str(uuid.uuid4())
             uploads.append(preview_upload)

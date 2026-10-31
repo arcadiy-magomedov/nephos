@@ -4,6 +4,33 @@ import XCTest
 @testable import NephosCore
 
 final class GalleryResourceTests: XCTestCase {
+    func testUpgradeResumesOnlyCompleteLegacyPhotoKitRejectionsOnce() throws {
+        let original = group()
+        var legacy = ResourceSetRecord(
+            id: original.id, libraryId: original.libraryId, source: original.source, kind: "edited")
+        legacy.requiresUserAction = true
+        legacy.error = "Server returned 400. Try again when the server is available."
+        var members = records(legacy)
+        members[1].resourceRole = "unknown-16"
+        var ledger = AccountLedger()
+        ledger.records = members
+        ledger.resourceSets = [legacy]
+        let now = Date(timeIntervalSince1970: 100)
+        XCTAssertTrue(ledger.resumeLegacyPhotoKitPublications(now: now))
+        XCTAssertEqual(ledger.resourceSets?[0].requiresUserAction, false)
+        XCTAssertEqual(ledger.resourceSets?[0].nextRetryAt, now)
+        XCTAssertEqual(ledger.records, members)
+        XCTAssertFalse(ledger.resumeLegacyPhotoKitPublications())
+        ledger.resourceSets?[0].requiresUserAction = true
+        XCTAssertFalse(ledger.resumeLegacyPhotoKitPublications(), "A new rejection must not trigger a migration loop")
+        ledger.resourceSets = [legacy]
+        ledger.records.removeLast()
+        XCTAssertFalse(ledger.resumeLegacyPhotoKitPublications(), "Incomplete sets must stay blocked")
+        ledger.records = members
+        ledger.resourceSets?[0].error = "Server returned 403. Access denied."
+        XCTAssertFalse(ledger.resumeLegacyPhotoKitPublications(), "An upgrade must not bypass denied access")
+    }
+
     func testResourceSetRequiresEveryVerifiedCanonicalPart() throws {
         let group = group()
         var records = records(group)

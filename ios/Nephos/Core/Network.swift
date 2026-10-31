@@ -151,7 +151,11 @@ final class API {
     }
     func endpoint(_ path: String, query: [URLQueryItem] = []) throws -> URL {
         var parts = URLComponents(url: connection.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { parts.queryItems = query }
+        if !query.isEmpty {
+            parts.queryItems = query
+            // Server query parsers interpret a literal plus as a space.
+            parts.percentEncodedQuery = parts.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let url = parts.url else { throw ClientError.invalid("Invalid API URL.") }
         return url
     }

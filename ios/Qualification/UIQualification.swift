@@ -17,7 +17,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        if ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"] == "backup-retry" {
+        if ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"]?.hasPrefix("backup-") == true {
             let registered = BGTaskScheduler.shared.register(
                 forTaskWithIdentifier: AppModel.backgroundID, using: nil
             ) { task in task.setTaskCompleted(success: false) }
@@ -30,7 +30,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         Task {
             do {
                 let env = ProcessInfo.processInfo.environment
-                if env["NEPHOS_UI_SCREEN"] == "backup-retry" {
+                if env["NEPHOS_UI_SCREEN"]?.hasPrefix("backup-") == true {
                     let configuration = URLSessionConfiguration.ephemeral
                     configuration.protocolClasses = [BackupQualificationProtocol.self]
                     let session = URLSession(configuration: configuration, delegate: HTTP.delegate, delegateQueue: nil)
@@ -44,14 +44,22 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         qualificationAPI: API(
                             connection: connection, auth: QualificationTokens("fixture-only"), session: session),
                         subject: "retry-fixture", library: library)
-                    model.ledger.records = [BackupQualificationProtocol.record]
+                    model.ledger.records = BackupQualificationProtocol.records
+                    if env["NEPHOS_UI_SCREEN"] == "backup-attention" {
+                        for index in model.ledger.records.indices {
+                            model.ledger.records[index].phase = .paused
+                            model.ledger.records[index].requiresUserAction = true
+                            model.ledger.records[index].error =
+                                "Server returned 400. Try again when the server is available."
+                        }
+                    }
                     model.ledger.settings.automaticBackup = false
                     model.ledger.settings.onboardingCompleted = true
                     model.ledger.settings.allowCellular = true
                     model.isLoadingGallery = true
                     window.rootViewController = UIHostingController(
                         rootView: NavigationStack { BackupView(model: model) })
-                    try report(["ready": true, "screen": "backup-retry", "realAPI": false])
+                    try report(["ready": true, "screen": env["NEPHOS_UI_SCREEN"]!, "realAPI": false])
                     return
                 }
                 if env["NEPHOS_UI_SCREEN"] == "onboarding-flow" {
@@ -145,15 +153,22 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
 
 private final class BackupQualificationProtocol: URLProtocol {
     static let library = UUID()
-    static let record = UploadRecord(
-        id: UUID(), libraryId: library, fileName: "retry-fixture.jpg", mediaType: "image/jpeg",
-        size: 100, sha256: String(repeating: "a", count: 64),
-        source: SourceRevision(
-            localIdentifier: "fixture", modificationTime: 0, resourceNames: ["retry-fixture.jpg"],
-            resourceTypes: [1], pixelWidth: 10, pixelHeight: 10, duration: 0, cleanupSupported: false),
-        resourceIndex: 0)
+    static let screen = ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"]
+    static let records: [UploadRecord] = (0..<(screen == "backup-parallel" ? 6 : screen == "backup-attention" ? 2 : 1))
+        .map {
+            UploadRecord(
+                id: UUID(), libraryId: library, fileName: "retry-fixture-\($0).jpg", mediaType: "image/jpeg",
+                size: 100, sha256: String(repeating: "a", count: 64),
+                source: SourceRevision(
+                    localIdentifier: "fixture-\($0)", modificationTime: 0, resourceNames: ["retry-fixture-\($0).jpg"],
+                    resourceTypes: [1], pixelWidth: 10, pixelHeight: 10, duration: 0, cleanupSupported: false),
+                resourceIndex: 0)
+        }
     private static let lock = NSLock()
     private static var attempts = 0
+    private static var inFlight = 0
+    private static var peak = 0
+    private var pending = false
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "backup-qualification.invalid"
     }
@@ -163,35 +178,85 @@ private final class BackupQualificationProtocol: URLProtocol {
             let status: Int
             let data: Data
             if request.url?.path == "/v1/uploads", request.httpMethod == "POST" {
+                let record = try requestedRecord()
                 Self.lock.lock()
                 Self.attempts += 1
                 let attempt = Self.attempts
+                if Self.screen == "backup-parallel" {
+                    pending = true
+                    Self.inFlight += 1
+                    Self.peak = max(Self.peak, Self.inFlight)
+                }
                 Self.lock.unlock()
-                status = attempt == 1 ? 503 : 200
+                status = Self.screen == "backup-retry" && attempt == 1 ? 503 : 200
                 data = try JSONEncoder().encode(
                     UploadStatus(
-                        id: Self.record.id, state: "ready", chunkSize: 100, receivedParts: [0],
-                        assetId: Self.record.id, error: nil))
-            } else if request.url?.path.lowercased() == "/v1/assets/\(Self.record.id)/backup".lowercased() {
+                        id: record.id, state: "ready", chunkSize: 100, receivedParts: [0],
+                        assetId: record.id, error: nil))
+                if Self.screen == "backup-parallel" {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                        guard self.endPending() else { return }
+                        self.respond(status: status, data: data)
+                    }
+                    return
+                }
+            } else if let record = Self.records.first(where: {
+                request.url?.path.lowercased() == "/v1/assets/\($0.id)/backup".lowercased()
+            }) {
                 status = 200
+                Self.lock.lock()
+                let overlappedCorrectly = Self.screen != "backup-parallel" || Self.peak == 3
+                Self.lock.unlock()
                 data = try JSONEncoder().encode(
                     BackupEvidence(
-                        id: Self.record.id, sha256: Self.record.sha256, size: Self.record.size,
-                        available: true, createdAt: "2026-10-31T00:00:00Z"))
+                        id: record.id, sha256: record.sha256, size: record.size,
+                        available: overlappedCorrectly, createdAt: "2026-10-31T00:00:00Z"))
             } else {
                 throw ClientError.invalid("Unexpected qualification request: \(request.url?.path ?? "nil")")
             }
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/json", "Content-Length": String(data.count)])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
+            respond(status: status, data: data)
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }
     }
-    override func stopLoading() {}
+    private func requestedRecord() throws -> UploadRecord {
+        var body = request.httpBody ?? Data()
+        if body.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count >= 0 else { throw ClientError.invalid("Fixture request body could not be read.") }
+                if count == 0 { break }
+                body.append(contentsOf: buffer.prefix(count))
+                guard body.count <= 65_536 else { throw ClientError.invalid("Fixture request body is too large.") }
+            }
+        }
+        struct Identity: Decodable { let id: UUID }
+        let id = try JSONDecoder().decode(Identity.self, from: body).id
+        guard let record = Self.records.first(where: { $0.id == id }) else {
+            throw ClientError.invalid("Unknown fixture upload.")
+        }
+        return record
+    }
+    private func respond(status: Int, data: Data) {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json", "Content-Length": String(data.count)])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    private func endPending() -> Bool {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        guard pending else { return false }
+        pending = false
+        Self.inFlight -= 1
+        return true
+    }
+    override func stopLoading() { _ = endPending() }
 }
 
 private struct QualificationScreen: View {

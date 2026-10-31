@@ -80,6 +80,26 @@ Existing English UI copy is retained; this is not a complete Russian localizatio
   Raw server errors, part acknowledgements and resource-set details are collapsed
   under **Details**; actionable failures remain visible without repeated upload
   alert dialogs. Incomplete whole-item publication never appears as completed backup.
+  Stopped items explain the failure and recovery inline and have **Retry this item**;
+  this retries only that item, without bypassing backoff for other failures.
+  Older persisted HTTP errors also receive recovery guidance.
+
+The queue runs up to three independent uploads concurrently, including manual
+selection, automatic discovery and resumed queues. PhotoKit preparation remains
+serialized; storage budgeting reserves space for all active chunk files and their
+atomic writes. A compound item's manifest is published only after every file is
+verified. Opaque PhotoKit resources (`unknown-<positive type>`, including Apple's
+adjustment envelope) and `photoProxy` are retained byte-for-byte, not discarded or
+misrepresented as natively restorable. Edited/unsupported items remain ineligible
+for automatic phone cleanup.
+On upgrade, previously rejected opaque-resource manifests are retried once when
+every constituent already has matching verification evidence. This reuses the
+existing uploads; incomplete sets, denied access and newly rejected attempts stay
+blocked rather than entering a retry loop.
+
+Gallery query encoding preserves literal plus signs, including positive UTC
+offsets in saved pagination anchors. A retained gallery is labelled as a saved
+copy rather than implying that every refresh failure is an authentication error.
 
 Temporary network failures, HTTP 408/425/429 and server 5xx responses retry with
 persisted exponential backoff: 30 seconds, 1/2/4 minutes, up to one hour.

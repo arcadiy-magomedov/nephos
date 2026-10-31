@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Npgsql;
 using static Nephos.Library.Api.Assets.PostgresGalleryJournal;
@@ -9,7 +10,18 @@ public sealed record ResourceSetInput(string Kind, string SourceRevision, Guid P
 {
     private static readonly HashSet<string> Roles =
         ["photo", "video", "pairedVideo", "alternatePhoto", "fullSizePhoto", "fullSizeVideo", "adjustmentData",
-         "adjustmentBasePhoto", "fullSizePairedVideo", "adjustmentBasePairedVideo", "adjustmentBaseVideo", "audio"];
+         "adjustmentBasePhoto", "fullSizePairedVideo", "adjustmentBasePairedVideo", "adjustmentBaseVideo", "audio", "photoProxy"];
+
+    private static bool IsResourceRole(string? role)
+    {
+        if (role is null) return false;
+        if (Roles.Contains(role)) return true;
+        // PhotoKit can expose resources absent from the public SDK. Preserve their
+        // bytes and raw type without claiming that native Photos restoration is supported.
+        return role.Length <= 18 && role.StartsWith("unknown-", StringComparison.Ordinal) &&
+            int.TryParse(role.AsSpan(8), NumberStyles.None, CultureInfo.InvariantCulture, out var type) &&
+            type > 0 && role == "unknown-" + type.ToString(CultureInfo.InvariantCulture);
+    }
 
     public bool IsValid()
     {
@@ -19,7 +31,7 @@ public sealed record ResourceSetInput(string Kind, string SourceRevision, Guid P
             Resources.Any(r => r is null) || Resources.Select(r => r.AssetId).Distinct().Count() != Resources.Length ||
             !Resources.Any(r => r.AssetId == PrimaryAssetId))
             return false;
-        if (Resources.Any(r => r.AssetId == Guid.Empty || !Roles.Contains(r.Role ?? "") || r.Size is <= 0 or > Nephos.ServiceDefaults.MediaProtocol.MaxUploadBytes ||
+        if (Resources.Any(r => r.AssetId == Guid.Empty || !IsResourceRole(r.Role) || r.Size is <= 0 or > Nephos.ServiceDefaults.MediaProtocol.MaxUploadBytes ||
             r.Sha256 is not { Length: 64 } || !r.Sha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') ||
             string.IsNullOrWhiteSpace(r.FileName) || r.FileName.Length > 200 || r.FileName.Any(c => char.IsControl(c) || c is '/' or '\\') ||
             string.IsNullOrWhiteSpace(r.UniformTypeIdentifier) || r.UniformTypeIdentifier.Length > 200 ||

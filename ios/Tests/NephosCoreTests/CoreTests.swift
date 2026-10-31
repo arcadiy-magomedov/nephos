@@ -2,6 +2,11 @@ import XCTest
 
 @testable import NephosCore
 
+@MainActor
+private final class QueryTestTokens: AccessTokenProviding {
+    func accessToken() async throws -> String { "fixture-only" }
+}
+
 final class CoreTests: XCTestCase {
     func testSHA256AndPKCEVector() {
         XCTAssertEqual(
@@ -85,6 +90,28 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(query[1].value, date)
         XCTAssertEqual(query[2].value, id.uuidString)
         XCTAssertEqual(Paging.gallery(before: nil).count, 1)
+    }
+    @MainActor
+    func testOutgoingQueryPreservesPlusOffsetsAndLiteralValuesUnderFormDecoding() throws {
+        let api = API(
+            connection: Connection(
+                baseURL: URL(string: "https://server.test/base")!,
+                config: ServerConfig(
+                    serverId: "fixture", issuer: "https://identity.test", clientId: "fixture",
+                    maxUploadBytes: 10, chunkSize: 4), allowDevelopmentHTTP: false),
+            auth: QueryTestTokens())
+        let values = [
+            "2025-08-31T06:04:59+00:00", "2025-08-31T06:04:59.123456+05:30",
+            "2025-08-31T06:04:59-04:00", "2025-08-31T06:04:59Z",
+            "name+alias %2B & = # \u{00e9}\u{0436}",
+        ]
+        for value in values {
+            let url = try api.endpoint("assets", query: [URLQueryItem(name: "before", value: value)])
+            let encoded = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery)
+            XCTAssertFalse(encoded.contains("+"))
+            let rawValue = String(try XCTUnwrap(encoded.split(separator: "=", maxSplits: 1).last))
+            XCTAssertEqual(rawValue.replacingOccurrences(of: "+", with: " ").removingPercentEncoding, value)
+        }
     }
     func testUploadIntentPreservesCaptureDateAndIdempotency() throws {
         var record = upload()

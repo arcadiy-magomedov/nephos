@@ -1,6 +1,42 @@
 import XCTest
 
 final class BackupUITests: XCTestCase {
+    func testActualQueueOverlapsThreeRequestsAndFinishesAllSixUploads() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-parallel"]
+        app.launch()
+        let button = app.buttons["Back up now"]
+        XCTAssertTrue(button.waitForExistence(timeout: 15))
+        reveal(button, in: app)
+        button.tap()
+        let complete = app.staticTexts["Backup complete"]
+        reveal(complete, in: app, upwards: false)
+        XCTAssertTrue(complete.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(
+            app.descendants(matching: .any).matching(identifier: "backup.progress").firstMatch.label,
+            "6 of 6 files saved")
+    }
+
+    func testStoppedItemExplainsCauseAndRetryDoesNotUnblockOtherItems() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-attention"]
+        app.launch()
+        let explanation = app.staticTexts.matching(
+            identifier: "The server rejected this item. Update Nephos and the server, then retry.")
+        reveal(explanation.firstMatch, in: app)
+        XCTAssertTrue(explanation.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Server returned")).count, 0)
+        let retry = app.buttons.matching(NSPredicate(format: "label == %@", "Retry this item")).firstMatch
+        reveal(retry, in: app)
+        retry.tap()
+        let saved = app.staticTexts["Saved"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Retry this item")).count, 1)
+        XCTAssertTrue(app.staticTexts["Backup stopped"].exists)
+    }
+
     private func start() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")

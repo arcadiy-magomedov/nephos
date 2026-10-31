@@ -81,8 +81,9 @@ struct ResourceSetRecord: Codable, Identifiable, Sendable {
     var retryCount: Int?
     var nextRetryAt: Date?
     var requiresUserAction: Bool?
+    var recoveryMessage: String?
 
-    func intent(records: [UploadRecord]) throws -> ResourceSetIntent {
+    func verifiedResources(in records: [UploadRecord]) -> [UploadRecord]? {
         let matching = records.filter { $0.resourceSetId == id }.sorted { $0.resourceIndex < $1.resourceIndex }
         guard (1...16).contains(source.resourceNames.count),
             matching.count == source.resourceNames.count,
@@ -93,7 +94,12 @@ struct ResourceSetRecord: Codable, Identifiable, Sendable {
                     && $0.evidence?.sha256 == $0.sha256 && $0.evidence?.size == $0.size && $0.resourceRole != nil
                     && $0.uniformTypeIdentifier != nil && $0.remoteRemoved != true
             })
-        else {
+        else { return nil }
+        return matching
+    }
+
+    func intent(records: [UploadRecord]) throws -> ResourceSetIntent {
+        guard let matching = verifiedResources(in: records) else {
             throw ClientError.invalid(
                 "Resource set is incomplete. Every required original must be verified before publication.")
         }
@@ -113,6 +119,33 @@ struct ResourceSetRecord: Codable, Identifiable, Sendable {
         let revision = String(decoding: try encoder.encode(source), as: UTF8.self)
         return ResourceSetIntent(
             kind: kind, sourceRevision: revision, primaryAssetId: primary.assetId, resources: parts)
+    }
+}
+
+extension AccountLedger {
+    mutating func resumeLegacyPhotoKitPublications(now: Date = Date()) -> Bool {
+        var changed = false
+        for index in resourceSets?.indices ?? 0..<0 {
+            guard let group = resourceSets?[index],
+                group.manifest == nil, group.requiresUserAction == true, group.recoveryMessage == nil,
+                group.error?.hasPrefix("Server returned 400.") == true,
+                ["edited", "archive", "single"].contains(group.kind),
+                let resources = group.verifiedResources(in: records),
+                resources.contains(where: { record in
+                    guard let role = record.resourceRole else { return false }
+                    if role == "photoProxy" { return true }
+                    guard role.hasPrefix("unknown-"), let type = Int32(role.dropFirst(8)), type > 0 else {
+                        return false
+                    }
+                    return role == "unknown-\(type)"
+                })
+            else { continue }
+            resourceSets?[index].requiresUserAction = false
+            resourceSets?[index].nextRetryAt = now
+            resourceSets?[index].recoveryMessage = "Retrying backup details after the app update."
+            changed = true
+        }
+        return changed
     }
 }
 

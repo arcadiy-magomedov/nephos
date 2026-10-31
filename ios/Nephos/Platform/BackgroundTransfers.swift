@@ -15,7 +15,7 @@ final class BackgroundTransfers: NSObject, URLSessionTaskDelegate, URLSessionDel
         let config = URLSessionConfiguration.background(withIdentifier: Self.identifier)
         config.sessionSendsLaunchEvents = true
         config.isDiscretionary = false
-        config.httpMaximumConnectionsPerHost = 1
+        config.httpMaximumConnectionsPerHost = BackupQueue.concurrency
         config.timeoutIntervalForResource = 60 * 60
         config.urlCache = nil
         config.httpCookieStorage = nil

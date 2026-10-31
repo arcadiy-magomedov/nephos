@@ -74,16 +74,16 @@ struct BackupStatusView: View {
                         : model.isRunning
                             ? "Backing up"
                             : progress.failed > 0
-                                ? "Needs attention"
+                                ? "Some backups stopped"
                                 : progress.total == 0
                                     ? "Ready to back up"
                                     : progress.isComplete ? "Backup complete" : "Backup queued"
             )
             .font(.title2.bold())
             Text(
-                progress.pending == 0 && progress.awaitingPublication > 0
-                    ? "\(progress.awaitingPublication) items finishing · \(progress.failed) need attention"
-                    : "\(progress.pending) pending · \(progress.failed) need attention"
+                progress.failed > 0
+                    ? "\(progress.failed) items not finished. See the reasons below."
+                    : "\(progress.pending) files pending · \(progress.awaitingPublication) items finishing"
             )
             .font(.subheadline).foregroundStyle(.secondary)
             if !NetworkPolicy.shared.isConnected {

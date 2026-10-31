@@ -134,6 +134,23 @@ final class NativeBackendTests: XCTestCase {
         let dayPage = try await api.assets(
             library: libraryID, snapshot: firstSnapshot.id, cursor: GalleryDates.endOfBucket("2018-02-03"))
         XCTAssertEqual(dayPage.items.first?.id, committed.id)
+        for path in [
+            "v1/libraries/\(libraryID)/assets",
+            "v1/libraries/\(libraryID)/snapshots/\(firstSnapshot.id)/assets",
+        ] {
+            let page = try await api.json(
+                AssetPage.self, path,
+                query: Paging.gallery(
+                    before: GalleryCursor(
+                        createdAt: "2018-02-04T00:00:00+00:00", id: UUID())))
+            XCTAssertEqual(page.items.first?.id, committed.id)
+        }
+        let anchored = try await api.assets(
+            library: libraryID, snapshot: firstSnapshot.id,
+            cursor: GalleryDates.inclusiveAnchor(
+                GalleryCursor(
+                    createdAt: "2018-02-03T12:00:00+00:00", id: committed.id)))
+        XCTAssertEqual(anchored.items.first?.id, committed.id)
         print(
             "PASS native XCTest: bounded authenticated range, immutable snapshots, year/day counts and exact-date navigation"
         )
@@ -160,19 +177,30 @@ final class NativeBackendTests: XCTestCase {
             let extra = environment["NEPHOS_E2E_RESOURCE_UPLOADS"]?.split(separator: ",").compactMap({
                 UUID(uuidString: String($0))
             }),
-            extra.count == 4
-        else { throw ClientError.invalid("Four pre-registered resource upload IDs are required.") }
+            extra.count == 8
+        else { throw ClientError.invalid("Eight pre-registered resource upload IDs are required.") }
         var published: [ResourceManifest] = []
-        for setIndex in 0..<2 {
+        var nextResource = 0
+        for setIndex in 0..<3 {
+            let edited = setIndex == 2
+            let roles = edited ? ["photo", "adjustmentData", "unknown-16", "fullSizePhoto"] : ["photo", "pairedVideo"]
             let source = SourceRevision(
                 localIdentifier: "synthetic-pair-\(setIndex)", modificationTime: 123,
-                resourceNames: ["still.bin", "paired.bin"], resourceTypes: [1, 9], pixelWidth: 0, pixelHeight: 0,
+                resourceNames: roles.map { "\($0).bin" }, resourceTypes: edited ? [1, 7, 16, 5] : [1, 9], pixelWidth: 0,
+                pixelHeight: 0,
                 duration: 0, cleanupSupported: false, creationTime: 100,
-                resourceUTIs: ["public.jpeg", "com.apple.quicktime-movie"])
-            let group = ResourceSetRecord(id: UUID(), libraryId: libraryID, source: source, kind: "live-photo")
+                resourceUTIs: edited
+                    ? [
+                        "public.heic", "com.apple.property-list", "com.apple.photos.apple-adjustment-envelope",
+                        "public.heic",
+                    ]
+                    : ["public.jpeg", "com.apple.quicktime-movie"])
+            let group = ResourceSetRecord(
+                id: UUID(), libraryId: libraryID, source: source, kind: edited ? "edited" : "live-photo")
             var resources: [UploadRecord] = []
-            for resourceIndex in 0..<2 {
-                let id = extra[setIndex * 2 + resourceIndex]
+            for resourceIndex in roles.indices {
+                let id = extra[nextResource]
+                nextResource += 1
                 // Repeated bytes in the second set exercise safe same-subject dedup with separate logical references.
                 let data = Data("native-compound-resource-\(resourceIndex)".utf8)
                 let file = try store.staging(account: account, id: id)
@@ -182,7 +210,7 @@ final class NativeBackendTests: XCTestCase {
                     mediaType: "application/octet-stream", size: Int64(data.count), sha256: Hashing.sha256(data),
                     source: source, resourceIndex: resourceIndex)
                 part.resourceSetId = group.id
-                part.resourceRole = resourceIndex == 0 ? "photo" : "pairedVideo"
+                part.resourceRole = roles[resourceIndex]
                 part.uniformTypeIdentifier = source.resourceUTIs![resourceIndex]
                 part.capturedAt = "2020-05-06T12:00:00Z"
                 let begun = try await client.begin(part)
@@ -210,7 +238,9 @@ final class NativeBackendTests: XCTestCase {
             let manifest = try await api.publish(group, records: resources)
             let repeatedManifest = try await api.publish(group, records: resources)
             XCTAssertEqual(manifest, repeatedManifest)
-            XCTAssertEqual(manifest.resources.count, 2)
+            XCTAssertEqual(manifest.resources.count, roles.count)
+            XCTAssertEqual(manifest.resources.map(\.role), roles)
+            if edited { XCTAssertFalse(manifest.restoreSupported) }
             if let prior = published.first {
                 XCTAssertTrue(
                     Set(prior.resources.map(\.assetId)).isDisjoint(with: Set(manifest.resources.map(\.assetId))))

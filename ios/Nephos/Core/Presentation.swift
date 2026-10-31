@@ -185,8 +185,8 @@ struct BackupProgress {
 enum BackupPresentation {
     static func status(_ record: UploadRecord, wholeItemPending: Bool = false) -> String {
         if record.remoteRemoved == true { return "Removed from server" }
-        if record.phase == .sourceChanged { return "Original changed — needs attention" }
-        if record.requiresUserAction == true { return "Needs attention" }
+        if record.phase == .sourceChanged { return "Original changed" }
+        if record.requiresUserAction == true { return "Backup stopped" }
         if record.error != nil, record.nextRetryAt != nil { return "Waiting to retry" }
         switch record.phase {
         case .queued: return "Waiting to upload"
@@ -196,15 +196,52 @@ enum BackupPresentation {
             return record.evidence?.available == true
                 ? (wholeItemPending ? "Finishing backup" : "Saved") : "Checking upload"
         case .paused: return "Waiting to resume"
-        case .failed, .sourceChanged: return "Needs attention"
+        case .failed, .sourceChanged: return "Backup stopped"
         }
     }
 
     static func failure(_ error: Error) -> String {
         if case ClientError.signedOut = error { return "Sign in again to continue backup." }
         if case ClientError.http(403, _) = error { return "Upload access was denied. Check your library access." }
+        if case ClientError.http(let status, _) = error {
+            switch status {
+            case 400, 422:
+                return "The server rejected this item. Update Nephos and the server, then retry."
+            case 404:
+                return "This upload is no longer available on the server. Retry to check its current state."
+            case 409:
+                return "The saved upload state conflicts with the server. Retry to reconcile it."
+            case 413:
+                return "This file exceeds the server's size limit. Ask your administrator to increase it, then retry."
+            default: break
+            }
+        }
+        if let error = error as? URLError,
+            [
+                .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                .serverCertificateNotYetValid, .secureConnectionFailed,
+            ].contains(error.code)
+        {
+            return
+                "The server's secure connection could not be verified. Ask your administrator to check its certificate."
+        }
+        if (error as? CocoaError)?.code == .fileWriteOutOfSpace {
+            return "Your iPhone is out of storage. Free some space, then retry. Your photos have not been removed."
+        }
         if BackupRetryPolicy.isTransient(error) { return "Upload interrupted. It will retry automatically." }
-        return "Backup needs attention. Open Details to see the problem, then try again."
+        return
+            "Could not finish this backup. Retry; if it fails again, send the error in Details to your administrator."
+    }
+
+    static func recovery(saved: String?, diagnostic: String?) -> String {
+        if let saved { return saved }
+        // Older ledgers kept only the formatted diagnostic, not recovery guidance.
+        for status in [400, 403, 404, 409, 413, 422] {
+            if diagnostic?.hasPrefix("Server returned \(status).") == true {
+                return failure(ClientError.http(status, ""))
+            }
+        }
+        return failure(ClientError.invalid(""))
     }
 }
 

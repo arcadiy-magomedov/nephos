@@ -1,5 +1,47 @@
 import Foundation
 
+@MainActor
+enum BackupQueue {
+    static let concurrency = 3
+
+    static func run<Item: Sendable>(
+        _ items: [Item], perform: @escaping @MainActor @Sendable (Item) async throws -> Void
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { tasks in
+            var remaining = items.makeIterator()
+            for _ in 0..<concurrency {
+                guard let item = remaining.next() else { break }
+                tasks.addTask { try await perform(item) }
+            }
+            while try await tasks.next() != nil {
+                try Task.checkCancellation()
+                if let item = remaining.next() {
+                    tasks.addTask { try await perform(item) }
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+final class BackupPreparation {
+    private var occupied = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func run<Value: Sendable>(_ perform: @MainActor () async throws -> Value) async throws -> Value {
+        if occupied {
+            await withCheckedContinuation { waiters.append($0) }
+        } else {
+            occupied = true
+        }
+        defer {
+            if waiters.isEmpty { occupied = false } else { waiters.removeFirst().resume() }
+        }
+        try Task.checkCancellation()
+        return try await perform()
+    }
+}
+
 enum BackupRetryPolicy {
     static func isTransient(_ error: Error) -> Bool {
         if error is CancellationError { return true }
