@@ -86,7 +86,7 @@ struct Asset: Codable, Identifiable, Equatable, Sendable {
     var sharedBy: String?
     var isVideo: Bool { mediaType.hasPrefix("video/") }
 }
-struct GalleryCursor: Codable, Equatable, Sendable {
+struct GalleryCursor: Codable, Hashable, Sendable {
     let createdAt: String
     let id: UUID
 }
@@ -138,6 +138,7 @@ struct BackupSettings: Codable, Equatable, Sendable {
     var automaticCleanup = false
     var allowCellular = false
     var cleanupWarningsAcknowledged = false
+    var backupPaused: Bool?
 }
 
 enum UploadPhase: String, Codable, Sendable {

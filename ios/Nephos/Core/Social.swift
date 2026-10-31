@@ -24,6 +24,26 @@ struct FacePage<Item: Decodable & Sendable>: Decodable, Sendable {
     let next: UUID?
 }
 
+struct FaceCorrection: Decodable, Identifiable, Sendable {
+    let id: UUID
+    let kind: String
+    let subjectId: UUID
+    let targetId: UUID?
+    let createdAt: String
+    var title: String {
+        switch kind {
+        case "name": "Name updated"
+        case "merge": "Groups merged"
+        case "unmerge": "Merge undone"
+        case "split": "Face separated"
+        case "assign": "Face reassigned"
+        case "negative": "Marked as different people"
+        case "negative_removed": "Different-person rule removed"
+        default: "Face correction"
+        }
+    }
+}
+
 struct DirectoryUser: Codable, Identifiable, Sendable {
     let id: String
     let name: String
@@ -76,6 +96,16 @@ struct PersonNameInput: Encodable, Sendable {
 }
 
 extension API {
+    func assets(ids: [UUID]) async throws -> [Asset] {
+        guard ids.count <= 50 else { throw ClientError.invalid("Load at most 50 assets at a time.") }
+        var result: [Asset] = []
+        for id in ids {
+            try Task.checkCancellation()
+            result.append(try await asset(id))
+        }
+        return result
+    }
+
     private func faceQuery(after: UUID?, name: String? = nil) -> [URLQueryItem] {
         var query = Paging.libraries(after: after)
         if let name, !name.isEmpty { query.append(URLQueryItem(name: "name", value: name)) }
@@ -97,7 +127,9 @@ extension API {
     }
 
     func person(_ id: UUID) async throws -> FacePerson {
-        try await json(FacePerson.self, "v1/faces/people/\(id)")
+        let result = try await json(FacePerson.self, "v1/faces/people/\(id)")
+        guard result.id == id else { throw ClientError.invalid("Person response returned a different identity.") }
+        return result
     }
 
     func personAssets(_ id: UUID, after: UUID? = nil) async throws -> FacePage<UUID> {
@@ -141,6 +173,32 @@ extension API {
         try await change(
             "v1/faces/observations/\(id)/person", method: "PUT",
             body: JSONEncoder().encode(["newPerson": true]))
+    }
+
+    func assignObservation(_ id: UUID, person: UUID) async throws {
+        try await change(
+            "v1/faces/observations/\(id)/person", method: "PUT",
+            body: JSONEncoder().encode(["personId": person]))
+    }
+
+    func negativeMatch(_ first: UUID, other: UUID) async throws {
+        guard first != other else { throw ClientError.invalid("Choose two different people.") }
+        try await change(
+            "v1/faces/people/\(first)/negative-matches", method: "POST",
+            body: JSONEncoder().encode(["otherId": other]))
+    }
+
+    func removeNegativeMatch(_ first: UUID, other: UUID) async throws {
+        try await change("v1/faces/people/\(first)/negative-matches/\(other)", method: "DELETE")
+    }
+
+    func corrections(after: UUID? = nil) async throws -> FacePage<FaceCorrection> {
+        let page = try await json(
+            FacePage<FaceCorrection>.self, "v1/faces/corrections", query: faceQuery(after: after))
+        guard page.next == nil || page.next != after else {
+            throw ClientError.invalid("Repeated correction cursor.")
+        }
+        return page
     }
 
     func directory(after: String? = nil) async throws -> DirectoryPage {

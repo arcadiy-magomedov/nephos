@@ -60,7 +60,7 @@ a preview or transcode is not proof that the original resource set was backed up
 
 ### 3.2 Proposed deferrals, awaiting scope agreement
 
-Android, semantic search, AI trash review, sharing UI, generic
+Android, semantic search, AI trash review, generic
 drive/folder behavior, S3/Azure adapters, Swarm/Helm packaging, explicit offline
 original pinning, and local-network auto-discovery can follow the first release.
 These are proposals, not deletion of north-star requirements.
@@ -73,8 +73,12 @@ a transactional publication outbox; JPEG/PNG/WebP/HEIC/HEIF primary photos are e
 Six licensed portraits are a small real-inference smoke set, not a representative
 accuracy benchmark. HEIC decoding is server-side and never replaces an original;
 the format-expansion migration queues eligible older HEIC/HEIF photos. Video
-analysis, native People UI and semantic/person
-combined search are still outstanding. See `face-inference/README.md`.
+analysis and semantic/person combined search are still outstanding.
+Native People/correction and known-user sharing screens are now implemented,
+along with the approved media-first navigation and System/Light/Dark setting.
+Server albums remain unavailable; the native Albums tab exposes libraries and
+sharing without inventing album data. See `face-inference/README.md` and
+the current [native feature inventory](../ios/README.md#remaining-features).
 
 The custom platform administration UI and APNs delivery deserve explicit scope
 decisions. Keycloak supplies identity administration, not library/storage

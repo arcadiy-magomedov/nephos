@@ -35,6 +35,11 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
   evidence covers every original, not just its representative image.
 - Owner-controlled selected-media or all/future-media sharing with known users;
   shared provenance, scoped snapshots/deltas, revocation and read-only grants.
+- Native media-first iOS navigation, chronological preview grid, full-screen
+  photo viewing, upload progress/pause, and persistent System/Light/Dark themes.
+  People screens use real private face crops and support names, aliases, merges,
+  undo, reassignment, splitting and different-person rules. Native sharing
+  includes selection, known-user discovery, scope changes and revocation.
 - Optional [owner-private face service](face-inference/README.md): local CPU
   detection/embeddings, stable person clusters, names, aliases, reversible
   merges/splits and manual negative matches. A transactional Library outbox
@@ -49,7 +54,7 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
   storage headroom, verification, publication backlogs, and dead letters.
 
 This is a functional MVP, **not certification of every north-star requirement**.
-Native sharing/People UI, semantic search, APNs, Android, HA, and multi-host
+Server albums/favorites, semantic search, APNs, Android, HA, and multi-host
 workload/network isolation remain unfinished. Face analysis currently supports
 JPEG/PNG/WebP/HEIC/HEIF still images, not video. HEIC is decoded only inside the
 bounded analysis service; the phone uploads its original and the stored bytes,
@@ -65,6 +70,13 @@ originals are fetched explicitly for export/restore (video playback uses bounded
 See the iOS documentation for supported resource restoration and
 device-only acceptance checks; a simulator build does not certify Face ID,
 background scheduling, or Photos deletion.
+
+The native Search screen currently supports exact person names/aliases and
+explicitly scoped filename filtering of loaded items, not semantic search.
+The Albums tab exposes libraries and incoming/outgoing sharing; server album
+creation is explicitly unavailable. See the
+[remaining feature list](ios/README.md#remaining-features) rather than treating
+every design mockup as an implemented backend capability.
 
 ## Start locally
 

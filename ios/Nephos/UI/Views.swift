@@ -4,15 +4,22 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var model: AppModel
+    @State private var tab = 0
     var body: some View {
         Group {
             if model.signedIn {
-                TabView {
-                    GalleryView(model: model).tabItem { Label("Gallery", systemImage: "photo.on.rectangle") }
-                    BackupView(model: model).tabItem { Label("Backup", systemImage: "arrow.up.doc") }
-                    SettingsView(model: model).tabItem { Label("Settings", systemImage: "gear") }
+                TabView(selection: $tab) {
+                    GalleryView(model: model)
+                        .tabItem { Label("Photos", systemImage: "square.grid.2x2") }.tag(0)
+                    NavigationStack { SearchView(model: model) }
+                        .tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(1)
+                    NavigationStack { PeopleView(model: model) }
+                        .tabItem { Label("People", systemImage: "person.2") }.tag(2)
+                    NavigationStack { CollectionsView(model: model) }
+                        .tabItem { Label("Albums", systemImage: "rectangle.stack") }.tag(3)
                 }
                 .id(model.mediaGeneration)
+                .onChange(of: model.mediaGeneration) { _, _ in tab = 0 }
             } else {
                 ConnectionView(model: model)
             }
@@ -114,6 +121,13 @@ struct ConnectionView: View {
                 if busy { ProgressView(model.activity.isEmpty ? "Checking…" : model.activity) }
             }
             .navigationTitle("Nephos")
+            .toolbar {
+                NavigationLink {
+                    AppearanceSettingsView()
+                } label: {
+                    Label("Appearance", systemImage: "circle.lefthalf.filled")
+                }
+            }
         }
     }
 }
@@ -121,12 +135,44 @@ struct ConnectionView: View {
 struct GalleryView: View {
     @Bindable var model: AppModel
     @State private var datePicker = false
+    @State private var filter: MediaFilter = .all
+    @State private var selecting = false
+    @State private var selected: Set<UUID> = []
+    @State private var shareSelection: ShareSelection?
+    private var progress: BackupProgress {
+        BackupProgress(ledger: model.ledger, library: model.ledger.selectedLibraryID)
+    }
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        LibrarySelector(model: model)
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let library = model.selectedLibrary {
+                                    Text(library.name).font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                if let count = model.retainedGallery?.snapshot.totalCount {
+                                    Text("\(count) items").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            NavigationLink {
+                                BackupView(model: model)
+                            } label: {
+                                Label(
+                                    model.ledger.settings.backupPaused == true
+                                        ? "Paused"
+                                        : progress.pending > 0 ? "\(progress.pending) pending" : "Backup",
+                                    systemImage: "cloud"
+                                )
+                                .font(.caption.bold()).padding(10)
+                                .background(NephosStyle.accent.opacity(0.1), in: Capsule())
+                            }
+                        }
+                        Picker("Media type", selection: $filter) {
+                            ForEach(MediaFilter.allCases) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented)
                         if model.galleryIsStale {
                             Label(
                                 "Offline or refresh failed — cached metadata may be stale. Media needs current authorization.",
@@ -134,34 +180,56 @@ struct GalleryView: View {
                             )
                             .font(.caption).foregroundStyle(.orange)
                         }
-                        if let snapshot = model.retainedGallery?.snapshot {
-                            Text("\(snapshot.totalCount) items • snapshot revision \(snapshot.revision)").font(.caption)
-                        }
                         if model.ledger.selectedLibraryID == nil {
+                            LibrarySelector(model: model)
+                        } else if model.gallery.items.filter({ filter.includes($0) }).isEmpty && !model.isLoadingGallery
+                        {
                             ContentUnavailableView(
-                                "Choose a library", systemImage: "photo.stack",
-                                description: Text("Your server library is available without Photos permission."))
-                        } else if model.gallery.items.isEmpty && !model.isLoadingGallery {
-                            ContentUnavailableView(
-                                "No loaded media", systemImage: "photo",
-                                description: Text(
-                                    "Pull to refresh. Connection and permission failures are shown separately, not treated as an empty library."
-                                ))
+                                "No matching media loaded", systemImage: "photo",
+                                description: Text("Refresh or load older items. Filters apply to the loaded window."))
                         }
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 8)], spacing: 8) {
-                            ForEach(model.gallery.items) { asset in
-                                NavigationLink {
-                                    OriginalView(asset: asset, model: model)
-                                } label: {
-                                    AssetTile(asset: asset, model: model)
+                        ForEach(MediaDay.groups(model.gallery.items, filter: filter)) { day in
+                            VStack(alignment: .leading, spacing: 9) {
+                                Text(day.date?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date")
+                                    .font(.headline)
+                                LazyVGrid(columns: NephosStyle.columns, spacing: 3) {
+                                    ForEach(day.assets) { asset in
+                                        Group {
+                                            if selecting {
+                                                Button {
+                                                    if selected.contains(asset.id) {
+                                                        selected.remove(asset.id)
+                                                    } else {
+                                                        selected.insert(asset.id)
+                                                    }
+                                                } label: {
+                                                    AssetTile(asset: asset, model: model)
+                                                        .overlay(alignment: .topTrailing) {
+                                                            Image(
+                                                                systemName: selected.contains(asset.id)
+                                                                    ? "checkmark.circle.fill" : "circle"
+                                                            )
+                                                            .foregroundStyle(.white).shadow(radius: 2).padding(5)
+                                                        }
+                                                }.disabled(
+                                                    asset.sharedBy != nil || model.selectedLibrary?.isReadOnly == true)
+                                            } else {
+                                                NavigationLink {
+                                                    OriginalView(asset: asset, model: model)
+                                                } label: {
+                                                    AssetTile(asset: asset, model: model)
+                                                }
+                                            }
+                                        }
+                                        .id(asset.id)
+                                        .background(
+                                            GeometryReader { geometry in
+                                                Color.clear.preference(
+                                                    key: GalleryPositions.self,
+                                                    value: [asset.id: geometry.frame(in: .named("gallery")).minY])
+                                            })
+                                    }
                                 }
-                                .id(asset.id)
-                                .background(
-                                    GeometryReader { geometry in
-                                        Color.clear.preference(
-                                            key: GalleryPositions.self,
-                                            value: [asset.id: geometry.frame(in: .named("gallery")).minY])
-                                    })
                             }
                         }
                         if model.isLoadingGallery { ProgressView("Loading gallery…").frame(maxWidth: .infinity) }
@@ -169,10 +237,11 @@ struct GalleryView: View {
                             Button("Load older photos and videos") { Task { await model.loadGallery() } }
                                 .buttonStyle(.bordered).frame(maxWidth: .infinity)
                         }
-                        Text(
-                            "Up to 300 items are cached. Refresh preserves your visible date; Newest returns to recent captures. Date counts and pages belong to a retained snapshot."
-                        ).font(.caption).foregroundStyle(.secondary)
-                    }.padding()
+                        if model.gallery.nextCursor != nil {
+                            Text("Filters apply to up to 300 loaded items.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(.horizontal, 16).padding(.vertical, 8)
                 }
                 .coordinateSpace(name: "gallery")
                 .onPreferenceChange(GalleryPositions.self) { positions in
@@ -183,25 +252,52 @@ struct GalleryView: View {
                     }
                 }
                 .onChange(of: model.gallery.items.map(\.id)) { _, _ in
+                    selected.formIntersection(Set(model.gallery.items.map(\.id)))
                     if let id = model.scrollTarget ?? model.visibleAnchor { proxy.scrollTo(id, anchor: .top) }
                 }
                 .refreshable { await model.loadGallery(reset: true) }
-                .navigationTitle("Gallery")
+                .navigationTitle("Library")
                 .toolbar {
-                    Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
-                    Button {
-                        datePicker = true
-                    } label: {
-                        Label("Jump to date", systemImage: "calendar")
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Menu {
+                            Button(selecting ? "Cancel selection" : "Select photos") {
+                                selected = []
+                                selecting.toggle()
+                            }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
+                            Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
+                            Button("Jump to date") { datePicker = true }.disabled(model.retainedGallery == nil)
+                        } label: {
+                            Label("Library actions", systemImage: "ellipsis.circle")
+                        }
+                        NavigationLink {
+                            SettingsView(model: model)
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
                     }
-                    .disabled(model.retainedGallery == nil)
-                    Button {
-                        Task { await model.loadGallery(reset: true) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if selecting {
+                        Button("Share \(selected.count) selected") {
+                            if let library = model.selectedLibrary {
+                                shareSelection = ShareSelection(library: library, assets: Array(selected))
+                            }
+                        }
+                        .buttonStyle(.borderedProminent).disabled(selected.isEmpty)
+                        .padding().frame(maxWidth: .infinity).background(.regularMaterial)
                     }
                 }
                 .sheet(isPresented: $datePicker) { TimelineView(model: model) }
+                .sheet(item: $shareSelection) { selection in
+                    NavigationStack { ShareComposer(model: model, selection: selection) }
+                }
+                .task {
+                    if model.ledger.selectedLibraryID == nil, let library = model.libraries.first {
+                        await model.selectLibrary(library.id)
+                    } else if !model.gallery.hasLoaded {
+                        await model.loadGallery(reset: true)
+                    }
+                }
             }
         }
     }
@@ -286,7 +382,9 @@ struct LibrarySelector: View {
                     })
             ) {
                 Text("Select a library").tag(Optional<UUID>.none)
-                ForEach(model.libraries) { Text($0.name).tag(Optional($0.id)) }
+                ForEach(model.libraries) {
+                    Text($0.name + ($0.isReadOnly ? " (shared)" : "")).tag(Optional($0.id))
+                }
             }.disabled(model.isRunning)
             if model.libraryCursor != nil {
                 Button("Load more libraries") {
@@ -303,38 +401,60 @@ struct AssetTile: View {
     @State private var image: UIImage?
     @State private var unavailable = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ZStack {
-                Rectangle().fill(.quaternary)
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFill()
-                } else {
-                    Image(systemName: asset.isVideo ? "video" : "photo").font(.title).foregroundStyle(.secondary)
-                }
-                if asset.isVideo {
-                    Image(systemName: "play.circle.fill").font(.title).foregroundStyle(.white).shadow(radius: 3)
-                }
-            }.frame(height: 115).clipped().clipShape(RoundedRectangle(cornerRadius: 8))
-            Text(asset.fileName).font(.caption).lineLimit(1).foregroundStyle(.primary)
-            if unavailable { Text("Preview unavailable").font(.caption2).foregroundStyle(.secondary) }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(asset.isVideo ? "Video" : "Photo"), \(asset.fileName)")
-        .task(id: "\(model.account ?? "")/\(asset.id)") {
-            guard let api = model.api, let account = model.account else { return }
-            do {
-                let loaded = try await MediaCache.shared.preview(asset, api: api, account: account)
-                guard model.account == account else { return }
-                image = loaded
-            } catch {
-                guard !(error is CancellationError) else { return }
-                unavailable = true
-                if AppModel.accessDenied(error) {
-                    model.clearGalleryAccess()
-                    model.handle(error)
+        Color.clear.aspectRatio(1, contentMode: .fit)
+            .overlay {
+                ZStack {
+                    Rectangle().fill(.quaternary)
+                    if let image {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Image(systemName: asset.isVideo ? "video" : "photo").font(.title).foregroundStyle(.secondary)
+                    }
+                    if asset.isVideo {
+                        Image(systemName: "play.circle.fill").font(.title).foregroundStyle(.white).shadow(radius: 3)
+                    }
                 }
             }
-        }
+            .overlay(alignment: .bottomTrailing) {
+                if asset.sharedBy != nil {
+                    Image(systemName: "person.2.fill").font(.caption2).padding(5)
+                        .foregroundStyle(.white).background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 5))
+                        .padding(4)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if unavailable {
+                    Text("Preview unavailable").font(.caption2).padding(3)
+                        .background(.regularMaterial).frame(maxWidth: .infinity)
+                }
+            }
+            .clipped().clipShape(RoundedRectangle(cornerRadius: 3))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(asset.isVideo ? "Video" : "Photo"), \(asset.fileName)\(asset.sharedBy == nil ? "" : ", shared with you")"
+            )
+            .task(id: "\(model.mediaGeneration)/\(asset.id)") {
+                guard let api = model.api, let account = model.account else { return }
+                let generation = model.mediaGeneration
+                image = nil
+                unavailable = false
+                do {
+                    let loaded = try await MediaCache.shared.preview(asset, api: api, account: account)
+                    guard model.account == account, generation == model.mediaGeneration, !Task.isCancelled else {
+                        return
+                    }
+                    image = loaded
+                } catch {
+                    guard !Task.isCancelled, !(error is CancellationError), generation == model.mediaGeneration else {
+                        return
+                    }
+                    unavailable = true
+                    if AppModel.accessDenied(error) {
+                        model.clearGalleryAccess()
+                        model.handle(error)
+                    }
+                }
+            }
     }
 }
 
@@ -355,66 +475,90 @@ struct OriginalView: View {
     @State private var failure: String?
     @State private var loading = true
     @State private var retry = 0
+    @State private var showingDetails = false
+    @State private var showingPeople = false
+    @State private var shareSelection: ShareSelection?
+    @State private var zoom: CGFloat = 1
+    @State private var lastZoom: CGFloat = 1
     var body: some View {
-        VStack {
+        ZStack {
+            Color.black.ignoresSafeArea()
             if let image {
-                ScrollView([.horizontal, .vertical]) {
-                    Image(uiImage: image).resizable().scaledToFit().frame(
-                        minWidth: 300, idealWidth: 800, maxWidth: 1600)
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                            .frame(width: geometry.size.width * zoom, height: geometry.size.height * zoom)
+                            .onTapGesture(count: 2) {
+                                zoom = zoom == 1 ? 2 : 1
+                                lastZoom = zoom
+                            }
+                            .gesture(
+                                MagnifyGesture().onChanged { value in
+                                    zoom = min(4, max(1, lastZoom * value.magnification))
+                                }.onEnded { _ in lastZoom = zoom }
+                            )
+                            .accessibilityLabel(asset.fileName)
+                    }
                 }
             } else if let player {
                 VideoPlayer(player: player)
             } else if let failure {
-                ContentUnavailableView(
-                    "Preview unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
-                Button("Retry") { retry += 1 }
+                VStack {
+                    ContentUnavailableView(
+                        "Preview unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
+                    Button("Retry") { retry += 1 }
+                }.foregroundStyle(.white)
             } else {
-                ProgressView("Loading preview…")
+                ProgressView("Loading preview…").tint(.white).foregroundStyle(.white)
             }
-            Text("\(asset.fileName) • \(ByteCountFormatter.string(fromByteCount: asset.size, countStyle: .file))").font(
-                .caption
-            ).padding()
-            if asset.isVideo {
-                Text(
-                    "Authenticated, bounded range playback. Export verifies the complete SHA-256; playback alone is not backup evidence."
-                ).font(.caption2)
-            } else {
-                Text("Viewing a resized preview. Export or restore to retrieve the unchanged original.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            if let manifest {
-                Text("\(manifest.kind) • \(manifest.resources.count) original resource(s)").font(.caption)
-                if !manifest.restoreSupported {
-                    Text(
-                        "Edited/archive resources cannot be reconstructed accurately in Photos. Export all originals and the manifest; phone cleanup stays blocked."
-                    ).font(.caption).foregroundStyle(.orange)
-                }
-                Button("Verify complete server retention") {
-                    exporting = true
-                    exportTask = Task {
-                        defer { exporting = false }
-                        do { outcome = try await model.verifyRetention(manifest) } catch {
-                            outcome = error.localizedDescription
-                            model.handle(error)
-                        }
-                    }
-                }.disabled(exporting)
-            }
-            if let outcome { Text(outcome).font(.caption) }
-            if exporting { ProgressView("Downloading and SHA-256 verifying every original…") }
-            HStack {
-                Button("Export all originals") { prepareExport(restore: false) }
-                Button("Save back to Photos") { prepareExport(restore: true) }
-                    .disabled(
-                        manifest.map { !$0.restoreSupported } ?? !(asset.isVideo || asset.mediaType.hasPrefix("image/"))
-                    )
-            }.buttonStyle(.bordered).disabled(exporting || !manifestLoaded)
-            Text(
-                "Export files are temporary until you save them in Files or Photos. Leaving this viewer cancels downloads and removes its cache."
-            ).font(.caption2).foregroundStyle(.secondary).padding()
         }
-        .navigationTitle(asset.isVideo ? "Video" : "Photo")
+        .navigationTitle(GalleryDates.parse(asset.createdAt)?.formatted(date: .abbreviated, time: .omitted) ?? "Photo")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarBackground(.black, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
+                if let owner = asset.sharedBy {
+                    Label("Shared by \(owner)", systemImage: "person.2").font(.caption)
+                }
+                if exporting { ProgressView("Verifying originals…") }
+                if let outcome { Text(outcome).font(.caption) }
+                HStack {
+                    if !asset.isVideo {
+                        Button {
+                            showingPeople = true
+                        } label: {
+                            Label("People", systemImage: "person.2")
+                        }
+                        Spacer()
+                    }
+                    Menu {
+                        if asset.sharedBy == nil {
+                            Button("Share with a known user") {
+                                shareSelection = ShareSelection(
+                                    library: model.libraries.first(where: { $0.id == asset.libraryId })
+                                        ?? Library(id: asset.libraryId, name: "Library"),
+                                    assets: [asset.id])
+                            }
+                        }
+                        Button("Export all originals") { prepareExport(restore: false) }
+                            .disabled(exporting || !manifestLoaded)
+                        Button("Save back to Photos") { prepareExport(restore: true) }
+                            .disabled(exporting || !manifestLoaded || manifest?.restoreSupported == false)
+                    } label: {
+                        Label("Share or export", systemImage: "square.and.arrow.up")
+                    }
+                    Spacer()
+                    Button {
+                        showingDetails = true
+                    } label: {
+                        Label("Info", systemImage: "info.circle")
+                    }
+                }.font(.title3).labelStyle(.iconOnly).buttonStyle(.bordered)
+            }.padding().foregroundStyle(.white).background(.black)
+        }
         .task(id: retry) {
             guard let api = model.api else { return }
             let version = model.epoch
@@ -480,6 +624,65 @@ struct OriginalView: View {
         .sheet(isPresented: $sharing) {
             if let exported { FileShareView(files: exported.shareFiles) }
         }
+        .sheet(isPresented: $showingDetails) {
+            NavigationStack {
+                ScrollView { originalDetails.padding() }
+                    .navigationTitle("Original details")
+                    .toolbar { Button("Done") { showingDetails = false } }
+            }
+        }
+        .sheet(isPresented: $showingPeople) {
+            NavigationStack {
+                PhotoPeopleView(model: model, asset: asset)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Done") { showingPeople = false } }
+                    }
+            }
+        }
+        .sheet(item: $shareSelection) { selection in
+            NavigationStack { ShareComposer(model: model, selection: selection) }
+        }
+    }
+    private var originalDetails: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(asset.fileName).font(.headline).textSelection(.enabled)
+            Text(ByteCountFormatter.string(fromByteCount: asset.size, countStyle: .file))
+            Text(
+                asset.isVideo
+                    ? "Playback uses authenticated ranges. Only a complete export verifies the original SHA-256."
+                    : "You are viewing a resized preview. Export and restore retrieve the unchanged original.")
+            if let manifest {
+                Text("\(manifest.kind) · \(manifest.resources.count) original resources")
+                if !manifest.restoreSupported {
+                    Text(
+                        "Edited/archive resources cannot be reconstructed accurately in Photos. Export preserves originals and their manifest; cleanup stays blocked."
+                    )
+                    .foregroundStyle(.orange)
+                }
+                Button("Verify complete server retention") {
+                    exporting = true
+                    let epoch = model.epoch
+                    exportTask = Task {
+                        defer { exporting = false }
+                        do {
+                            let result = try await model.verifyRetention(manifest)
+                            guard epoch == model.epoch, !Task.isCancelled else { return }
+                            outcome = result
+                        } catch {
+                            guard epoch == model.epoch else { return }
+                            outcome = error.localizedDescription
+                            model.handle(error)
+                        }
+                    }
+                }.disabled(exporting)
+            }
+            if exporting { ProgressView("Verifying originals…") }
+            if let outcome { Text(outcome) }
+            Text(
+                "Temporary exports are removed when you leave the viewer. Save them to Files or Photos to keep a copy. Server retention is not an independent backup."
+            )
+            .font(.footnote).foregroundStyle(.secondary)
+        }
     }
     private func prepareExport(restore: Bool) {
         guard let api = model.api, !exporting else { return }
@@ -532,8 +735,18 @@ struct BackupView: View {
     @Bindable var model: AppModel
     @State private var picker = false
     var body: some View {
-        NavigationStack {
+        Group {
             List {
+                Section {
+                    BackupStatusView(model: model).listRowInsets(EdgeInsets())
+                }.listRowBackground(Color.clear)
+                Section {
+                    Button(model.ledger.settings.backupPaused == true ? "Resume backup" : "Pause backup") {
+                        Task { await model.setBackupPaused(model.ledger.settings.backupPaused != true) }
+                    }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
+                    Text("Pausing stops new uploads. A current Photos export or server verification may finish.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section {
                     LibrarySelector(model: model)
                     if model.needsReauthentication {
@@ -546,11 +759,15 @@ struct BackupView: View {
                             await model.requestPhotos()
                             picker = true
                         }
-                    }.disabled(model.selectedLibrary == nil || model.isRunning)
+                    }.disabled(
+                        model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
+                            || model.isRunning || model.ledger.settings.backupPaused == true)
                     Button("Resume uploads / scan accessible Photos") {
                         Task { await model.runBackup(ignoreBackoff: true) }
                     }
-                    .disabled(model.isRunning || model.selectedLibrary == nil)
+                    .disabled(
+                        model.isRunning || model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true
+                            || model.ledger.settings.backupPaused == true)
                     if model.isRunning { ProgressView(model.activity) }
                     Text(
                         "Uploads use originals, not thumbnails. Selected imports require Photos identity access. Cloud-only originals may download first. Wi-Fi is the default."
@@ -587,12 +804,20 @@ struct BackupView: View {
                 }
                 Section("Recent uploads (\(model.ledger.records.count) tracked)") {
                     if model.recentUploads.isEmpty { Text("No originals have been queued for this account.") }
-                    ForEach(model.recentUploads) { record in
+                    ForEach(model.recentUploads.filter { $0.libraryId == model.ledger.selectedLibraryID }) { record in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(record.fileName).font(.headline)
                             Text(
                                 "\(record.phase.rawValue) resource • \(ByteCountFormatter.string(fromByteCount: record.size, countStyle: .file))"
                             )
+                            if record.phase == .uploading, let chunkSize = model.connection?.config.chunkSize,
+                                record.size > 0
+                            {
+                                ProgressView(
+                                    value: Double(record.receivedParts.count),
+                                    total: Double(Chunking.count(size: record.size, chunkSize: chunkSize)))
+                                Text("\(record.receivedParts.count) parts acknowledged by server").font(.caption)
+                            }
                             if let set = model.ledger.resourceSets?.first(where: { $0.id == record.resourceSetId }) {
                                 Text(
                                     set.manifest == nil
@@ -645,8 +870,14 @@ struct SettingsView: View {
             })
     }
     var body: some View {
-        NavigationStack {
+        Group {
             Form {
+                AppearancePicker()
+                Section("Library") {
+                    LibrarySelector(model: model)
+                    NavigationLink("Backup and upload queue") { BackupView(model: model) }
+                    NavigationLink("Manage shared access") { SharingListView(model: model, received: false) }
+                }
                 Section("Independent opt-ins") {
                     Toggle("Automatically back up accessible Photos", isOn: setting(\.automaticBackup))
                     Text(

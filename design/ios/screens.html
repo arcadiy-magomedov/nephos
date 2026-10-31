@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nephos — дизайн iOS</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eff0f3;color:#20232a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+    .board{width:1280px;margin:auto;padding:44px 44px 40px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:2.6px;font-weight:700;color:#777f8b}
+    .intro{display:flex;align-items:end;justify-content:space-between;margin:12px 0 28px}.intro h1{font-size:36px;letter-spacing:-1.6px;margin:0}.intro p{font-size:13px;color:#747b86;line-height:1.65;margin:0;max-width:370px}
+    .row{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.caption{margin:18px 0 8px;display:flex;align-items:center;gap:10px}.caption b{font-size:16px;letter-spacing:-.3px}.number{font-size:11px;font-weight:700;color:#848c96}.desc{font-size:12px;line-height:1.6;color:#747b86;margin:0 0 18px;min-height:38px}
+    .phone{--bg:#fff;--fg:#202529;--muted:#83908e;--line:#edf0ef;--accent:#188674;--wash:#e9f4ef;position:relative;background:var(--bg);color:var(--fg);border:7px solid #202328;border-radius:44px;height:788px;overflow:hidden;box-shadow:0 14px 30px #14233112}
+    .phone.dark,body[data-theme="dark"] .phone:not(.light):not(.viewer){--bg:#131a1c;--fg:#f6f8f7;--muted:#899896;--line:#2a3335;--accent:#9cdec8;--wash:#263e37}
+    .status{height:49px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:650;position:relative}.island{position:absolute;width:102px;height:28px;top:8px;left:calc(50% - 51px);background:#080a0c;border-radius:18px}.signal{font-size:11px;letter-spacing:1px}
+    .content{padding:14px 20px 0}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:9px}.round{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--line);flex-shrink:0}.round svg{width:17px;height:17px}.title{margin:17px 0 5px;font-size:31px;letter-spacing:-1.2px;line-height:1.1;font-weight:760}.sub{font-size:12px;color:var(--muted);line-height:1.5}.pill{border-radius:16px;padding:7px 10px;background:var(--wash);color:var(--accent);font-size:10px;font-weight:650;display:inline-flex;gap:5px;align-items:center}.pill svg{width:12px;height:12px}
+    .tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--line);margin:20px 0}.tab{padding:8px 10px;font-size:11px;color:var(--muted);flex:1;text-align:center;white-space:nowrap}.tab.active{background:var(--bg);box-shadow:0 2px 5px #0000000a;color:var(--fg);border-radius:9px;font-weight:650}
+    .date{display:flex;justify-content:space-between;align-items:baseline;margin:18px 0 10px;font-size:16px;font-weight:680;letter-spacing:-.3px}.date span{font-size:10px;font-weight:400;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}.grid.large{grid-template-columns:repeat(2,1fr);gap:5px}.photo{width:100%;aspect-ratio:1;position:relative;overflow:hidden;border-radius:3px;background:#ccded5}.photo img{width:100%;height:100%;object-fit:cover;display:block}.photo.wide{aspect-ratio:1.65}.badge{position:absolute;bottom:5px;right:5px;font-size:8px;color:white;background:#122c367a;border-radius:5px;padding:3px 4px;backdrop-filter:blur(8px)}.badge svg{width:10px;height:10px;vertical-align:middle}
+    .bottom{position:absolute;bottom:0;left:0;right:0;background:var(--bg);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:13px 6px 30px}.nav{font-size:9px;text-align:center;color:var(--muted);min-width:50px}.nav svg{display:block;margin:0 auto 5px;width:21px;height:21px}.nav.active{color:var(--accent);font-weight:700}.home{width:104px;height:4px;background:var(--fg);opacity:.85;position:absolute;bottom:9px;left:calc(50% - 52px);border-radius:8px}
+    .section-label{font-size:11px;font-weight:650;color:var(--accent)}
+    .page-heading{margin:12px 0}.page-heading .title{margin:0}.page-heading a{text-decoration:none}
+    .row>article{min-width:0}
+    .appearance{border:0;margin:29px 0 15px;padding:0;min-width:0}.appearance legend{font-size:12px;font-weight:650;margin-bottom:12px}.appearance-options{background:var(--line);border-radius:13px;padding:0 14px}.appearance label{display:flex;align-items:center;gap:12px;min-height:55px;border-bottom:1px solid var(--bg);font-size:13px;cursor:pointer}.appearance label:last-child{border:0}.appearance input{margin-left:auto;width:20px;height:20px;accent-color:var(--accent)}
+    #theme-storage-error{color:var(--fg)}a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+    .searchbox{display:flex;align-items:center;gap:9px;background:var(--line);border-radius:13px;padding:13px 12px;font-size:13px;margin:20px 0 14px}.searchbox svg{width:17px;height:17px;color:var(--muted)}.chips{display:flex;gap:7px;margin:12px 0 20px;flex-wrap:wrap}.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:20px;padding:7px 10px;font-size:11px}.chip.on{background:var(--wash);border-color:var(--wash);color:var(--accent)}.chip .avatar{width:20px;height:20px}.hint{font-size:11px;line-height:1.6;color:var(--muted)}
+    .avatar{height:48px;width:48px;border-radius:50%;overflow:hidden;display:inline-block;background:#e5ece7;flex-shrink:0}.avatar img{width:100%;height:100%;object-fit:cover}.people{display:grid;grid-template-columns:1fr 1fr;gap:23px 20px;margin-top:25px;text-align:center}.person .avatar{width:103px;height:103px}.person b{display:block;font-size:14px;margin:9px 0 4px}.person small{font-size:11px;color:var(--muted)}
+    .back{font-size:12px;display:flex;gap:4px;align-items:center}.back svg{width:16px;height:16px}.profile{text-align:center;padding:20px 0 9px}.profile .avatar{width:86px;height:86px}.profile h2{font-size:25px;letter-spacing:-.6px;margin:10px 0 4px}.actions{display:flex;justify-content:center;gap:8px;margin:15px 0}.actions .chip{font-size:10px;padding:8px 10px}
+    .sheet-shade{position:absolute;inset:0;background:#12242255}.sheet{position:absolute;bottom:0;left:0;right:0;background:var(--bg);border-radius:24px 24px 0 0;padding:12px 22px 36px;box-shadow:0 -10px 30px #00000010}.grab{width:30px;height:4px;border-radius:4px;background:#dce1df;margin:0 auto 21px}.sheet h2{font-size:24px;line-height:1.15;letter-spacing:-.7px;margin:0 0 10px}.merge-pair{display:flex;align-items:center;justify-content:center;gap:23px;margin:23px 0}.merge-pair .person{text-align:center}.merge-pair .avatar{width:73px;height:73px}.merge-pair svg{width:23px;height:23px;color:var(--accent)}.info{background:var(--wash);border-radius:12px;padding:12px;color:var(--accent);font-size:11px;line-height:1.6;margin:19px 0}
+    .button{background:var(--accent);color:var(--bg);border-radius:13px;padding:15px 10px;text-align:center;font-size:13px;font-weight:680;margin:12px 0}.button.secondary{background:var(--line);color:var(--fg)}.textbutton{font-size:12px;text-align:center;color:var(--muted);padding:9px}
+    .viewer{--bg:#101516;--fg:#fff;--muted:#a4b2ae;--line:#263133;--accent:#c6efdf;background:var(--bg)}.viewer .view-image{position:absolute;top:151px;left:0;right:0;height:449px;overflow:hidden}.view-image img{width:100%;height:100%;object-fit:cover}.view-top{padding:11px 19px;display:flex;align-items:center;justify-content:space-between}.view-top strong{font-size:13px;display:block}.view-top small{font-size:10px;color:var(--muted)}.view-footer{position:absolute;bottom:44px;left:22px;right:22px}.view-footer .toolbar{margin-top:21px;justify-content:space-around}.view-footer svg{width:22px;height:22px}.face-label{display:inline-flex;align-items:center;gap:7px;border:1px solid #455653;border-radius:18px;padding:5px 10px 5px 5px;font-size:11px}.face-label .avatar{width:23px;height:23px}
+    .sync-card{background:var(--wash);border-radius:20px;text-align:center;padding:25px 15px 17px;margin:23px 0}.ring{width:132px;height:132px;border-radius:50%;background:conic-gradient(var(--accent) 0 358.74deg,#c6e2d7 358.74deg 360deg);padding:7px;margin:0 auto 19px}.ring-inner{width:100%;height:100%;border-radius:50%;background:var(--wash);display:flex;align-items:center;justify-content:center;flex-direction:column}.ring-inner strong{font-size:29px;letter-spacing:-1px}.ring-inner span{font-size:10px;margin-top:4px;color:var(--muted)}.sync-card h2{font-size:18px;letter-spacing:-.4px;margin:0 0 8px}.sync-card p{font-size:11px;line-height:1.6;margin:0;color:var(--muted)}
+    .listrow{display:flex;gap:11px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}.listrow b{font-size:12px;display:block;margin-bottom:4px}.listrow small{font-size:10px;color:var(--muted)}.listrow .tail{margin-left:auto;font-size:11px;color:var(--accent)}.listrow .mini{width:41px;height:41px;border-radius:7px;object-fit:cover}.check{background:var(--accent);color:var(--bg);width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px}.empty-check{width:20px;height:20px;border:1.5px solid #dce3df;border-radius:50%;margin-left:auto}.stack{display:flex;align-items:center;margin:18px 0 5px;height:113px}.stack img{width:90px;height:100px;object-fit:cover;border:3px solid var(--bg);border-radius:10px;transform:rotate(-7deg)}.stack img:nth-child(2){transform:rotate(5deg);margin-left:-14px}.stack img:nth-child(3){transform:rotate(-3deg);margin-left:-15px}.stack span{font-size:12px;color:var(--muted);margin-left:18px}
+    .floating-action{position:absolute;bottom:35px;left:20px;right:20px}.album-card{margin-bottom:20px}.album-card img{width:100%;aspect-ratio:1.15;border-radius:11px;object-fit:cover}.album-card b{font-size:13px;display:block;margin:8px 0 4px}.album-card small{font-size:10px;color:var(--muted)}
+    .board-foot{display:flex;justify-content:space-between;color:#8d949e;font-size:10px;padding-top:17px;border-top:1px solid #dce0e5;margin-top:15px}.tag{display:inline-block;border:1px solid #cfd9d5;border-radius:20px;font-size:10px;padding:5px 9px;color:#537366}
+    a{color:inherit}svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}button{font:inherit}
+    @media(max-width:800px){.board{width:100%;padding:24px}.row{grid-template-columns:1fr;max-width:380px;margin:auto}.intro{display:block}.intro p{margin-top:14px}.phone{height:788px}.board-foot{line-height:1.6;gap:20px}}
+  </style>
+</head>
+<body>
+  <section class="board" id="directions">
+    <div class="eyebrow">Nephos · iOS · дизайн-концепт</div>
+    <div class="intro"><h1>Один интерфейс. Две темы.</h1><p>По умолчанию — оформление системы.<br>Выбор в настройках меняет палитру всех макетов ниже. Два образца галереи остаются для сравнения.</p></div>
+    <div class="row" id="styles"></div>
+    <div class="board-foot"><span>01 / Светлая, тёмная и системная тема · одинаковая структура</span><span>Оригинальные иллюстрации вместо личных фото · демонстрационные данные</span></div>
+  </section>
+  <section class="board" id="discovery">
+    <div class="eyebrow">Основные сценарии · выбранная тема</div>
+    <div class="intro"><h1>Найти. Узнать. Вспомнить.</h1><p>Поиск обычными словами, личные имена людей<br>и фотографии каждого человека.</p></div>
+    <div class="row" id="discovery-screens"></div>
+    <div class="board-foot"><span>02 / Поиск и люди</span><span>Концепт интерфейса, не скриншоты реализованных функций</span></div>
+  </section>
+  <section class="board" id="actions">
+    <div class="eyebrow">Основные сценарии · без потери контроля</div>
+    <div class="intro"><h1>Смотреть. Исправлять. Сохранять.</h1><p>Лёгкое превью при просмотре. Обратимые исправления.<br>Честный статус фоновой выгрузки.</p></div>
+    <div class="row" id="action-screens"></div>
+    <div class="board-foot"><span>03 / Просмотр, объединение и backup</span><span>iOS управляет фоновым выполнением · оригиналы не подменяются превью</span></div>
+  </section>
+  <section class="board" id="sharing">
+    <div class="eyebrow">Личная библиотека · общий доступ</div>
+    <div class="intro"><h1>Делиться — осознанно.</h1><p>Только известные пользователи. Выбранные фотографии<br>по умолчанию. Общий доступ можно отозвать.</p></div>
+    <div class="row" id="sharing-screens"></div>
+    <div class="board-foot"><span>04 / Альбомы и sharing</span><span>Доступ к фотографиям не передаёт ваши личные подписи лиц</span></div>
+  </section>
+  <script>
+    const paths={
+      grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+      search:'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15 M16 16l5 5',
+      people:'M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M2 21v-2a6 6 0 0 1 12 0v2 M16 4a4 4 0 0 1 0 8 M18 16a5 5 0 0 1 4 5',
+      albums:'M4 7h16v14H4z M6 4h12 M8 1h8',
+      cloud:'M6 17a4 4 0 0 1-1-8 7 7 0 0 1 13-2 5 5 0 0 1 0 10 M9 15l2 2 4-5',
+      more:'M5 12h.01 M12 12h.01 M19 12h.01',
+      settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z',
+      back:'M15 5l-7 7 7 7',
+      share:'M12 15V2 M8 6l4-4 4 4 M5 10H3v11h18V10h-2',
+      heart:'M12 21 3 12C-3 4 7-2 12 5c5-7 15-1 9 7z',
+      info:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 11v6 M12 7h.01',
+      close:'M6 6l12 12 M18 6 6 18',
+      arrow:'M3 12h18 M15 6l6 6-6 6',
+      plus:'M12 4v16 M4 12h16',
+      wifi:'M2 8a16 16 0 0 1 20 0 M5 12a11 11 0 0 1 14 0 M8 16a6 6 0 0 1 8 0 M12 20h.01',
+      check:'M5 12l4 4L19 6'
+    };
+    function icon(name){return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.more}"/></svg>`}
+    function uri(svg){return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)}
+    const sceneBody=[
+      '<rect width="600" height="600" fill="#b6dce2"/><circle cx="430" cy="120" r="47" fill="#fff2bd"/><path d="M0 290L190 105 350 290 510 170 600 300V600H0Z" fill="#849f94"/><path d="m135 160 55-55 49 56-42-10-19 21Z" fill="#f1f2e6"/><path d="M0 345Q160 315 310 355T600 345V600H0Z" fill="#478f98"/><path d="M0 445Q150 395 300 450T600 435" fill="none" stroke="#bddad5" stroke-width="7"/><path d="M70 600 220 415l42 14-58 171Z" fill="#dec495"/>',
+      '<rect width="600" height="600" fill="#eed1a7"/><circle cx="430" cy="200" r="70" fill="#fff0be"/><path d="M0 305Q260 330 600 280V600H0Z" fill="#6ea7b1"/><path d="M0 400Q180 470 400 365L600 395V600H0Z" fill="#e0ba82"/><path d="M0 388Q175 463 400 356L600 386" fill="none" stroke="#eff5dc" stroke-width="14"/><path d="M82 290 130 128 200 290Z" fill="#edf0da"/><path d="M130 128v220" stroke="#776754" stroke-width="6"/><path d="m62 343 154 0-36 28H99Z" fill="#776754"/>',
+      '<rect width="600" height="600" fill="#d0d6c1"/><circle cx="450" cy="108" r="50" fill="#f5e1a5"/><path d="M0 300 110 80 230 290 390 50 600 310v290H0Z" fill="#748676"/><path d="M0 410q240-230 600-55v245H0Z" fill="#9eae81"/><path d="M220 600q-60-95 125-160t130-125" fill="none" stroke="#eee1b8" stroke-width="38"/><path d="M55 480V210 M37 300l18-52 23 52 M28 357l27-80 34 80" stroke="#3e6855" stroke-width="19" fill="#3e6855"/>',
+      '<rect width="600" height="600" fill="#c0d9d7"/><rect x="15" y="160" width="180" height="440" fill="#c88767"/><rect x="205" y="90" width="178" height="510" fill="#ead5b1"/><rect x="390" y="210" width="190" height="390" fill="#a9b6a2"/><path d="M40 205h40v70H40z M120 205h40v70h-40z M40 315h40v70H40z M120 315h40v70h-40z M237 140h40v80h-40z M310 140h40v80h-40z M237 265h40v80h-40z M310 265h40v80h-40z M425 245h42v80h-42z M505 245h42v80h-42z" fill="#5c7474"/><path d="M0 525h600v75H0Z" fill="#c6b698"/>',
+      '<rect width="600" height="600" fill="#ddd8c4"/><path d="M0 375Q120 285 300 356T600 345V600H0Z" fill="#a4ad82"/><path d="M0 452Q300 300 600 449V600H0Z" fill="#668674"/><path d="M0 550Q200 470 600 530V600H0Z" fill="#3c695b"/><path d="M110 350v-115 M80 256q15-100 50-45 51-26 51 56-30 71-74 50-48 16-27-61Z" fill="#557b5a"/><circle cx="465" cy="110" r="40" fill="#f9efc7"/>',
+      '<rect width="600" height="600" fill="#6c8190"/><circle cx="431" cy="135" r="53" fill="#f6c397"/><path d="M0 320 195 160l145 145 154-106 106 113V600H0Z" fill="#4d646b"/><path d="M0 405q300-20 600 6v189H0Z" fill="#476e7d"/><path d="m340 447 58 0 M320 469h115 M282 490h183 M250 515h240" stroke="#e5bd95" stroke-width="9"/><path d="M0 570 128 400 194 600H0Z" fill="#263e47"/>'
+    ];
+    const scenes=sceneBody.map((body,i)=>uri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">${body}<filter id="n"><feTurbulence baseFrequency=".7" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".075"/></feComponentTransfer></filter><rect width="600" height="600" opacity=".5" filter="url(#n)"/></svg>`));
+    function portrait(i){
+      const backgrounds=['#e4d8c7','#d4e4dd','#e7cfc2','#d6dceb'];
+      const hair=['#654936','#343f3b','#8d644c','#b89567'];
+      return uri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="${backgrounds[i%4]}"/><ellipse cx="100" cy="190" rx="78" ry="67" fill="${['#668779','#728397','#c08066','#888974'][i%4]}"/><path d="M52 83q0-63 49-62 54 0 49 70l-6 51H56Z" fill="${hair[i%4]}"/><ellipse cx="100" cy="90" rx="35" ry="47" fill="#ddb298"/><path d="M63 68q4-43 41-33 29 2 32 31-29-1-43-21-5 25-30 23Z" fill="${hair[i%4]}"/><path d="M85 91h1 M113 91h1" stroke="#615246" stroke-width="5" stroke-linecap="round"/><path d="M91 113q9 8 19 0" stroke="#a67461" stroke-width="3" fill="none"/><path d="M86 134v12q14 17 28 0v-13" fill="#ddb298"/></svg>`);
+    }
+    function avatar(i=0){return `<span class="avatar"><img src="${portrait(i)}" alt="Условный портрет"></span>`}
+    function photo(i,badge='',extra=''){return `<div class="photo ${extra}"><img src="${scenes[i%6]}" alt="Иллюстрация вместо фотографии">${badge?`<span class="badge">${badge}</span>`:''}</div>`}
+    function grid(indices=[0,1,2,3,4,5,2,0,4],large=false){return `<div class="grid${large?' large':''}">${indices.map((i,j)=>photo(i,j===2?'0:14':j===4?icon('people'):'')).join('')}</div>`}
+    function status(){return '<div class="status"><span>9:41</span><span class="island"></span><span class="signal">▴▴▴ &nbsp;◒ ▰</span></div>'}
+    function nav(active='grid'){return `<div class="bottom">${[['grid','Фото'],['search','Поиск'],['people','Люди'],['albums','Альбомы']].map(([key,label])=>`<div class="nav ${active===key?'active':''}">${icon(key)}${label}</div>`).join('')}</div><div class="home"></div>`}
+    function phone(body,style='',active='grid',bottom=true){return `<div class="phone ${style}">${status()}${body}${bottom?nav(active):'<div class="home"></div>'}</div>`}
+    function card(n,title,desc,body){return `<article><div class="caption"><span class="number">${n}</span><b>${title}</b></div><p class="desc">${desc}</p>${body}</article>`}
+    function heading(title,action='more'){
+      const control=action==='settings'
+        ? `<a class="round" href="#theme-settings" aria-label="Настройки">${icon(action)}</a>`
+        : `<span class="round">${icon(action)}</span>`;
+      return `<div class="toolbar page-heading"><h2 class="title">${title}</h2>${control}</div>`;
+    }
+    const photoHead=`${heading('Медиатека','settings')}<div class="toolbar"><span class="sub">12 408 фото · 286 видео</span><span class="pill">${icon('cloud')} 42 осталось</span></div><div class="tabs"><span class="tab active">Все</span><span class="tab">Фото</span><span class="tab">Видео</span><span class="tab">Общие</span></div>`;
+    const galleryBody=`<div class="content">${photoHead}<div class="date">Сегодня<span>31 октября</span></div>${grid([0,4,1,3,2,5])}<div class="date">Вчера<span>30 октября</span></div>${grid([2,0,4,5,1,3])}</div>`;
+    const mainA=phone(galleryBody,'light');
+    const mainB=phone(galleryBody,'dark');
+    const settings=phone(`<div class="content" id="theme-settings"><a class="back" href="#directions" style="text-decoration:none">${icon('back')} Медиатека</a><h2 class="title">Настройки</h2><fieldset class="appearance"><legend>Оформление</legend><div class="appearance-options"><label>Как в системе<input type="radio" name="appearance" value="system" checked></label><label>Светлая<input type="radio" name="appearance" value="light"></label><label>Тёмная<input type="radio" name="appearance" value="dark"></label></div></fieldset><p class="hint" id="theme-description">Тема меняется вместе с оформлением системы.</p><p class="hint" id="theme-storage-error" role="alert" hidden></p></div>`,'','',false);
+    document.querySelector('#styles').innerHTML=[
+      card('01','Светлая тема','Без декоративных надзаголовков.<br>Название и настройки — в одной строке.',mainA),
+      card('02','Тёмная тема','Те же фотографии, сетка и действия.<br>Меняется только цветовая палитра.',mainB),
+      card('03','Настройки оформления','Переключатель работает в этом макете.<br>Выбор сохраняется в браузере; по умолчанию — система.',settings)
+    ].join('');
+    const search=phone(`<div class="content">${heading('Поиск')}<div class="searchbox">${icon('search')}<span>Море с Машей</span><span style="margin-left:auto;color:var(--muted)">×</span></div><div class="chips"><span class="chip on">${avatar(0)} Маша ×</span><span class="chip on">Море ×</span><span class="chip">Дата +</span></div><div class="date">Нашлось 38 фото<span>Фильтры</span></div>${grid([1,0,5,1,2,0,5,4,1])}<p class="hint">Можно искать по описанию, человеку<br>или сочетать их в одном запросе.</p></div>`,'','search');
+    const people=phone(`<div class="content">${heading('Люди')}<div class="searchbox">${icon('search')}<span style="color:var(--muted)">Найти по имени</span></div><div class="people">${[[0,'Маша','312 фотографий'],[1,'Алексей','184 фотографии'],[2,'Анна','96 фотографий'],[3,'Без имени','24 фотографии']].map(([i,n,c])=>`<div class="person">${avatar(i)}<b>${n}</b><small>${c}</small></div>`).join('')}</div><div class="info" style="margin-top:28px">Похожи на одного человека?<br><strong>Проверить 2 предложенных совпадения →</strong></div><p class="hint">Имена задаёте вы. Их не видят получатели<br>общих фотографий.</p></div>`,'','people');
+    const person=phone(`<div class="content"><div class="toolbar"><span class="back">${icon('back')} Люди</span><span class="round">${icon('more')}</span></div><div class="profile">${avatar(0)}<h2>Маша</h2><span class="sub">312 фотографий · 2022–2026</span><div class="actions"><span class="chip">Изменить имя</span><span class="chip">Объединить…</span></div></div><div class="date">Октябрь 2026<span>Выбрать</span></div>${grid([4,0,3,2,1,5])}<div class="date">Август 2026<span>38 фото</span></div>${grid([1,5,0])}</div>`,'','people');
+    document.querySelector('#discovery-screens').innerHTML=[
+      card('04','Умный поиск','Свободный текст + человек. Видимые фильтры<br>вместо скрытой «магии» поиска.',search),
+      card('05','Люди','Имена, неизвестные лица и предложения.<br>Личные подписи не становятся общими.',people),
+      card('06','Фотографии человека','Сначала фотографии. Редактирование имени<br>и исправление группировки — рядом.',person)
+    ].join('');
+    const viewer=phone(`<div class="view-top"><span class="round">${icon('back')}</span><div style="text-align:center"><strong>14 августа</strong><small>18:42 · Лето у моря</small></div><span class="round">${icon('more')}</span></div><div class="view-image"><img src="${scenes[1]}" alt="Иллюстрация вместо полноэкранной фотографии"></div><div class="view-footer"><span class="face-label">${avatar(0)} Маша</span><div class="toolbar">${icon('heart')}${icon('share')}${icon('info')}${icon('people')}</div></div>`,'viewer','',false);
+    const merge=phone(`<div class="content"><h2 class="title">Люди</h2><div class="people"><div class="person">${avatar(0)}<b>Маша</b></div><div class="person">${avatar(1)}<b>Алексей</b></div></div></div><div class="sheet-shade"></div><div class="sheet"><div class="grab"></div><h2>Это один человек?</h2><p class="hint">Объедините фотографии в одну группу.<br>Имя «Маша» сохранится.</p><div class="merge-pair"><div class="person">${avatar(0)}<b>Маша</b><small>312 фото</small></div>${icon('plus')}<div class="person">${avatar(0)}<b>Без имени</b><small>24 фото</small></div></div><div class="info">Оригиналы не изменятся.<br>Объединение можно отменить в истории изменений.</div><div class="button">Объединить 336 фотографий</div><div class="button secondary">Нет, это разные люди</div><div class="textbutton">Решить позже</div></div>`,'','',false);
+    const backup=phone(`<div class="content"><div class="toolbar"><span class="back">${icon('back')} Медиатека</span><span class="round">${icon('info')}</span></div><h2 class="title">Резервная копия</h2><div class="sync-card"><div class="ring"><div class="ring-inner"><strong>11 958</strong><span>из 12 000 объектов</span></div></div><h2>Сохраняем оригиналы</h2><p>Осталось 42 объекта · 268 МБ<br>Подключено по Wi-Fi</p></div><div class="toolbar"><b style="font-size:13px">Сейчас загружаются</b><span class="section-label">Пауза</span></div><div class="listrow"><img class="mini" src="${scenes[0]}" alt=""><div><b>Сегодня, 12:34</b><small>Фото · 4,8 МБ</small></div><span class="tail">78%</span></div><div class="listrow"><img class="mini" src="${scenes[4]}" alt=""><div><b>Сегодня, 12:31</b><small>Видео · 86 МБ</small></div><span class="tail">В очереди</span></div><div class="listrow">${icon('wifi')}<div><b>Только по Wi-Fi</b><small>Изменить условия загрузки</small></div><span class="tail">›</span></div><p class="hint">Фоновое выполнение зависит от iOS.<br>При открытии приложения загрузка продолжится.</p></div>`,'','',false);
+    document.querySelector('#action-screens').innerHTML=[
+      card('07','Просмотр фотографии','Фото занимает экран. Оригинал — явное действие<br>в меню, а не обязательная загрузка при открытии.',viewer),
+      card('08','Объединение кластеров','Понятно, что объединяется и как отменить.<br>Есть действие «Это разные люди».',merge),
+      card('09','Backup без обещаний магии','Прогресс по реальным объектам, пауза и Wi-Fi.<br>Нет заявления «всегда работает в фоне».',backup)
+    ].join('');
+    const albums=phone(`<div class="content">${heading('Альбомы','plus')}<div class="tabs"><span class="tab active">Мои</span><span class="tab">Общие со мной</span></div><div class="grid large" style="gap:16px;margin-top:23px"><div class="album-card"><img src="${scenes[1]}" alt=""><b>Лето у моря</b><small>128 фото · 8 видео</small></div><div class="album-card"><img src="${scenes[4]}" alt=""><b>Выходные</b><small>46 фотографий</small></div><div class="album-card"><img src="${scenes[3]}" alt=""><b>Город</b><small>92 фотографии</small></div><div class="album-card"><img src="${scenes[0]}" alt=""><b>В горах</b><small>54 фото · Общий доступ</small></div></div><div class="info">Вы поделились 3 подборками<br><strong>Управлять доступом →</strong></div></div>`,'','albums');
+    const share=phone(`<div class="content"><div class="toolbar"><span class="back">${icon('back')} Отмена</span><span class="section-label">12 выбрано</span></div><h2 class="title">Поделиться</h2><div class="stack"><img src="${scenes[0]}" alt=""><img src="${scenes[4]}" alt=""><img src="${scenes[1]}" alt=""><span>Ещё 9<br>фотографий</span></div><div class="date">С кем?<span>Пользователи сервера</span></div><div class="searchbox">${icon('search')}<span style="color:var(--muted)">Найти человека</span></div><div class="listrow">${avatar(2)}<div><b>Анна</b><small>Известный пользователь</small></div><span class="check" style="margin-left:auto">✓</span></div><div class="listrow">${avatar(1)}<div><b>Алексей</b><small>Известный пользователь</small></div><span class="empty-check"></span></div><div class="info">Анна сможет смотреть и скачивать эти фото.<br>Ваши подписи лиц останутся личными.</div><div class="floating-action"><div class="button">Поделиться 12 фотографиями</div><div class="textbutton">Не включает будущие загрузки</div></div></div>`,'','',false);
+    const access=phone(`<div class="content"><div class="toolbar"><span class="back">${icon('back')} Альбомы</span><span class="round">${icon('more')}</span></div><h2 class="title">Общий доступ</h2><div class="sub">Вы контролируете, кто видит фотографии.</div><div class="date" style="margin-top:26px">Анна<span>Изменить</span></div><div class="listrow">${avatar(2)}<div><b>12 выбранных фотографий</b><small>Только просмотр и скачивание</small></div></div><div class="grid" style="margin-top:16px">${[0,4,1].map(i=>photo(i)).join('')}</div><div class="date" style="margin-top:27px">Что доступно?<span></span></div><div class="listrow"><span class="check">✓</span><div><b>Только выбранные фото</b><small>Новые загрузки не добавляются</small></div></div><div class="listrow"><span class="empty-check" style="margin-left:0"></span><div><b>Все мои фото в библиотеке</b><small>Включая будущие загрузки</small></div></div><p class="hint">После отзыва доступа фото исчезнут из общей<br>библиотеки. Уже скачанные копии останутся<br>у получателя.</p><div class="button secondary" style="color:#b6584d;margin-top:23px">Отозвать доступ</div></div>`,'','',false);
+    document.querySelector('#sharing-screens').innerHTML=[
+      card('10','Альбомы','Личные подборки и общие со мной разделены.<br>Sharing виден, но не захватывает всю библиотеку.',albums),
+      card('11','Поделиться выбранным','Без публичных ссылок и случайных получателей.<br>Сначала явно выбираем человека и объекты.',share),
+      card('12','Управление доступом','Все будущие фото — отдельное решение.<br>Отзыв не обещает удалить скачанные копии.',access)
+    ].join('');
+    const appearanceKey='nephos-ios-design-appearance';
+    const systemTheme=window.matchMedia('(prefers-color-scheme: dark)');
+    const themeDescriptions={
+      system:'Тема меняется вместе с оформлением системы.',
+      light:'Светлая тема независимо от оформления системы.',
+      dark:'Тёмная тема независимо от оформления системы.'
+    };
+    const storageError=document.querySelector('#theme-storage-error');
+    let appearance='system';
+    function reportStorageError(message){
+      storageError.textContent=message;
+      storageError.hidden=false;
+    }
+    try{
+      const saved=localStorage.getItem(appearanceKey);
+      if(saved!==null){
+        if(Object.hasOwn(themeDescriptions,saved)) appearance=saved;
+        else reportStorageError('Сохранённая тема не распознана. Выбрано оформление системы.');
+      }
+    }catch{
+      reportStorageError('Не удалось прочитать настройку. Используется оформление системы.');
+    }
+    function applyAppearance(){
+      document.body.dataset.theme=appearance==='system'?(systemTheme.matches?'dark':'light'):appearance;
+      document.querySelector(`input[name="appearance"][value="${appearance}"]`).checked=true;
+      document.querySelector('#theme-description').textContent=themeDescriptions[appearance];
+    }
+    document.querySelectorAll('input[name="appearance"]').forEach(input=>{
+      input.addEventListener('change',()=>{
+        appearance=input.value;
+        applyAppearance();
+        try{
+          localStorage.setItem(appearanceKey,appearance);
+          storageError.hidden=true;
+        }catch{
+          reportStorageError('Не удалось сохранить выбор. Тема применена только до перезагрузки страницы.');
+        }
+      });
+    });
+    systemTheme.addEventListener('change',applyAppearance);
+    applyAppearance();
+  </script>
+</body>
+</html>

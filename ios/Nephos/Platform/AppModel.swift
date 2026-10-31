@@ -43,7 +43,28 @@ final class AppModel {
     private var galleryLoadID = UUID()
 
     var selectedLibrary: Library? { libraries.first { $0.id == ledger.selectedLibraryID } }
-    var subject: String? { activeAuth?.subject }
+    var subject: String? {
+        #if UI_QUALIFICATION
+            return qualificationSubject ?? activeAuth?.subject
+        #else
+            return activeAuth?.subject
+        #endif
+    }
+    #if UI_QUALIFICATION
+        private var qualificationSubject: String?
+        convenience init(qualificationAPI: API, subject: String, library: Library) {
+            precondition(Bundle.main.bundleIdentifier == "app.nephos.ui-qualification")
+            self.init()
+            self.connection = qualificationAPI.connection
+            self.qualificationSubject = subject
+            self.account = LedgerStore.accountKey(connection: qualificationAPI.connection, subject: subject)
+            self.api = qualificationAPI
+            self.libraries = [library]
+            self.ledger = AccountLedger()
+            self.ledger.selectedLibraryID = library.id
+            self.signedIn = true
+        }
+    #endif
     var recentUploads: [UploadRecord] { Array(ledger.records.suffix(100).reversed()) }
     var cleanupCandidates: [UploadRecord] {
         ledger.records.filter { record in
@@ -482,6 +503,27 @@ final class AppModel {
         if settings.automaticBackup { scheduleAutomaticRun() }
         scheduleBackground()
     }
+    func setBackupPaused(_ paused: Bool) async {
+        var settings = ledger.settings
+        settings.backupPaused = paused
+        setSettings(settings)
+        guard ledger.settings.backupPaused == paused else { return }
+        if paused {
+            let task = automaticTask
+            task?.cancel()
+            await BackgroundTransfers.shared.cancelAll()
+            await task?.value
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundID)
+        } else {
+            scheduleAutomaticRun()
+        }
+    }
+    private func checkBackup(_ version: UUID) throws {
+        try check(version)
+        guard ledger.settings.backupPaused != true, selectedLibrary?.isReadOnly != true else {
+            throw CancellationError()
+        }
+    }
     private func persist() throws {
         guard let store, let account else { throw ClientError.invalid("Sign in before changing account settings.") }
         try store.save(ledger, account: account)
@@ -519,6 +561,7 @@ final class AppModel {
     }
     func handle(_ error: Error) {
         if error is CancellationError { return }
+        if let error = error as? URLError, error.code == .cancelled, ledger.settings.backupPaused == true { return }
         message = error.localizedDescription
         if Self.accessDenied(error) { clearGalleryAccess() }
         if case ClientError.signedOut = error {
@@ -584,7 +627,9 @@ final class AppModel {
         } catch { handle(error) }
     }
     func runBackup(ignoreBackoff: Bool = false) async {
-        guard !isRunning, signedIn, !needsReauthentication, selectedLibrary != nil else { return }
+        guard !isRunning, signedIn, !needsReauthentication, selectedLibrary != nil,
+            selectedLibrary?.isReadOnly != true, ledger.settings.backupPaused != true
+        else { return }
         isRunning = true
         let version = epoch
         defer {
@@ -608,7 +653,7 @@ final class AppModel {
                     && (ignoreBackoff || ($0.nextRetryAt ?? .distantPast) <= Date())
             }.sorted { ($0.lastAttemptAt ?? .distantPast) < ($1.lastAttemptAt ?? .distantPast) }
             for record in pending.prefix(20) {
-                try check(version)
+                try checkBackup(version)
                 do { try await transfer(record, version: version) } catch {
                     handle(error)
                     if needsReauthentication { return }
@@ -623,7 +668,7 @@ final class AppModel {
                             $0.resourceSetId == group.id && ($0.nextRetryAt ?? .distantPast) > Date()
                         }))
             }).prefix(12) {
-                try check(version)
+                try checkBackup(version)
                 do {
                     if let source = photos.asset(group.source.localIdentifier), photos.revision(source) == group.source
                     {
@@ -646,7 +691,7 @@ final class AppModel {
                 }
                 let batch = photos.batch(after: ledger.scanAfter)
                 for asset in batch.assets {
-                    try check(version)
+                    try checkBackup(version)
                     do { try await stageAndUpload(asset, version: version) } catch {
                         handle(error)
                         if needsReauthentication { return }
@@ -665,6 +710,7 @@ final class AppModel {
         } catch { handle(error) }
     }
     private func stageAndUpload(_ asset: PHAsset, version: UUID, ignoreBackoff: Bool = false) async throws {
+        try checkBackup(version)
         guard let store, let account, let library = ledger.selectedLibraryID, let connection else {
             throw ClientError.signedOut
         }
@@ -795,6 +841,7 @@ final class AppModel {
         return budget
     }
     private func transfer(_ original: UploadRecord, version: UUID) async throws {
+        try checkBackup(version)
         guard let store, let account, let api, let connection else { throw ClientError.signedOut }
         let client = UploadClient(api: api)
         var record = original
@@ -831,7 +878,7 @@ final class AppModel {
                 }
                 let parts = Chunking.count(size: record.size, chunkSize: connection.config.chunkSize)
                 for index in 0..<parts where !record.receivedParts.contains(index) {
-                    try check(version)
+                    try checkBackup(version)
                     let chunk = try store.chunk(account: account, id: record.id, part: index)
                     let length = try Chunking.length(
                         index: index, size: record.size, chunkSize: connection.config.chunkSize)
@@ -847,7 +894,7 @@ final class AppModel {
                     try check(version)
                     activity = "\(record.fileName): part \(index + 1) of \(parts)"
                     try await client.sendPart(record, index: index, file: chunk) { request, file in
-                        try self.check(version)
+                        try self.checkBackup(version)
                         try await BackgroundTransfers.shared.upload(
                             request: request, file: file,
                             identity: "\(account)/\(record.id)/\(index)", cellular: self.ledger.settings.allowCellular)
@@ -897,8 +944,15 @@ final class AppModel {
             }
         } catch {
             if version == epoch {
-                record.error = error.localizedDescription
-                record.deferRetry()
+                if ledger.settings.backupPaused == true,
+                    error is CancellationError || (error as? URLError)?.code == .cancelled
+                {
+                    record.error = nil
+                    record.nextRetryAt = nil
+                } else {
+                    record.error = error.localizedDescription
+                    record.deferRetry()
+                }
                 if record.phase != .sourceChanged && record.phase != .ready { record.phase = .paused }
                 try update(record)
             }
@@ -1004,7 +1058,9 @@ final class AppModel {
             "\(removed) item(s) removed from Photos. iCloud/shared-library deletion can propagate. Recently Deleted may still use space. Server originals were retained, not independently replicated."
     }
     func scheduleAutomaticRun() {
-        guard signedIn, !needsReauthentication, automaticTask == nil else { return }
+        guard signedIn, !needsReauthentication, automaticTask == nil, ledger.settings.backupPaused != true,
+            selectedLibrary?.isReadOnly != true
+        else { return }
         automaticTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled, let self else { return }
@@ -1014,7 +1070,9 @@ final class AppModel {
     }
     static let backgroundID = "app.nephos.ios.backup"
     func scheduleBackground() {
-        guard signedIn, ledger.settings.automaticBackup || ledger.records.contains(where: \.needsTransfer) else {
+        guard signedIn, ledger.settings.backupPaused != true, selectedLibrary?.isReadOnly != true,
+            ledger.settings.automaticBackup || ledger.records.contains(where: \.needsTransfer)
+        else {
             return
         }
         let request = BGProcessingTaskRequest(identifier: Self.backgroundID)

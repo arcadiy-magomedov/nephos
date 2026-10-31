@@ -69,6 +69,7 @@ struct NephosApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
+                .modifier(AppAppearanceModifier())
                 .privacySensitive()
                 .overlay {
                     if scenePhase != .active {

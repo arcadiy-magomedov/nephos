@@ -6,6 +6,62 @@ packages. The checked-in Xcode project is generated deterministically by
 `python3 generate_project.py`; generation is only needed after adding source files.
 Core invariants also form a dependency-free Swift package.
 
+## Native design and social journeys
+
+The approved [design board](../design/ios/screens.html) is implemented using
+native SwiftUI controls (including the host iOS version's navigation/tab-bar
+appearance), not a web view. There are no decorative subtitles above page titles.
+Existing English UI copy is retained; this is not a complete Russian localization.
+
+- Photos: three-column chronological previews, loaded-window photo/video/shared
+  filters, visible shared provenance, selection, date navigation and refresh.
+  Backup and Settings are reached from the gallery rather than occupying tabs.
+- Appearance: `@AppStorage` plus `preferredColorScheme`, System by default,
+  explicit Light/Dark overrides persisted on this installation, including sheets
+  and the signed-out appearance settings. Both modes share the same layout.
+- People: real authorized face crops, exact name/alias search, person photos,
+  name/alias edits, confirmed merges, current-merge undo, individual-face
+  reassignment/split, different-person rules and removal through history.
+- Sharing: known-user directory, selected originals or all/future media with
+  explicit confirmation, editable selection/scope, incoming read-only media and
+  outgoing grant revocation. Originals already downloaded cannot be revoked.
+- Viewer: sized previews on a black canvas, pinch/double-tap zoom, people
+  inspection, explicit original export/restore and retention details.
+- Backup: verified-resource counts and acknowledged-part progress, persistent
+  pause/resume, existing permission/import/cleanup controls. Counts describe the
+  queued ledger, not an invented total of all Photos items. Pausing does not
+  interrupt already-running Photos preparation or server-side verification.
+
+People/sharing pages are bounded to 300 retained rows with explicit pagination
+and errors. Requests are fenced by account/library generation. No test login,
+fixture token or demo-media mode is compiled into the production app.
+
+### Native social acceptance and UI qualification
+
+After preparing the licensed face fixtures and starting a stable local Faces
+deployment, run:
+
+```sh
+python3 run_social_e2e.py --backend-stable
+# Also render production SwiftUI views in a separate test application:
+python3 run_social_e2e.py --backend-stable --simulator <booted-simulator-UUID>
+```
+
+The runner uploads two attributed portrait fixtures through real verification,
+waits for actual face inference, and exercises the production Swift APIs for
+private names, merge/undo, split/reassignment, negative matches, directory,
+selected/all grants, narrowing and original/preview revocation.
+Known-user accounts, grants, media and face rows are disposable and cleaned.
+The UI host has a separate bundle ID, receives fixture credentials only through
+its process environment, and is uninstalled after capture. Its initializer is
+behind `UI_QUALIFICATION`, which is absent from Debug/Release app builds.
+Screenshots under `.logs/design-ui/` are **native views using real fixture API
+data**, not proof of user-driven passkey login or physical-device acceptance.
+
+The local design acceptance passed 27 deterministic tests, real native social
+API integration, and Debug/Release simulator compilation. The existing original
+upload/restore acceptance and physical-device boundaries below still apply.
+
 ## Build and verification
 
 Run from `ios/`:
@@ -427,16 +483,39 @@ Before using irreplaceable media, perform signed-device E2E probes for:
 - retention expiry/assurance failures, changed hashes/sources, user cancellation,
   iCloud/shared-library consequences and post-removal reconciliation.
 
-Remaining deliberate UI scope: no Bonjour discovery, APNs, search/AI, collaborative
-library sharing, server trash, or offline original pinning. Files/share-sheet
+Remaining deliberate UI scope: no Bonjour discovery, APNs, semantic search,
+collaborative editing, server trash, or offline original pinning. Read-only
+known-user sharing and People correction UI are implemented. Files/share-sheet
 export, supported save-back, retained offline metadata, direct date navigation,
 and large-video range playback are implemented. The durable ledger is still a
 bounded MVP JSON ledger, not a million-item local database. No physical-device
 passkey/background/deletion gate is marked passed.
 
+## Remaining features
+
+| Area | Not implemented or not yet qualified |
+|---|---|
+| Semantic search | Image/video vector indexing, natural-language queries and combined scene + person search. Current person search is exact-name/alias; filename filtering covers only the loaded window. |
+| Albums and favorites | Server album CRUD, album covers/membership, favorites and associated synchronization. The Albums tab currently exposes libraries and sharing, not fabricated collections. |
+| More ML/video | Video face recognition, automatically suggested duplicate-person review, representative large-library accuracy/scaling, optimized video transcodes and adaptive streaming. Original-range playback already works. |
+| Background updates | APNs device registration, durable push delivery and remote update hints. Existing background URLSession/BGProcessing backup is OS-scheduled, not guaranteed overnight execution. |
+| Offline/mobile completeness | Pinned offline originals, Bonjour discovery, million-item local indexing, complete localization, and broad Dynamic Type/VoiceOver/device qualification. |
+| Media lifecycle | Server trash/delete/restore, user metadata/date editing and collaborative editing. Current shared grants are read-only. |
+| Release acceptance | Physical-iPhone passkey enrollment/login, signing/production HTTPS, interruptions/force-quits, actual overnight backup and safe Photos/iCloud removal. RAW pairs need representative device qualification. |
+| Platform roadmap | Android, Helm/Swarm deployment, alternate storage/database adapters, HA, independent full recovery including the optional Faces database, and future books/Jellyfin-style applications. |
+
+This list distinguishes absent product features from unpassed release checks.
+No provider login bypass or synthetic production gallery was added to hide the
+remaining setup/device prerequisites.
+
 ## Native completion change inventory
 
-Only `ios/` was changed; no backend/deployment files or commits were made.
+The original native foundation inventory is below. The approved-design increment
+adds `Core/Presentation.swift`, `Core/Social.swift`, `UI/Design.swift`,
+`UI/PeopleViews.swift`, `UI/SharingViews.swift`, native presentation/social tests
+and `Qualification/UIQualification.swift` with its runner. It also updates the
+root documentation and preserves the accepted design source under `design/ios/`.
+No backend schema or deployment change is required for these native screens.
 
 - Core: `Nephos/Core/{Models,Ledger,Network,ResourceSets,Snapshots,RangedMedia}.swift`
 - Platform: `Nephos/Platform/{AppModel,PhotosLibrary,Media,RangedPlayer,Restore}.swift`
