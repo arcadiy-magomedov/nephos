@@ -16,6 +16,16 @@ guidance; a remote server advertising a loopback issuer is rejected before login
 The issuer is displayed explicitly even when it differs from the API origin.
 TLS validation and the existing PKCE/nonce/issuer checks remain mandatory.
 
+**Find nearby servers** starts an optional Bonjour search on the first step.
+The host advertises `_nephos._tcp` with a versioned TXT record containing its
+canonical HTTPS URL; see [host setup](../deploy/discovery/README.md).
+Results never overwrite a manually entered address until selected. Selection
+performs normal preflight and still requires explicit trust. No passkey, token
+or certificate is accepted from discovery. Both app configurations declare
+Bonjour/Local Network usage; discovery stops when leaving the server step or
+backgrounding the app. Manual URLs remain available if discovery is denied,
+blocked by the network or unsupported by the server.
+
 The validated server-address draft survives restart even if TLS or discovery
 fails. Change server signs out and removes the old approved connection, without
 deleting account upload ledgers or staged originals. A saved remote server with a
@@ -109,6 +119,10 @@ approval/relaunch, the real system sign-in page and cancellation. It does not
 simulate Face ID or silently trust certificates. The disposable app and its
 generated Xcode project are removed afterward; personal signing settings are
 untouched.
+Add `--discovery` while a real host advertisement is running to also exercise
+the native nearby-server list, stopping/restarting search, URL selection and
+the explicit-trust boundary. The qualification does not inject fake discovery
+results; it browses the real local DNS-SD service.
 
 ## Build and verification
 

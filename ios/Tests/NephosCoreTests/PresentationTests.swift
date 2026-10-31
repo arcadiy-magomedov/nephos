@@ -5,6 +5,26 @@ import XCTest
 @testable import NephosCore
 
 final class PresentationTests: XCTestCase {
+    func testServerAdvertisementsRequireSafeVersionedHTTPSAddresses() throws {
+        let server = try ServerAdvertisement(name: "Nephos", version: "1", address: "https://Photos.local:18443/")
+        XCTAssertEqual(server.url.absoluteString, "https://photos.local:18443")
+        XCTAssertEqual(server.id, server.url.absoluteString)
+        for address in [
+            "http://photos.local", "https://user:password@photos.local", "https://photos.local?token=x",
+            "https://photos.local?", "https://photos.local#", "https://localhost", "https://localhost.",
+            "https://127.0.0.1", "https://[::1]", "https://0.0.0.0", "https://[::]",
+            "https://photos.local:0", "https://photos.local:65536", "https://photos.local\n",
+            "https://photos.local/" + String(repeating: "x", count: 252),
+        ] {
+            XCTAssertThrowsError(try ServerAdvertisement(name: "Nephos", version: "1", address: address), address)
+        }
+        for name in ["", " ", "bad\nname", String(repeating: "\u{1F600}", count: 16)] {
+            XCTAssertThrowsError(try ServerAdvertisement(name: name, version: "1", address: "https://photos.local"))
+        }
+        XCTAssertThrowsError(try ServerAdvertisement(name: "Nephos", version: "2", address: "https://photos.local"))
+        XCTAssertThrowsError(try ServerAdvertisement(name: "Nephos", version: "", address: "https://photos.local"))
+    }
+
     func testChangedDraftAndOldLoopbackIssuerCannotReuseApprovedServer() {
         let old = Connection(
             baseURL: URL(string: "http://192.168.1.10:18080")!,
@@ -56,6 +76,8 @@ final class PresentationTests: XCTestCase {
 
     func testOnboardingDistinguishesCertificateAndIdentityFailures() {
         XCTAssertEqual(OnboardingFailure(URLError(.serverCertificateUntrusted)).title, "Certificate not trusted")
+        XCTAssertTrue(
+            OnboardingFailure(URLError(.serverCertificateUntrusted)).guidance.contains("Certificate Trust Settings"))
         XCTAssertEqual(OnboardingFailure(URLError(.cannotConnectToHost)).title, "Server unavailable")
         XCTAssertEqual(
             OnboardingFailure(URLError(.cannotConnectToHost), identity: true).title, "Sign-in server unavailable")

@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">Nephos on %h</name>
+  <service>
+    <type>_nephos._tcp</type>
+    <port>443</port>
+    <txt-record>v=1</txt-record>
+    <txt-record>url=https://photos.example.net</txt-record>
+  </service>
+</service-group>

@@ -12,6 +12,9 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
 
 - Explicit [API major-version contracts](specs/005-api-compatibility.md):
   public `/v1`, private `/internal/v1`, and v1-pinned legacy peer aliases.
+- Optional [Bonjour LAN discovery](deploy/discovery/README.md): a host-side
+  advertiser and native iOS server picker, with HTTPS/OIDC verification and
+  explicit trust preserved.
 - Known-user Keycloak authentication; real JWT validation and immediate platform
   disablement checks. No public registration or application password grant.
 - A separate, localhost-only administration console for known users, personal

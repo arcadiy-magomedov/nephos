@@ -1,6 +1,29 @@
 import CoreGraphics
 import Foundation
 
+struct ServerAdvertisement: Identifiable, Equatable, Sendable {
+    let name: String
+    let url: URL
+    var id: String { url.absoluteString }
+
+    init(name: String, version: String, address: String) throws {
+        guard version == "1", !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            name.utf8.count <= 63, !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+            address.utf8.count <= 251,
+            !address.unicodeScalars.contains(where: {
+                CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+            })
+        else { throw ClientError.invalid("Unsupported server announcement.") }
+        let url = try URLPolicy.validate(address)
+        guard !OnboardingPolicy.isLoopback((url.host ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "."))),
+            !["0.0.0.0", "::", "[::]"].contains(url.host ?? ""),
+            (1...65535).contains(url.port ?? 443)
+        else { throw ClientError.invalid("An announced server must have a reachable address and valid port.") }
+        self.name = name
+        self.url = url
+    }
+}
+
 struct OnboardingDraft: Codable, Equatable, Sendable {
     var libraryID: UUID
     var backup: Bool
@@ -54,7 +77,7 @@ struct OnboardingFailure: LocalizedError {
                 .serverCertificateNotYetValid, .secureConnectionFailed:
                 title = "Certificate not trusted"
                 guidance =
-                    "Check the server address. For a local development server, install and trust the certificate provided by your administrator in iOS Settings. Certificate checks cannot be skipped."
+                    "Use the hostname covered by the certificate. For a local development CA, installing its profile is not enough: also enable full trust in Settings > General > About > Certificate Trust Settings. Only trust a CA supplied by your administrator. Certificate checks cannot be skipped."
             default:
                 title = identity ? "Sign-in server unavailable" : "Server unavailable"
                 guidance =

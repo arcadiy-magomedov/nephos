@@ -18,6 +18,7 @@ struct OnboardingView: View {
     @State private var wifiOnly = true
     @State private var permission = PHAuthorizationStatus.notDetermined
     @State private var initialized = false
+    @State private var discovery = ServerDiscovery()
 
     private enum Step: Int, CaseIterable {
         case server, trust, signIn, library, photos, ready
@@ -96,7 +97,12 @@ struct OnboardingView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { permission = model.photos.authorization }
+                if phase == .background { discovery.stop() }
             }
+            .onChange(of: step) { _, step in
+                if step != .server { discovery.stop() }
+            }
+            .onDisappear { discovery.stop() }
         }
     }
 
@@ -104,7 +110,7 @@ struct OnboardingView: View {
         switch step {
         case .server:
             heading("Connect your server", symbol: "externaldrive.connected.to.line.below")
-            description("Enter the address of your Nephos server. Your administrator can provide it.")
+            description("Find your Nephos server on this network, or enter the address provided by your administrator.")
             VStack(alignment: .leading, spacing: 10) {
                 Text("Server address").font(.subheadline.bold())
                 TextField("https://photos.example.net", text: $url)
@@ -115,6 +121,7 @@ struct OnboardingView: View {
                     .accessibilityIdentifier("onboarding.serverURL")
                     .disabled(busy).submitLabel(.go).onSubmit { checkServer() }
             }
+            nearbyServers
             card(
                 "Connection first",
                 text:
@@ -223,6 +230,46 @@ struct OnboardingView: View {
                     permission == .limited
                         ? "Only the photos you allowed can be backed up."
                         : "Accessible originals will be added to the upload queue. They are not considered backed up until verified by the server."
+                )
+            }
+        }
+    }
+
+    private var nearbyServers: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(discovery.isSearching ? "Stop searching" : "Find nearby servers") {
+                if discovery.isSearching { discovery.stop() } else { discovery.start() }
+            }.buttonStyle(.bordered).disabled(busy).accessibilityIdentifier("onboarding.findServers")
+            if let message = discovery.message {
+                description(message)
+            } else if discovery.isSearching && discovery.servers.isEmpty {
+                ProgressView("Searching local network…").font(.footnote)
+                description(
+                    "If nothing appears, check Wi-Fi or enter the address manually. Guest networks and VPNs may block discovery."
+                )
+            }
+            ForEach(discovery.servers) { server in
+                Button {
+                    url = server.url.absoluteString
+                    allowHTTP = false
+                    checkServer()
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(server.name, systemImage: "server.rack").font(.subheadline.bold())
+                        Text(server.url.absoluteString).font(.footnote).multilineTextAlignment(.leading)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                }
+                .buttonStyle(.bordered).disabled(busy)
+                .accessibilityIdentifier("onboarding.discovered." + server.id)
+            }
+            if !discovery.servers.isEmpty {
+                description(
+                    "These announcements are not verified. Selecting a server checks its connection; you still decide whether to trust it."
+                )
+            }
+            if discovery.hasOmittedResults {
+                description(
+                    "Some announcements could not be shown. Only supported HTTPS addresses are listed, up to 32 servers."
                 )
             }
         }
@@ -354,6 +401,7 @@ struct OnboardingView: View {
     }
     private func checkServer() {
         perform {
+            discovery.stop()
             let validated = try URLPolicy.validate(url, allowDevelopmentHTTP: allowHTTP)
             checkedURL = validated.absoluteString
             url = validated.absoluteString

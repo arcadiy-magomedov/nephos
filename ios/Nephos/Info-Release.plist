@@ -35,8 +35,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_nephos._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to the self-hosted Nephos server you explicitly configure on your local network.</string>
+	<string>Find and connect to the Nephos server you choose on your local network.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Restore SHA-256 verified originals and supported unedited resource pairs to your Photos library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

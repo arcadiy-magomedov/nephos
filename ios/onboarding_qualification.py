@@ -176,6 +176,7 @@ def main():
     parser.add_argument("--simulator", required=True)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--certificate-error-url", required=True)
+    parser.add_argument("--discovery", action="store_true", help="Also require the base URL's real LAN announcement.")
     args = parser.parse_args()
     scratch = IOS / ".test-work"
     scratch.mkdir(exist_ok=True)
@@ -224,6 +225,7 @@ def main():
                     {
                         "NEPHOS_UI_BASE_URL": args.base_url.rstrip("/"),
                         "NEPHOS_UI_BAD_CERT_URL": args.certificate_error_url.rstrip("/"),
+                        "NEPHOS_UI_DISCOVERY": "1" if args.discovery else "0",
                     }
                 )
             runfile.write_bytes(plistlib.dumps(run))
