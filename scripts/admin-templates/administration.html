@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Nephos local administration</h1>
+<p>Manage known accounts and personal libraries. Self-registration is disabled.</p>
+<h2>Known users</h2>
+<ul>{% for user in users %}<li>{{ user.username }} - platform access: {{ principals.get(user.id, False) }}</li>{% else %}<li>No users yet. Create an account below, then send its passkey invitation.</li>{% endfor %}</ul>
+{% macro user_picker(label="Known user") %}
+<label>{{ label }}<select name="subject" required>{% for user in users %}<option value="{{ user.id }}">{{ user.username }}</option>{% endfor %}</select></label>
+{% endmacro %}
+{% macro action_fields(action) %}
+<input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ action }}">
+{% endmacro %}
+<div class="grid">
+  <form class="card" method="post">
+    <h2>Create an account</h2>{{ action_fields("create") }}
+    <label>Username<input name="username" required maxlength="100" autocomplete="off"></label>
+    <label>Email<input name="email" type="email" required autocomplete="off"></label>
+    <button>Create known user and personal library</button>
+  </form>
+  <form class="card" method="post">
+    <h2>Passkey invitation</h2>{{ action_fields("invite") }}{{ user_picker() }}
+    <p>The recipient opens the email on the device that will hold their passkey. Invitations expire after 15 minutes.</p>
+    <button {% if not users %}disabled{% endif %}>Send passkey enrollment / recovery invitation</button>
+  </form>
+  <form class="card" method="post">
+    <h2>Platform access</h2>{{ action_fields("access") }}{{ user_picker("User") }}
+    <label><input type="checkbox" name="enabled" value="yes"> Enable platform access</label>
+    <button {% if not users %}disabled{% endif %}>Apply (unchecked disables existing tokens immediately)</button>
+  </form>
+  <form class="card" method="post">
+    <h2>Sharing directory</h2>{{ action_fields("directory") }}{{ user_picker("User") }}
+    <label><input type="checkbox" name="discoverable" value="yes" checked> Visible in the known-user sharing directory</label>
+    <button {% if not users %}disabled{% endif %}>Update sharing-directory visibility</button>
+  </form>
+</div>
+<h2>Libraries</h2>
+<ul>{% for library in state.libraries %}<li>{{ library.name }} <small>{{ library.id }}</small></li>{% else %}<li>No libraries yet.</li>{% endfor %}</ul>
+<form class="card" method="post">
+  {{ action_fields("library") }}
+  <label>Name<input name="name" maxlength="200" required></label>{{ user_picker("Owner") }}
+  <button {% if not users %}disabled{% endif %}>Create library</button>
+</form>
+<p>SMTP and identity recovery policies are managed in the private Keycloak console. No application endpoint deletes originals or retention holds.</p>
+{% endblock %}

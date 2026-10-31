@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Verify selected/all-media sharing through real authorization, snapshot and original APIs."""
 
-import re
 import runpy
 import secrets
-import urllib.parse
 import uuid
 
 import smoke
@@ -113,15 +111,8 @@ def main():
         assert len(request(API + "/v1/resource-sets/" + group_id, token=recipient)["resources"]) == 2
         assert len(media["raw"]("/v1/assets/" + parts[1]["assetId"] + "/original", recipient)[0]) == 64
         request(API + "/v1/resource-sets/" + group_id + "/retention", token=recipient, method="POST", expected=404)
-        auth = "admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"]
-        admin_page = request("http://localhost:18082/", basic=auth)
-        csrf = re.search(r'name="csrf" value="([^"]+)"', admin_page)[1]
-        request(
-            "http://localhost:18082/",
-            basic=auth,
-            data=urllib.parse.urlencode({"csrf": csrf, "action": "access", "subject": owner_id}).encode(),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        with smoke.AdminSession() as admin:
+            admin.submit({"action": "access", "subject": owner_id})
         request(API + "/v1/assets/" + parts[0]["assetId"] + "/original", token=recipient, expected=404)
         request(API + "/v1/users", token=owner, expected=403)
         print(

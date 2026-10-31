@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Unable to continue - Nephos administration{% endblock %}
+{% block content %}
+<section class="card login error" role="alert">
+  <h1>Unable to continue</h1>
+  <p>{{ message }}</p>
+  <a class="button" href="/">Return to administration</a>
+</section>
+{% endblock %}

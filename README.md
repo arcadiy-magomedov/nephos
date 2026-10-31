@@ -1,4 +1,4 @@
-# Nephos MVP
+# Nephos
 
 Self-hosted original photo/video backup with an ASP.NET Core backend and a native
 [iOS client](ios/README.md). Implementation is on `feature/mvp-foundation`;
@@ -9,6 +9,13 @@ copyright holder. This is **not the Unlicense**. Third-party dependencies,
 models and test media retain their own licenses; see [LICENSE](LICENSE).
 
 ## What is implemented
+
+Production-grade engineering is the required baseline for **every feature and
+service**, including native clients, administration, ML and deployment.
+Incremental delivery limits scope, not correctness, security or operability.
+The [shared completion standard](specs/000-media-platform.md#14-engineering-and-completion-standard)
+applies to all implementation work. The inventory below describes functionality,
+not a claim that the entire platform is production-qualified.
 
 - Explicit [API major-version contracts](specs/005-api-compatibility.md):
   public `/v1`, private `/internal/v1`, and v1-pinned legacy peer aliases.
@@ -58,7 +65,7 @@ models and test media retain their own licenses; see [LICENSE](LICENSE).
   Provisioned operational dashboards and alert rules cover worker liveness,
   storage headroom, verification, publication backlogs, and dead letters.
 
-This is a functional MVP, **not certification of every north-star requirement**.
+The current implementation is **not yet production-qualified as a whole**.
 Server albums/favorites, semantic search, APNs, Android, HA, and multi-host
 workload/network isolation remain unfinished. Face analysis currently supports
 JPEG/PNG/WebP/HEIC/HEIF still images, not video. HEIC is decoded only inside the
@@ -106,10 +113,18 @@ settings. Environment edits do not rotate credentials already stored in volumes.
 | `http://localhost:18083` | Development-only enrollment email inbox (Mailpit) |
 | `http://localhost:13000` | Grafana, username `admin` |
 
-Use `KEYCLOAK_ADMIN_PASSWORD` from `.env` for both private administration consoles,
+The Nephos console has a normal **Sign in** page. It redirects to the private
+Keycloak operator login and returns to the console; it never uses a browser
+Basic Auth dialog or receives your password. Use `KEYCLOAK_ADMIN_PASSWORD`
+from `.env` with username `admin` for both private administration consoles,
 and `GRAFANA_PASSWORD` for Grafana. Do not share or commit them. PostgreSQL,
 RabbitMQ and OTLP have no host-published ports. All development host ports bind
 to loopback, not the LAN.
+
+For existing installations, run `python3 scripts/upgrade-dev-env.py` before
+rebuilding the administration services. See
+[administration deployment and recovery](deploy/administration.md) for the OIDC
+bootstrap, private origins, session lifecycle and verification commands.
 
 In the Nephos administration console, create a user and personal library, then
 send a passkey enrollment invitation. Open the invitation from the local Mailpit

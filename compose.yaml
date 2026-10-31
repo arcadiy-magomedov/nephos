@@ -167,18 +167,64 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
+  admin-init:
+    build: {context: ., dockerfile: deploy/admin.Dockerfile}
+    command: ["python", "/app/admin-bootstrap.py"]
+    environment:
+      ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Required}
+      ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-http://localhost:18082}
+      ADMIN_IDENTITY_PUBLIC_URL: ${ADMIN_IDENTITY_PUBLIC_URL:-http://localhost:18081}
+      IDENTITY_URL: http://keycloak:8080
+    depends_on: [keycloak]
+    user: "65534:65534"
+    read_only: true
+    mem_limit: 128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  admin-sessions:
+    image: valkey/valkey:9.0.1-alpine
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'printf "requirepass %s\nsave \"\"\nappendonly no\nmaxmemory 64mb\nmaxmemory-policy noeviction\nmaxclients 64\ndir /tmp\n" "$$REDISCLI_AUTH" | exec valkey-server -'
+    environment:
+      REDISCLI_AUTH: ${ADMIN_SESSION_STORE_PASSWORD:?Run scripts/upgrade-dev-env.py}
+    networks: [admin-private]
+    user: "65534:65534"
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   admin-console:
     build: {context: ., dockerfile: deploy/admin.Dockerfile}
     environment:
-      ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?Run scripts/upgrade-dev-env.py}
+      ADMIN_SESSION_STORE_PASSWORD: ${ADMIN_SESSION_STORE_PASSWORD:?Run scripts/upgrade-dev-env.py}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-http://localhost:18082}
+      ADMIN_IDENTITY_PUBLIC_URL: ${ADMIN_IDENTITY_PUBLIC_URL:-http://localhost:18081}
       IDENTITY_URL: http://keycloak:8080
       LIBRARY_ADMIN_URL: http://library-admin:8080
       SERVICE_KEY: ${ADMIN_SERVICE_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     ports: ["127.0.0.1:18082:8080"]
+    networks: [default, admin-private]
+    depends_on:
+      admin-init: {condition: service_completed_successfully}
+      admin-sessions: {condition: service_healthy}
+      library-admin: {condition: service_started}
     user: "65534:65534"
     read_only: true
-    mem_limit: 128m
+    tmpfs: ["/tmp"]
+    mem_limit: 256m
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
@@ -301,6 +347,8 @@ services:
     mem_limit: 384m
 
 networks:
+  admin-private:
+    internal: true
   image-private:
     internal: true
 

@@ -43,8 +43,10 @@ jobs:
           tar -xzf actionlint.tar.gz actionlint
           echo "$RUNNER_TEMP/quality-tools" >> "$GITHUB_PATH"
       - run: python3 scripts/secret_scan.py --history
+      - run: python3 -m pip install -r scripts/admin-requirements.txt
       - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: python3 -m pip install -r scripts/quality-requirements.txt
+      - run: pip-audit -r scripts/admin-requirements.txt
       - run: ruff check . && ruff format --check .
       - run: yamllint -s .github compose*.yaml deploy tests/alert-rules.test.yaml .yamllint.yaml
       - run: actionlint -color
@@ -94,6 +96,12 @@ jobs:
       - run: python3 scripts/smoke.py
       - run: python3 scripts/admin-smoke.py
       - run: pip install -r scripts/browser-requirements.txt && python3 -m playwright install --with-deps chromium
+      - run: python3 scripts/admin-browser-smoke.py
+      - name: Administration session recovery
+        run: |
+          python3 scripts/admin-session-smoke.py \
+            --console-container "$(docker compose ps -q admin-console)" \
+            --session-container "$(docker compose ps -q admin-sessions)"
       - run: python3 scripts/passkey-smoke.py
       - run: python3 scripts/media-smoke.py
       - run: python3 scripts/release-smoke.py

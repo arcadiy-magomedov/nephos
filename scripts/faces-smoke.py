@@ -9,7 +9,6 @@ or authentication override is installed. Only the optional face API/worker resta
 import hashlib
 import json
 import math
-import re
 import runpy
 import struct
 import subprocess
@@ -217,18 +216,11 @@ def restart_faces(token):
 
 
 def admin_access(subject, enabled):
-    basic = "admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"]
-    page = request("http://localhost:18082/", basic=basic)
-    csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
-    values = {"csrf": csrf, "action": "access", "subject": subject}
+    values = {"action": "access", "subject": subject}
     if enabled:
         values["enabled"] = "yes"
-    result = request(
-        "http://localhost:18082/",
-        basic=basic,
-        data=urllib.parse.urlencode(values).encode(),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    with smoke.AdminSession() as admin:
+        result = admin.submit(values)
     assert "Platform membership updated" in result
 
 

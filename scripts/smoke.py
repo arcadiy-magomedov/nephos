@@ -2,9 +2,12 @@
 """Exercise real development services. Never run against a production realm."""
 
 import base64
+from html.parser import HTMLParser
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 import json
 from pathlib import Path
 import secrets
+import re
 import subprocess
 import time
 import urllib.error
@@ -19,18 +22,18 @@ IDENTITY = "http://localhost:18081"
 GRAFANA = "http://localhost:13000"
 
 
-def request(url, *, data=None, token=None, basic=None, method=None, headers=None, expected=200):
+def request(url, *, data=None, token=None, basic=None, method=None, headers=None, expected=200, opener=None):
     request_headers = dict(headers or {})
     if token:
         request_headers["Authorization"] = "Bearer " + token
     if basic:
         request_headers["Authorization"] = "Basic " + base64.b64encode(basic.encode()).decode()
-    if isinstance(data, dict):
+    if isinstance(data, (dict, list)):
         data = json.dumps(data).encode()
         request_headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with (opener.open if opener else urllib.request.urlopen)(req, timeout=10) as response:
             status, body = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, body = error.code, error.read()
@@ -42,6 +45,73 @@ def request(url, *, data=None, token=None, basic=None, method=None, headers=None
         return json.loads(body)
     except json.JSONDecodeError:
         return body.decode()
+
+
+class AdminSession:
+    """Exercise the actual local OIDC browser-form flow, without password grants or Basic Auth."""
+
+    def __init__(self, base="http://localhost:18082"):
+        self.base = base.rstrip("/")
+
+        class LocalBrowserCookies(DefaultCookiePolicy):
+            def return_ok_secure(self, cookie, request):
+                url = urllib.parse.urlsplit(request.get_full_url())
+                # Browsers treat localhost as trustworthy even without HTTPS.
+                if url.scheme == "http" and url.hostname == "localhost" and url.port == 18081:
+                    return True
+                return super().return_ok_secure(cookie, request)
+
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(CookieJar(policy=LocalBrowserCookies()))
+        )
+        page = self.request("/login")
+
+        class LoginForm(HTMLParser):
+            action = None
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "form" and attrs.get("id") == "kc-form-login":
+                    self.action = attrs.get("action")
+
+        form = LoginForm()
+        form.feed(page)
+        target = urllib.parse.urlsplit(form.action or "")
+        if target.scheme != "http" or target.hostname != "localhost" or target.port != 18081:
+            raise AssertionError("Expected the private local Keycloak operator login form.")
+        page = request(
+            form.action,
+            opener=self.opener,
+            data=urllib.parse.urlencode({"username": "admin", "password": ENV["KEYCLOAK_ADMIN_PASSWORD"]}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://localhost:18081"},
+        )
+        assert "Nephos local administration" in page, "Operator browser-form authentication did not complete."
+        self.csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+
+    def request(self, path="/", **kwargs):
+        headers = {"Origin": self.base, **kwargs.pop("headers", {})}
+        return request(self.base + path, opener=self.opener, headers=headers, **kwargs)
+
+    def submit(self, values, expected=200):
+        return self.request(
+            "/",
+            data=urllib.parse.urlencode({"csrf": self.csrf, **values}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected=expected,
+        )
+
+    def close(self):
+        self.request(
+            "/logout",
+            data=urllib.parse.urlencode({"csrf": self.csrf}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
 
 def wait(description, check, timeout=90):

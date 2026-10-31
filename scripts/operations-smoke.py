@@ -55,11 +55,8 @@ smoke.wait("all operational alert rules successfully evaluated", evaluated_alert
 dashboard = smoke.request(smoke.GRAFANA + "/api/dashboards/uid/nephos-operations", basic=auth)
 assert dashboard["dashboard"]["title"] == "Nephos operations"
 trace_id = uuid.uuid4().hex
-smoke.request(
-    "http://localhost:18082/",
-    basic="admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"],
-    headers={"traceparent": f"00-{trace_id}-{secrets.token_hex(8)}-01"},
-)
+with smoke.AdminSession() as admin:
+    admin.request(headers={"traceparent": f"00-{trace_id}-{secrets.token_hex(8)}-01"})
 smoke.wait("administration request metrics centrally stored", lambda: query("nephos_admin_requests_total > 0"))
 datasources = smoke.GRAFANA + "/api/datasources/proxy/uid/"
 logs = urllib.parse.urlencode(

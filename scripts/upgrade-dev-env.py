@@ -9,6 +9,9 @@ path = Path(__file__).resolve().parents[1] / ".env"
 existing = {line.split("=", 1)[0] for line in path.read_text().splitlines() if "=" in line}
 with path.open("a") as output:
     for name in (
+        "ADMIN_OIDC_CLIENT_SECRET",
+        "ADMIN_SESSION_SECRET",
+        "ADMIN_SESSION_STORE_PASSWORD",
         "SERVICE_KEY",
         "SERVER_ID",
         "ADMIN_SERVICE_KEY",

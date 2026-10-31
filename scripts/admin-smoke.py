@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Verify closed local provisioning and delivery of passkey enrollment invitations."""
 
-import re
 import urllib.parse
 import uuid
+import os
 import smoke
 
-base = "http://localhost:18082"
-auth = "admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"]
+base = os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082")
 admin_url = smoke.IDENTITY + "/admin/realms/nephos"
-smoke.wait("private administration ready", lambda: smoke.request(base + "/", basic=auth))
-smoke.request(base + "/", expected=401)
+smoke.wait("private administration ready", lambda: smoke.request(base + "/"))
+assert "Sign in" in smoke.request(base + "/")
 smoke.request(smoke.API + "/internal/admin/state", expected=404)
 realm = smoke.request(admin_url, token=smoke.admin_token())
 if not realm.get("smtpServer"):
@@ -23,16 +22,15 @@ if not realm.get("smtpServer"):
             "smtpServer": {"host": "mailpit", "port": "1025", "from": "nephos@localhost"},
         },
     )
-page = smoke.request(base + "/", basic=auth)
-csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+admin = smoke.AdminSession(base)
+csrf = admin.csrf
 username = "enrollment-smoke-" + uuid.uuid4().hex
 subject = None
 
 
 def submit(values, expected=200):
-    return smoke.request(
-        base + "/",
-        basic=auth,
+    return admin.request(
+        "/",
         data=urllib.parse.urlencode(values).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         expected=expected,
@@ -65,6 +63,7 @@ try:
     assert "Platform membership updated" in result
     print("PASS: authenticated/CSRF-protected local provisioning, known user, personal library, invite and disablement")
 finally:
+    admin.close()
     if subject:
         smoke.sql(
             """

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Sign in - Nephos administration{% endblock %}
+{% block content %}
+<section class="card login">
+  <h1>Welcome to Nephos</h1>
+  <p>Sign in with your operator account to manage users, invitations and libraries.</p>
+  <a class="button" href="/login">Sign in</a>
+  <p>Your identity provider handles your password, passkeys and multi-factor authentication. This console never receives your password.</p>
+  <small>Private administration only. Photo-library accounts do not grant administrator access.</small>
+</section>
+{% endblock %}

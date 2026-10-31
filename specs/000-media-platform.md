@@ -47,14 +47,50 @@ The initial application is the photo/video backend. Native phone upload clients,
 the end-user UI, cinema/TV applications, and books clients require separate design
 specifications. Their future integration must be accommodated by this backend.
 
-This document defines the production-grade north star, not an MVP. Resource
+This document defines the production-grade requirements for the platform. Resource
 limits, history retention, recovery, and consistency are architectural contracts,
-not reasons to silently weaken guarantees for an initial deployment. MVP scope
-and implementation sequencing will be designed separately.
+not reasons to silently weaken guarantees for an initial deployment. Incremental
+scope and implementation sequencing do not lower the engineering standard.
 
 Section 2 records the requirements established during discussion. Section 3 maps
 a proposed solution to every requirement. Technologies and policies explicitly
 marked **open** or **proposed** have not been selected or approved.
+
+### 1.4 Engineering and completion standard
+
+Production-grade engineering is mandatory across every feature and service:
+backend APIs and workers, native clients, administration, ML, storage,
+authentication, observability and deployment. It is not a later hardening phase
+and is not confined to whichever defect is currently being fixed.
+
+A capability is complete only when its applicable guarantees have evidence:
+
+- The real user/operator journey works, including first setup, ordinary use,
+  understandable errors and recovery. A successful API call is not evidence
+  that a browser or native application flow works.
+- Authentication, authorization, isolation and credential handling preserve
+  the specified trust boundaries. Reuse maintained identity/protocol components;
+  never substitute a bypass or a custom password flow to make a demo succeed.
+- State survives the promised lifecycle. Retries, cancellation, duplicates,
+  concurrency, restart and dependency failure have deliberate, tested behavior;
+  partial operations are recoverable rather than silently reported as success.
+- Originals and metadata retain their integrity. Relevant backup/restore,
+  migration, compatibility and rollback paths are verified before rollout.
+- Resource consumption is bounded for the supported home-server deployment.
+  Capacity limits, timeouts, overload behavior and ML model/data versions are
+  explicit. Production quality does not require unnecessary infrastructure.
+- Logs, metrics and traces support diagnosis without exposing credentials or
+  private media. Operators can recognize failures and follow recovery guidance.
+- Automated regression coverage and realistic end-to-end acceptance address
+  the changed contract, including failure paths. Required lint/build checks pass.
+  Human-only device checks are reported as pending, never inferred from mocks.
+- Code, configuration, deployment definitions, dependencies and documentation
+  are delivered together. Existing installations have a supported upgrade path.
+
+Existing functionality does not become qualified merely because it appears in
+the feature inventory or predates this standard. Identify gaps explicitly;
+do not label incomplete capabilities production-ready or normalize temporary
+POC/MVP shortcuts as permanent implementations.
 
 Supporting documents:
 

@@ -32,11 +32,8 @@ class Callback(BaseHTTPRequestHandler):
 
 def main():
     issuer = smoke.request(smoke.API + "/v1/config")["issuer"]
-    base = "http://localhost:18082"
-    auth = "admin:" + smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"]
     admin_url = smoke.IDENTITY + "/admin/realms/nephos"
-    page_html = smoke.wait("private administration ready", lambda: smoke.request(base + "/", basic=auth))
-    csrf = re.search(r'name="csrf" value="([^"]+)"', page_html)[1]
+    admin = smoke.AdminSession()
     username = "passkey-smoke-" + uuid.uuid4().hex
     server = ThreadingHTTPServer(("127.0.0.1", 0), Callback)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -46,12 +43,7 @@ def main():
     subject = client = None
 
     def submit(values):
-        return smoke.request(
-            base + "/",
-            basic=auth,
-            data=urllib.parse.urlencode({"csrf": csrf, **values}).encode(),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        return admin.submit(values)
 
     try:
         submit({"action": "create", "username": username, "email": username + "@example.test"})
@@ -220,6 +212,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join()
+        admin.close()
         if client:
             smoke.request(admin_url + "/clients/" + client, method="DELETE", token=smoke.admin_token(), expected=204)
         if subject:
