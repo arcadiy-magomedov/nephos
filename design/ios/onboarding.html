@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nephos — первый запуск</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eff0f3;color:#20272b;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+    button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button,a{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}a{color:inherit}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #188674;outline-offset:4px}
+    .board{max-width:1280px;padding:40px;margin:auto}.intro{display:flex;justify-content:space-between;gap:32px;align-items:end;margin-bottom:30px}.intro h1{font-size:36px;letter-spacing:-1.4px;margin:12px 0}.intro p{max-width:490px;color:#667373;font-size:14px;line-height:1.65}.tag{font-size:11px;color:#526e65;border:1px solid #cbd8d2;border-radius:20px;padding:6px 10px;display:inline-block}
+    .workbench{display:grid;grid-template-columns:1fr 370px 1fr;gap:44px;align-items:start}.notes{padding-top:28px}.notes h2{font-size:19px;letter-spacing:-.4px}.notes p,.notes li{font-size:13px;line-height:1.7;color:#63716f}.notes ol{padding-left:20px}.notes li{padding:6px 0}.controls{display:grid;gap:18px}.controls label{display:grid;gap:7px;font-size:12px;font-weight:600}.controls select{width:100%;min-width:0;border:1px solid #cbd5d0;border-radius:10px;padding:10px;background:white;color:#25302b}.notes .plain{border:1px solid #bccfc5;border-radius:10px;padding:10px 15px;background:transparent;font-size:12px}.prototype-note{font-size:11px!important;color:#7c8882!important}
+    .phone{--bg:#fff;--fg:#20292a;--muted:#72817e;--line:#eaf0ed;--accent:#188674;--wash:#e9f4ef;--danger:#aa3a31;--warning:#fbefea;background:var(--bg);color:var(--fg);border:7px solid #202328;border-radius:43px;height:790px;overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 18px 35px #233b2912;min-width:0}
+    body[data-theme="dark"] .phone{--bg:#131a1c;--fg:#f6f8f7;--muted:#9eadaa;--line:#293436;--accent:#9cdec8;--wash:#263e37;--danger:#ffc0ad;--warning:#422b28}
+    .status{height:47px;min-height:47px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;font-weight:650}.island{position:absolute;top:9px;left:calc(50% - 48px);width:96px;height:26px;background:#080a0c;border-radius:20px}.top{height:50px;min-height:50px;display:flex;align-items:center;padding:0 18px;gap:15px}.back{border:0;background:var(--line);color:var(--fg);border-radius:50%;width:32px;height:32px;font-size:21px}.progress{display:flex;gap:5px;flex:1}.progress i{height:3px;background:var(--line);border-radius:4px;flex:1}.progress i.filled{background:var(--accent)}.step{font-size:10px;color:var(--muted);white-space:nowrap}
+    .screen{padding:14px 22px 18px;overflow:auto;flex:1}.screen h2{font-size:30px;font-weight:730;letter-spacing:-1px;line-height:1.12;margin:10px 0 14px}.screen p{font-size:13px;line-height:1.65;margin:10px 0;color:var(--muted)}.symbol{width:70px;height:70px;background:var(--wash);color:var(--accent);border-radius:22px;display:grid;place-items:center;margin:15px 0 26px}.symbol svg{width:34px;height:34px}.symbol.error{background:var(--warning);color:var(--danger)}
+    svg{fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;width:19px;height:19px}.field{display:block;font-size:12px;font-weight:600;margin-top:25px}.field input,.field select{display:block;min-width:0;width:100%;margin-top:9px;border:1px solid var(--line);border-radius:13px;background:var(--line);color:var(--fg);padding:16px 12px;font-size:13px}.field input::placeholder{color:var(--muted)}
+    .helper{font-size:11px!important;line-height:1.65!important}.card{border:1px solid var(--line);border-radius:17px;padding:16px;margin:20px 0}.card.soft{background:var(--wash);border-color:var(--wash)}.card.warn{background:var(--warning);border-color:var(--warning)}.card strong{font-size:13px;display:block;line-height:1.5}.card p{font-size:11px;margin:5px 0 0}.address{overflow-wrap:anywhere;color:var(--accent)!important}.checkrow{display:flex;align-items:center;gap:10px;font-size:12px;padding:13px 0;border-bottom:1px solid var(--line)}.checkrow:last-child{border:0}.checkrow svg{color:var(--accent);flex-shrink:0}.checkrow.fail svg{color:var(--danger)}.checkrow span{flex:1}.checkrow small{color:var(--muted);font-size:10px}
+    details{margin:22px 0;font-size:11px;color:var(--muted);line-height:1.65}summary{cursor:pointer}details p{font-size:11px!important;overflow-wrap:anywhere}.footer{padding:14px 22px 29px;background:var(--bg);border-top:1px solid var(--line)}.primary,.secondary,.text-button{display:block;width:100%;border:0;border-radius:13px;padding:15px 10px;font-size:13px;font-weight:650;text-align:center;min-height:46px}.primary{background:var(--accent);color:var(--bg)}.secondary{background:var(--line);color:var(--fg);margin-top:10px}.text-button{background:transparent;color:var(--muted);font-size:12px;padding:11px 4px;margin-top:3px}.footer .caption{font-size:10px;line-height:1.5;color:var(--muted);text-align:center;margin:0 0 12px}.home{position:absolute;bottom:8px;width:100px;height:4px;left:calc(50% - 50px);background:var(--fg);border-radius:4px}
+    .toggle{display:flex;gap:14px;align-items:center;font-size:12px;padding:16px 0}.toggle input{width:20px;height:20px;accent-color:var(--accent);margin-left:auto}.error-text{color:var(--danger)!important}.screen .eyebrow{font-size:10px;color:var(--accent);font-weight:650;margin-bottom:6px}.divider{border:0;border-top:1px solid #d6ded9;margin:46px 0 30px}.flow-heading{font-size:27px;letter-spacing:-.7px;margin:0 0 10px}.flow-copy{font-size:13px;color:#687772;line-height:1.7;max-width:760px;margin-bottom:25px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}.grid article{min-width:0}.grid h3{font-size:15px;margin:17px 0 7px}.grid article>p{font-size:12px;color:#6c7875;line-height:1.65;margin:0 0 26px}.grid .phone{height:775px}.grid button:disabled:not(.back){opacity:1}.grid .symbol{width:60px;height:60px;margin:8px 0 20px}.rule{padding:13px 0;border-bottom:1px solid #d7dfdb}.rule strong{font-size:12px}.rule p{margin:4px 0}.notice{margin-top:16px;font-size:12px;color:#a13930;line-height:1.6}
+    @media(max-width:1000px){.workbench{grid-template-columns:1fr 370px}.controls-wrap{grid-column:1/-1}.controls{grid-template-columns:repeat(3,minmax(0,1fr))}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:650px){.board{padding:23px 16px}.intro{display:block}.intro h1{font-size:30px}.workbench{display:flex;flex-direction:column;align-items:center;gap:15px}.notes{width:100%;padding:0}.workbench>.phone{width:100%;max-width:370px}.workbench>.notes:first-child{order:2}.controls-wrap{order:3}.controls{grid-template-columns:1fr}.grid{grid-template-columns:1fr;max-width:370px;margin:auto}.intro p{font-size:13px}}
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="intro">
+      <div><a href="screens.html" class="tag">← Основной дизайн</a><h1>Первый запуск. По одному шагу.</h1></div>
+      <p>Интерактивный дизайн-концепт, не новая версия приложения. Данные демонстрационные; подключения, входа и доступа к фотографиям здесь нет.</p>
+    </header>
+    <section class="workbench" aria-label="Прототип визарда">
+      <aside class="notes">
+        <h2>Сначала — работающий вход</h2>
+        <ol>
+          <li>Ввести адрес сервера.</li>
+          <li>Проверить API, сертификат и адрес входа. Подтвердить доверие.</li>
+          <li>Войти существующим аккаунтом в системном браузере.</li>
+          <li>Выбрать библиотеку и режим работы.</li>
+          <li>Разрешить фото только для резервного копирования.</li>
+          <li>Перейти в медиатеку.</li>
+        </ol>
+        <p>«Только просмотр» пропускает запрос доступа к Фото. Пользователь, которому дали общий доступ, не обязан загружать свои снимки.</p>
+        <button class="plain" id="restart">Начать прототип заново</button>
+      </aside>
+      <div class="phone" id="prototype" aria-label="Интерактивный экран iPhone"></div>
+      <aside class="notes controls-wrap">
+        <h2>Проверить сценарий</h2>
+        <div class="controls">
+          <label>Оформление
+            <select id="theme"><option value="system">Как в системе</option><option value="light">Светлое</option><option value="dark">Тёмное</option></select>
+          </label>
+          <label>Результат проверки сервера
+            <select id="server-result"><option value="ok">Всё доступно</option><option value="offline">Сервер недоступен</option><option value="issuer">Issuer указывает на localhost</option><option value="certificate">Сертификат не подтверждён</option></select>
+          </label>
+          <label>Ответ iOS на доступ к Фото
+            <select id="photos-result"><option value="full">Все фотографии</option><option value="limited">Выбранные фотографии</option><option value="denied">Доступ запрещён</option></select>
+          </label>
+        </div>
+        <p class="prototype-note">Эти переключатели — инструменты просмотра макета. В приложении их не будет.</p>
+        <div class="rule"><strong>Никакой саморегистрации</strong><p>Администратор создаёт пользователя. Apple Account для подписи приложения — не аккаунт Nephos.</p></div>
+        <div class="rule"><strong>Не скрывать проблемы</strong><p>Недоступный issuer блокирует вход до открытия браузера. Недоверенный сертификат нельзя «просто пропустить».</p></div>
+        <div class="rule"><strong>Ничего не удалять</strong><p>Онбординг не включает очистку Photos. Резервное копирование и удаление — разные решения.</p></div>
+        <p id="theme-error" class="notice" hidden></p>
+      </aside>
+    </section>
+    <hr class="divider">
+    <h2 class="flow-heading">Основной маршрут</h2>
+    <p class="flow-copy">Форма адреса → подтверждение сервера → вход → библиотека → необязательное резервное копирование. Назад можно вернуться без повторного ввода адреса. Пароли и Face ID обрабатывает системное окно, а не собственная форма приложения.</p>
+    <section class="grid" id="flow" aria-label="Экраны первого запуска"></section>
+    <hr class="divider">
+    <h2 class="flow-heading">Ошибка объясняет, что делать дальше</h2>
+    <p class="flow-copy">Не один общий alert «Could not connect to the server», а отдельные состояния подключения. Технические значения доступны по раскрытию; адрес сервера и адрес входа не скрываются.</p>
+    <section class="grid" id="errors" aria-label="Состояния ошибок"></section>
+    <hr class="divider">
+    <h2 class="flow-heading">Решения для реализации</h2>
+    <p class="flow-copy">Рассмотрены: единая форма, короткий мастер, подробный мастер, старт из приглашения, QR-настройка и автоматический поиск в сети. Для первой версии выбран короткий мастер с ручным HTTPS-адресом: он не требует новых QR/Bonjour API и даёт понятные ошибки. Приглашения и обнаружение сервера можно добавить позже, не меняя дальнейшие шаги.</p>
+    <p class="flow-copy">Разрешение локальной сети запрашивает iOS при реальной проверке сервера. При отказе экран ведёт в настройки iPhone, а не обещает определить причину любого сетевого сбоя. Для нескольких библиотек показывается выбор; общая библиотека доступна только для просмотра. Настройки бэкапа сохраняются только после явного согласия. Истёкшая сессия возвращает к входу, не сбрасывая сервер; смена сервера требует повторного подтверждения и сохраняет изоляцию данных аккаунтов.</p>
+    <p class="flow-copy">Подтверждённый сервер и выбранный режим следует сохранять между запусками. Отменённый вход остаётся на шаге входа. Ограниченный доступ к Фото — нормальный режим, не ошибка. Недоверенный сертификат и первый вход пользователя требуют действий владельца устройства/администратора: визард помогает, но не обходит их.</p>
+  </main>
+  <script>
+    const icons={
+      server:'M4 4h16v6H4z M4 14h16v6H4z M7 7h.01 M7 17h.01 M10 7h7 M10 17h7',
+      check:'M5 12l4 4L19 6',shield:'M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z M8 12l3 3 5-6',
+      key:'M14 14a6 6 0 1 0-4-4L3 17v4h4v-3h3v-3z',photo:'M3 4h18v16H3z M3 16l5-6 5 6 3-3 5 5 M16 8h.01',
+      library:'M3 5h7l2 2h9v13H3z',warning:'M12 3L2 21h20z M12 9v5 M12 17h.01',cloud:'M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11 M12 10v11 M8 14l4-4 4 4'
+    };
+    const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[name]}"/></svg>`;
+    const escape=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const state={step:0,url:'',error:null,library:'owned',wifi:true,backup:false,permission:null};
+    const sample='https://photos.example.net';
+    const names=['Адрес сервера','Подтверждение','Вход','Режим работы','Доступ к Фото','Готово'];
+    function frame(content,footer,step,interactive){
+      return `<div class="status"><span>9:41</span><div class="island"></div><span>▮▮▮  ▰</span></div><div class="top"><button class="back" data-action="back" aria-label="Назад" ${step===0?'disabled':''}>‹</button><div class="progress">${names.map((_,index)=>`<i class="${index<=step?'filled':''}"></i>`).join('')}</div><span class="step">${step+1} из 6</span></div><div class="screen" ${interactive?'aria-live="polite"':''}>${content}</div><div class="footer">${footer}</div><div class="home"></div>`;
+    }
+    const button=(title,action,secondary=false,disabled=false)=>`<button class="${secondary?'text-button':'primary'}" data-action="${action}" ${disabled?'disabled':''}>${title}</button>`;
+    function page(step,options={}){
+      const s={...state,...options};const address=escape(s.url||sample);
+      const symbol=(name,error=false)=>`<div class="symbol${error?' error':''}">${icon(name)}</div>`;
+      let content='',footer='';
+      if(s.error){
+        const copy={
+          offline:['Сервер не отвечает','Проверьте адрес и подключение к домашней сети или VPN. Если iOS запретила локальную сеть, разрешите её в настройках Nephos.'],
+          issuer:['Не удаётся открыть вход','Сервер доступен, но его адрес авторизации указывает на localhost. На iPhone это сам телефон. Администратору нужно исправить публичный адрес входа на сервере.'],
+          certificate:['Сертификат не подтверждён','Подключение остановлено: не удалось подтвердить подлинность сервера. Проверьте адрес. Для локального тестового сервера администратор должен предоставить сертификат и инструкцию доверия.']
+        }[s.error];
+        content=`${symbol('warning',true)}<h2>${copy[0]}</h2><p>${copy[1]}</p><div class="card"><strong>Сервер</strong><p class="address">${address}</p>${s.error==='issuer'?'<div class="checkrow">'+icon('check')+'<span>API доступен</span></div><p class="error-text">Вход: http://localhost:18081</p>':''}</div><details><summary>Технические сведения</summary><p>${s.error==='issuer'?'OIDC issuer: http://localhost:18081/realms/nephos':s.error==='certificate'?'В примере: неизвестный центр сертификации. Проверка TLS остаётся обязательной.':'Проверьте локальную сеть, VPN, DNS, порт сервера и разрешения iOS. Один таймаут не определяет причину.'}</p></details>`;
+        footer=button('Проверить снова','check')+button('Изменить адрес','edit',true);
+      }else if(step===0){
+        content=`${symbol('server')}<h2>Подключить сервер</h2><p>Введите адрес вашего Nephos. Его можно получить у администратора.</p><label class="field">Адрес сервера<input data-field="url" type="url" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" placeholder="${sample}" value="${escape(s.url)}"></label><p class="helper">Например, https://photos.example.net</p><div class="card soft"><strong>Сначала проверим подключение</strong><p>Сертификат, доступность медиатеки и адрес входа — до того, как просить вас авторизоваться.</p></div><details><summary>У меня локальная dev-сборка</summary><p>Для passkeys всё равно нужен HTTPS. Самоподписанный сертификат требует явного доверия в iOS; небезопасное соединение не включается автоматически.</p></details><p id="address-error" class="error-text" role="alert"></p>`;
+        footer=button('Проверить сервер','check');
+      }else if(step===1){
+        content=`${symbol('shield')}<h2>Это ваш сервер?</h2><p>Продолжайте, только если узнаёте этот адрес или получили его от своего администратора.</p><div class="card"><strong class="address">${address}</strong><div class="checkrow">${icon('check')}<span>Защищённое соединение</span></div><div class="checkrow">${icon('check')}<span>Медиатека доступна</span></div><div class="checkrow">${icon('check')}<span>Адрес входа доступен</span></div></div><p class="helper">Вход выполняется на том же сервере. Если оператор использует другой адрес авторизации, он будет показан отдельно перед подтверждением.</p><details><summary>Идентификатор и адрес входа</summary><p>Демонстрационный сервер · 8f4a…2bc1<br>Issuer: ${address}/realms/nephos</p></details>`;
+        footer=button('Доверять и продолжить','next')+button('Другой сервер','edit',true);
+      }else if(step===2){
+        content=`${symbol('key')}<h2>Войти в Nephos</h2><p>Откроется защищённое системное окно входа. Используйте аккаунт, созданный администратором вашего сервера.</p><div class="card"><strong>Адрес входа</strong><p class="address">${address}</p><p>Passkey подтверждается через Face ID, Touch ID или доступный на устройстве способ.</p></div><div class="card soft"><strong>Нет аккаунта?</strong><p>Попросите администратора добавить вас и выдать приглашение для первого входа. Самостоятельной регистрации нет.</p></div><p class="helper">Apple Account, использованный для установки dev-сборки, не является аккаунтом Nephos.</p>`;
+        footer='<p class="caption">Nephos не запрашивает ваш пароль в собственной форме.</p>'+button('Войти','next')+button('Сменить сервер','edit',true);
+      }else if(step===3){
+        content=`${symbol('library')}<h2>Как использовать<br>Nephos?</h2><p>Можно просто смотреть медиатеку или сохранять в неё оригиналы с этого iPhone.</p><label class="field">Библиотека<select data-field="library" aria-label="Библиотека"><option value="owned" ${s.library==='owned'?'selected':''}>Моя медиатека</option><option value="shared" ${s.library==='shared'?'selected':''}>Семейная · общий доступ</option></select></label><div class="card soft"><strong>${s.library==='shared'?'Только просмотр':'Резервное копирование — по желанию'}</strong><p>${s.library==='shared'?'Вам предоставили доступ к чужой библиотеке. Загружать в неё свои фотографии нельзя.':'Оригиналы останутся в Фото. Этот шаг не включает удаление снимков с телефона или из iCloud.'}</p></div><p class="helper">Настройки можно изменить позже. Для просмотра доступ к Фото не нужен.</p>`;
+        footer=button('Настроить резервное копирование','backup',false,s.library==='shared')+button('Пока только просмотр','browse',true);
+      }else if(step===4){
+        const denied=s.permission==='denied';
+        content=`${symbol('photo')}<h2>${denied?'Доступ к Фото<br>не разрешён':'Сохранять фото<br>с iPhone'}</h2><p>${denied?'Медиатека сервера остаётся доступна. Для резервного копирования разрешите доступ к Фото в настройках iPhone.':'Разрешите iOS предоставить фотографии и видео для резервного копирования. Можно выбрать отдельные снимки.'}</p><label class="toggle">Только по Wi-Fi<input data-field="wifi" type="checkbox" ${s.wifi?'checked':''}></label><div class="card soft"><strong>Оригиналы остаются у вас</strong><p>Nephos не удаляет фотографии. Фоновую работу разрешает iOS; приложение не обещает непрерывную выгрузку при закрытом экране.</p></div><p class="helper">Загружаются только доступные приложению ресурсы. Ограниченный доступ к Фото поддерживается.</p>`;
+        footer=button(denied?'Открыть настройки iPhone':'Разрешить доступ к Фото',denied?'settings':'permission')+button('Продолжить без резервного копирования','browse',true);
+      }else{
+        content=`${symbol('check')}<h2>${s.backup?'Резервное копирование включено':'Всё готово<br>для просмотра'}</h2><p>${s.backup?'Доступные оригиналы будут добавляться в очередь. Прогресс и пауза находятся в разделе резервного копирования.':'Откройте медиатеку сервера. Доступ к фотографиям на iPhone для этого не требуется.'}</p><div class="card"><strong>${s.library==='shared'?'Семейная · общий доступ':'Моя медиатека'}</strong><p class="address">${address}</p><div class="checkrow">${icon('check')}<span>${s.backup?'Резервное копирование':'Режим просмотра'}</span></div>${s.backup?`<div class="checkrow">${icon('photo')}<span>${s.permission==='limited'?'Только выбранные фотографии':'Разрешённые фотографии и видео'}</span></div><div class="checkrow">${icon('cloud')}<span>${s.wifi?'Загрузка только по Wi-Fi':'Сотовая сеть разрешена'}</span></div>`:''}</div><p class="helper">${s.backup?'Если сервер недоступен, очередь дождётся подключения. Пока оригинал не проверен сервером, он не считается сохранённым.':'Резервное копирование можно включить позже в настройках.'}</p>`;
+        footer=button('Открыть медиатеку','finish');
+      }
+      return frame(content,footer,step,options.interactive);
+    }
+    const prototype=document.querySelector('#prototype');
+    function render(){prototype.innerHTML=page(state.step,{interactive:true});}
+    function check(){
+      if(state.step===0){
+        try{
+          const url=new URL(state.url);
+          if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw new Error();
+          state.url=url.href.replace(/\/$/,'');
+        }catch{
+          document.querySelector('#address-error').textContent='Введите полный HTTPS-адрес без логина, пароля и параметров.';
+          return;
+        }
+      }
+      const outcome=document.querySelector('#server-result').value;
+      state.error=outcome==='ok'?null:outcome;
+      state.step=1;render();
+    }
+    prototype.addEventListener('input',event=>{
+      if(event.target.dataset.field==='url')state.url=event.target.value;
+      if(event.target.dataset.field==='wifi')state.wifi=event.target.checked;
+    });
+    prototype.addEventListener('change',event=>{
+      if(event.target.dataset.field==='library'){state.library=event.target.value;render();}
+    });
+    prototype.addEventListener('click',event=>{
+      const action=event.target.closest('[data-action]')?.dataset.action;
+      if(!action)return;
+      if(action==='check'){check();return;}
+      if(action==='edit'){state.step=0;state.error=null;}
+      if(action==='back'){
+        state.step=state.step===5?(state.backup?4:3):Math.max(0,state.step-1);
+        state.error=null;
+      }
+      if(action==='next')state.step++;
+      if(action==='backup'){state.step=4;state.permission=null;}
+      if(action==='browse'){state.backup=false;state.step=5;}
+      if(action==='permission'){
+        state.permission=document.querySelector('#photos-result').value;
+        if(state.permission!=='denied'){state.backup=true;state.step=5;}
+      }
+      if(action==='settings'){
+        const message=prototype.querySelector('.screen p');
+        message.textContent='В приложении здесь откроются настройки Nephos в iOS. В макете измените «Ответ iOS» справа и вернитесь к запросу доступа.';
+        state.permission=null;
+        prototype.querySelector('[data-action="settings"]').dataset.action='permission';
+        return;
+      }
+      if(action==='finish'){
+        prototype.querySelector('.screen').innerHTML='<div class="symbol">'+icon('check')+'</div><h2>Конец прототипа</h2><p>В приложении здесь откроется настоящая медиатека. Этот макет не создавал аккаунт, не выполнял вход и не запрашивал фотографии.</p><p><a href="screens.html">Посмотреть дизайн медиатеки →</a></p>';
+        prototype.querySelector('.footer').innerHTML=button('Пройти ещё раз','restart');
+        return;
+      }
+      if(action==='restart'){reset();return;}
+      render();
+    });
+    function reset(){Object.assign(state,{step:0,url:'',error:null,library:'owned',wifi:true,backup:false,permission:null});render();}
+    document.querySelector('#restart').addEventListener('click',reset);
+    const descriptions=[
+      'Один адрес. Проверка до входа; без issuer и служебных идентификаторов в основной форме.',
+      'Явное доверие серверу. Технические подробности раскрываются по запросу.',
+      'Без своей формы пароля. Объясняем, откуда берётся аккаунт и почему нет регистрации.',
+      'Бэкап не обязателен. Общая библиотека не становится местом загрузки.',
+      'Разрешение в контексте задачи. Wi-Fi по умолчанию, никаких обещаний удалить или непрерывно загружать.',
+      'Показываем выбранный режим, а не выдуманный прогресс. Для просмотра достаточно входа.'
+    ];
+    document.querySelector('#flow').innerHTML=names.map((name,step)=>`<article><div class="phone">${page(step,{url:sample,error:null,library:'owned',backup:step===5,permission:step===5?'limited':null})}</div><h3>${String(step+1).padStart(2,'0')} · ${name}</h3><p>${descriptions[step]}</p></article>`).join('');
+    document.querySelector('#errors').innerHTML=['offline','issuer','certificate'].map((error,index)=>`<article><div class="phone">${page(1,{url:sample,error})}</div><h3>${['Сеть или адрес','Адрес авторизации','Доверие сертификату'][index]}</h3><p>${['Сохраняем введённый адрес и даём повторить проверку.','Проверяем issuer с устройства до открытия системного входа.','Никакой кнопки «Игнорировать». Исправляется доверие или сертификат сервера.'][index]}</p></article>`).join('');
+    document.querySelectorAll('.grid .phone button,.grid .phone input,.grid .phone select').forEach(control=>{control.disabled=true;});
+    const media=matchMedia('(prefers-color-scheme: dark)');
+    const theme=document.querySelector('#theme');
+    const themeError=document.querySelector('#theme-error');
+    function applyTheme(){document.body.dataset.theme=theme.value==='system'?(media.matches?'dark':'light'):theme.value;}
+    try{
+      const stored=localStorage.getItem('nephos-onboarding-appearance');
+      if(stored!==null){
+        if(['system','light','dark'].includes(stored))theme.value=stored;
+        else{themeError.textContent='Сохранённая тема не распознана. Используется системная.';themeError.hidden=false;}
+      }
+    }catch{themeError.textContent='Не удалось прочитать оформление. Используется системная тема.';themeError.hidden=false;}
+    theme.addEventListener('change',()=>{
+      applyTheme();
+      try{localStorage.setItem('nephos-onboarding-appearance',theme.value);themeError.hidden=true;}
+      catch{themeError.textContent='Не удалось сохранить тему. Выбор действует до перезагрузки.';themeError.hidden=false;}
+    });
+    media.addEventListener('change',applyTheme);
+    applyTheme();render();
+  </script>
+</body>
+</html>

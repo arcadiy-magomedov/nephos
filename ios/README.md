@@ -8,6 +8,13 @@ Core invariants also form a dependency-free Swift package.
 
 ## Native design and social journeys
 
+The proposed first-launch wizard is available in
+[`design/ios/onboarding.html`](../design/ios/onboarding.html). It is an interactive
+design prototype, **not yet wired into the native app**: server and issuer
+preflight, explicit trust, system-browser sign-in, library selection and optional
+Photos backup are separate steps. It includes unreachable-server, loopback-issuer
+and untrusted-certificate states, plus limited/denied Photos access.
+
 The approved [design board](../design/ios/screens.html) is implemented using
 native SwiftUI controls (including the host iOS version's navigation/tab-bar
 appearance), not a web view. There are no decorative subtitles above page titles.
