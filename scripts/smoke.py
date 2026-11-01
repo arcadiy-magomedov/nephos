@@ -237,6 +237,7 @@ def main():
             "enabled": True,
             "publicClient": False,
             "serviceAccountsEnabled": True,
+            "defaultClientScopes": ["basic"],
             "standardFlowEnabled": False,
             "directAccessGrantsEnabled": False,
             "protocol": "openid-connect",
@@ -246,7 +247,13 @@ def main():
                     "protocol": "openid-connect",
                     "protocolMapper": "oidc-audience-mapper",
                     "config": {"included.custom.audience": "nephos-api", "access.token.claim": "true"},
-                }
+                },
+                {
+                    "name": "introspection",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {"included.custom.audience": "nephos-api-introspection", "access.token.claim": "true"},
+                },
             ],
         },
     )
