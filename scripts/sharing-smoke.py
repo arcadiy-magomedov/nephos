@@ -114,7 +114,7 @@ def main():
         with smoke.AdminSession() as admin:
             admin.submit({"action": "access", "subject": owner_id})
         request(API + "/v1/assets/" + parts[0]["assetId"] + "/original", token=recipient, expected=404)
-        request(API + "/v1/users", token=owner, expected=403)
+        request(API + "/v1/users", token=owner, expected=401)
         print(
             "PASS: known directory, selected/all/future media, frozen scoped views/deltas, compound originals, provenance, read-only authority and revocation"
         )
