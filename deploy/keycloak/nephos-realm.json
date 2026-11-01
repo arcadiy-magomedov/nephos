@@ -44,7 +44,7 @@
       "directAccessGrantsEnabled": false,
       "implicitFlowEnabled": false,
       "redirectUris": ["nephos://oauth/callback"],
-      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "defaultClientScopes": ["basic", "web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": ["offline_access"],
       "attributes": {"pkce.code.challenge.method": "S256"},
       "protocol": "openid-connect",

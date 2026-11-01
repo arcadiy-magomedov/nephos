@@ -434,6 +434,13 @@ final class AppModel {
         guard startingEpoch == epoch else { throw CancellationError() }
         epoch = UUID()
         let boundary = epoch
+        var established = false
+        defer {
+            if !established, epoch == boundary {
+                signedIn = false
+                api?.invalidate()
+            }
+        }
         signedIn = false
         automaticTask?.cancel()
         automaticTask = nil
@@ -490,6 +497,7 @@ final class AppModel {
             try await loadLibraries(reset: true)
             if ledger.selectedLibraryID != nil { await loadGallery(reset: true) }
         }
+        established = true
     }
     func probe(url: String, allowHTTP: Bool) async throws {
         try await bootstrap()

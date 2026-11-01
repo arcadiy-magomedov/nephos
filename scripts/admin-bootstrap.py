@@ -132,6 +132,18 @@ def main():
         call(api_path + "/" + api_clients[0]["id"], api_definition, token, "PUT")
     else:
         call(api_path, api_definition, token)
+    scopes = call("/admin/realms/nephos/client-scopes", token=token)
+    basic = next((scope for scope in scopes if scope["name"] == "basic"), None)
+    if basic is None:
+        raise RuntimeError("The identity realm is missing the basic OIDC scope required for access-token subjects.")
+    mobile_clients = call(api_path + "?clientId=nephos-ios", token=token)
+    if len(mobile_clients) != 1:
+        raise RuntimeError("Expected exactly one Nephos iOS identity client.")
+    call(
+        api_path + "/" + mobile_clients[0]["id"] + "/default-client-scopes/" + basic["id"],
+        token=token,
+        method="PUT",
+    )
     print("Private operator and API introspection clients configured; end-user credentials unchanged.")
 
 

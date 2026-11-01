@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Boot production-mode Keycloak against a disposable isolated PostgreSQL instance."""
 
+import base64
 import json
 import os
 import secrets
@@ -248,6 +249,10 @@ try:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     assert token_response["access_token"] and token_response["id_token"] and token_response["refresh_token"]
+    for token_type in ("access_token", "id_token"):
+        encoded = token_response[token_type].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        assert claims["sub"] == subject, f"{token_type} must identify the known library account"
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
     smoke.request(
         token_url,

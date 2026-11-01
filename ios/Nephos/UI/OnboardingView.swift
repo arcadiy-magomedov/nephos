@@ -94,6 +94,7 @@ struct OnboardingView: View {
                 }
             }
             .onChange(of: model.signedIn) { _, signedIn in
+                guard !model.isSigningIn else { return }
                 if signedIn && model.needsOnboarding {
                     resumeSetup()
                 } else if !signedIn && step.rawValue >= Step.library.rawValue {

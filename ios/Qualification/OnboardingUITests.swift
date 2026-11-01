@@ -267,6 +267,16 @@ final class OnboardingUITests: XCTestCase {
         screenshot.name = "email-validated-pin-entry"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        if let suppliedPIN = environment["NEPHOS_UI_SIGNIN_PIN"], !suppliedPIN.isEmpty {
+            pin.tap()
+            pin.typeText(suppliedPIN)
+            app.buttons["onboarding.submitPin"].tap()
+            XCTAssertTrue(app.buttons["Set up backup"].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.buttons["Browse only"].isEnabled, app.debugDescription)
+            XCTAssertFalse(app.staticTexts["No library is available yet"].exists, app.debugDescription)
+            XCTAssertFalse(app.staticTexts["Sign-in could not continue"].exists, app.debugDescription)
+            return
+        }
         app.buttons["Different email"].tap()
         XCTAssertTrue(email.waitForExistence(timeout: 15))
         XCTAssertFalse(pin.exists)

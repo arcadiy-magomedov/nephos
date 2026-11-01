@@ -209,6 +209,11 @@ python3 onboarding_qualification.py --simulator <booted-simulator-UUID> \
   --signin-email enabled-fixture@example.test
 ```
 
+Add `--complete-signin` for a disposable account provisioned through the private
+admin console: the driver obtains its PIN privately, enters it in the native UI,
+and requires the writable-library setup screen. Temporary test configuration is
+removed afterward. Never use this option with a personal or production account.
+
 The simulator must trust the development CA. The test seeds an old IP/localhost
 connection, drives failed TLS checks, draft persistence, server replacement,
 approval/relaunch, email validation, unknown-account rejection, the separate
@@ -643,6 +648,8 @@ No registered developer team or physical-device certification was available.
 Before using irreplaceable media, perform signed-device E2E probes for:
 
 - known-user PIN issuance/expiry/one-use behavior, OIDC token verification,
+  access-token `sub` and the full provision/email/PIN/own-library/refresh/revocation
+  journey in `scripts/admin-smoke.py` (required by backend integration CI),
   offline refresh, device revocation, account/server switches, and the
   deployment's issuer hostname and HTTPS trust chain;
 - selected/limited/denied/revoked Photos access, cloud-only originals, low disk
