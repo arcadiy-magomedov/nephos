@@ -65,7 +65,7 @@ final class MediaCache {
             (trash
             ? api.trashPreviewRequest(asset.id, size: size)
             : api.previewRequest(asset.id, size: size))
-        let bytes = try await HTTP.data(request, maximum: 8 * 1024 * 1024, session: api.session)
+        let bytes = try await api.data(request, maximum: 8 * 1024 * 1024)
         try Task.checkCancellation()
         guard boundary == generation else { throw CancellationError() }
         let worker = Task.detached(priority: .userInitiated) {

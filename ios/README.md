@@ -153,6 +153,9 @@ and clearing at those privacy boundaries.
 The mandatory native suite also compares thumbnail pixels during a delayed refresh
 and local-to-server publication, and checks that rename/merge refresh the People list.
 People mutations invalidate cached lists, and stale detail requests cannot apply names.
+API metadata, mutations and previews retry an unauthorized response once after
+refreshing the rejected access token. Temporary refresh failures remain network
+errors; a second unauthorized response still requires reauthentication.
 Merges keep a named destination, or inherit the source name when it is unnamed.
 Source names and aliases remain searchable through the destination; undo restores
 the separate groups without discarding either label.

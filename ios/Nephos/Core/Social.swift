@@ -222,7 +222,7 @@ extension API {
     }
 
     func change(_ path: String, method: String, body: Data? = nil) async throws {
-        _ = try await HTTP.data(request(path, method: method, body: body), session: session)
+        _ = try await data(request(path, method: method, body: body))
     }
 
     func namePerson(_ id: UUID, input: PersonNameInput) async throws {

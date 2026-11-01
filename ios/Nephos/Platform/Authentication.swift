@@ -175,6 +175,13 @@ final class AuthSession: AccessTokenProviding {
         defer { refreshTask = nil }
         return try await task.value
     }
+    func recoverAccessToken(rejected: String) async throws -> String {
+        guard var saved = credentials else { throw ClientError.signedOut }
+        if saved.accessToken != rejected { return try await accessToken() }
+        saved.expiresAt = .distantPast
+        credentials = saved
+        return try await accessToken()
+    }
     func signOut() throws {
         generation = UUID()
         refreshTask?.cancel()

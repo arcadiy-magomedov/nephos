@@ -132,6 +132,11 @@ enum HTTP {
 @MainActor
 protocol AccessTokenProviding: AnyObject {
     func accessToken() async throws -> String
+    func recoverAccessToken(rejected: String) async throws -> String
+}
+
+extension AccessTokenProviding {
+    func recoverAccessToken(rejected: String) async throws -> String { throw ClientError.signedOut }
 }
 
 @MainActor
@@ -172,7 +177,23 @@ final class API {
         _ type: T.Type, _ path: String, method: String = "GET",
         body: Data? = nil, query: [URLQueryItem] = []
     ) async throws -> T {
-        try await HTTP.json(type, request(path, method: method, body: body, query: query), session: session)
+        try JSONDecoder().decode(type, from: await data(request(path, method: method, body: body, query: query)))
+    }
+    func data(_ request: URLRequest, maximum: Int = 2 * 1024 * 1024) async throws -> Data {
+        guard !invalidated else { throw CancellationError() }
+        do {
+            return try await HTTP.data(request, maximum: maximum, session: session)
+        } catch ClientError.signedOut {
+            guard !invalidated else { throw CancellationError() }
+            guard let authorization = request.value(forHTTPHeaderField: "Authorization"),
+                authorization.hasPrefix("Bearer ")
+            else { throw ClientError.signedOut }
+            let token = try await auth.recoverAccessToken(rejected: String(authorization.dropFirst(7)))
+            guard !invalidated else { throw CancellationError() }
+            var retried = request
+            retried.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            return try await HTTP.data(retried, maximum: maximum, session: session)
+        }
     }
     func libraries(cursor: UUID? = nil) async throws -> LibraryPage {
         try await json(
