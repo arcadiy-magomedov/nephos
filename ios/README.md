@@ -145,6 +145,8 @@ loaded window, bounded to 300 items. Automatic refresh does not issue a command
 to align the visible photo to the viewport top.
 Explicit navigation/restoration scroll requests are consumed once, not replayed
 whenever upload-state changes rebuild the unified gallery.
+Publishing a phone original keeps its local cell ID, capture date and day group;
+the server reference changes its backup state without relocating the thumbnail.
 Historical/date windows remain historical.
 Failures keep cached metadata and use inline recovery with polling backoff up to
 five minutes, not repeated alerts. Media still requires current authorization.

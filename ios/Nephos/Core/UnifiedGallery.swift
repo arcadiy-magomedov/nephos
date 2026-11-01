@@ -63,12 +63,15 @@ struct UnifiedGallerySnapshot: Sendable {
             try Task.checkCancellation()
             let identifier = byAsset[asset.id]?.source.localIdentifier
             let localAsset = identifier.flatMap { local[$0] }
-            if let localAsset { knownLocal.insert(localAsset.identifier) }
+            if let localAsset, !knownLocal.insert(localAsset.identifier).inserted { continue }
             items.append(
                 GalleryMedia(
-                    id: GalleryMedia.remoteID(asset.id), asset: asset, localIdentifier: localAsset?.identifier,
+                    id: localAsset.map { "local:\($0.identifier)" } ?? GalleryMedia.remoteID(asset.id),
+                    asset: asset, localIdentifier: localAsset?.identifier,
                     shared: asset.sharedBy != nil || input.readOnlyLibraries.contains(asset.libraryId),
-                    uploaded: true, date: precise.date(from: asset.createdAt) ?? plain.date(from: asset.createdAt),
+                    uploaded: true,
+                    date: localAsset != nil
+                        ? localAsset?.date : precise.date(from: asset.createdAt) ?? plain.date(from: asset.createdAt),
                     isVideo: asset.isVideo))
         }
         for asset in input.local where !knownLocal.contains(asset.identifier) {

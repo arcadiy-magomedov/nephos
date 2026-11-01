@@ -198,15 +198,15 @@ struct GalleryView: View {
                 .onChange(of: snapshot.filtered.map(\.id)) { _, _ in
                     selected.formIntersection(Set(galleryItems.map(\.id)))
                     if let id = model.scrollTarget,
-                        filteredItems.contains(where: { $0.id == GalleryMedia.remoteID(id) })
+                        let item = filteredItems.first(where: { $0.asset?.id == id })
                     {
-                        proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top)
+                        proxy.scrollTo(item.id, anchor: .top)
                         model.scrollTarget = nil
                     }
                 }
                 .onChange(of: model.scrollTarget) { _, id in
-                    if let id, filteredItems.contains(where: { $0.id == GalleryMedia.remoteID(id) }) {
-                        proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top)
+                    if let id, let item = filteredItems.first(where: { $0.asset?.id == id }) {
+                        proxy.scrollTo(item.id, anchor: .top)
                         model.scrollTarget = nil
                     }
                 }

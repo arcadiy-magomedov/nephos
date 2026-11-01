@@ -37,7 +37,7 @@ final class UnifiedGalleryTests: XCTestCase {
         let snapshot = try UnifiedGallerySnapshot.build(input)
         XCTAssertEqual(snapshot.items.count, 3)
         let merged = try XCTUnwrap(snapshot.items.first { $0.asset?.id == owned.id })
-        XCTAssertEqual(merged.id, GalleryMedia.remoteID(owned.id))
+        XCTAssertEqual(merged.id, "local:local")
         XCTAssertEqual(merged.localIdentifier, "local")
         XCTAssertTrue(merged.uploaded)
         XCTAssertFalse(merged.shared)
@@ -45,6 +45,39 @@ final class UnifiedGalleryTests: XCTestCase {
         XCTAssertTrue(snapshot.items.first { $0.localIdentifier == "video" }?.isVideo == true)
         XCTAssertEqual(snapshot.days.flatMap(\.items).map(\.id), snapshot.filtered.map(\.id))
     }
+    func testUploadPublicationPreservesLocalIdentityDateOrderAndDay() throws {
+        let remote = asset()
+        let locals = [
+            LocalGalleryAsset(identifier: "capture", date: Date(timeIntervalSince1970: 100), isVideo: false),
+            LocalGalleryAsset(identifier: "neighbor", date: Date(timeIntervalSince1970: 200), isVideo: false),
+        ]
+        func snapshot(_ remoteAssets: [Asset]) throws -> UnifiedGallerySnapshot {
+            try UnifiedGallerySnapshot.build(
+                UnifiedGalleryInput(
+                    remote: remoteAssets, local: locals, records: [record(remote, identifier: "capture")],
+                    readOnlyLibraries: [], selectedLibrary: library, filter: .all))
+        }
+        let before = try snapshot([])
+        let after = try snapshot([remote])
+        XCTAssertEqual(before.filtered.map(\.id), after.filtered.map(\.id))
+        XCTAssertEqual(before.filtered.map(\.date), after.filtered.map(\.date))
+        XCTAssertEqual(before.days.map(\.id), after.days.map(\.id))
+        XCTAssertTrue(try XCTUnwrap(after.items.first { $0.id == "local:capture" }).uploaded)
+    }
+
+    func testLocalResourceConstituentsCannotCreateDuplicateStableIDs() throws {
+        let photo = asset()
+        let video = asset()
+        let result = try UnifiedGallerySnapshot.build(
+            UnifiedGalleryInput(
+                remote: [photo, video],
+                local: [LocalGalleryAsset(identifier: "live", date: nil, isVideo: false)],
+                records: [record(photo, identifier: "live"), record(video, identifier: "live")],
+                readOnlyLibraries: [], selectedLibrary: library, filter: .all))
+        XCTAssertEqual(result.items.map(\.id), ["local:live"])
+        XCTAssertNil(result.items.first?.date)
+    }
+
     func testRemovedSourcesAreNotShownUploadedAndReadOnlyFilterIncludesSharedLibrary() throws {
         let remote = asset()
         let input = UnifiedGalleryInput(
