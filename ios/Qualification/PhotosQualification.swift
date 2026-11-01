@@ -22,6 +22,35 @@ struct PhotosQualificationApp: App {
 
 @MainActor
 enum PhotosQualification {
+    private final class CancellationImageManager: PHCachingImageManager, @unchecked Sendable {
+        private let lock = NSLock()
+        private var didStart = false
+        private var didCancel = false
+        private var handler: ((AVPlayerItem?, [AnyHashable: Any]?) -> Void)?
+        var started: Bool { lock.withLock { didStart } }
+        var cancelled: Bool { lock.withLock { didCancel } }
+        func deliver(_ item: AVPlayerItem?, info: [AnyHashable: Any]? = nil) {
+            let callback = lock.withLock {
+                let callback = handler
+                handler = nil
+                return callback
+            }
+            callback?(item, info)
+        }
+        override func requestPlayerItem(
+            forVideo asset: PHAsset, options: PHVideoRequestOptions?,
+            resultHandler: @escaping (AVPlayerItem?, [AnyHashable: Any]?) -> Void
+        ) -> PHImageRequestID {
+            lock.withLock {
+                didStart = true
+                handler = resultHandler
+            }
+            return 42
+        }
+        override func cancelImageRequest(_ requestID: PHImageRequestID) {
+            lock.withLock { didCancel = requestID == 42 }
+        }
+    }
     static func run() async -> [String] {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let work = root.appendingPathComponent("SyntheticResources", isDirectory: true)
@@ -77,6 +106,34 @@ enum PhotosQualification {
                 }
                 let identifier = try await export.saveToPhotos()
                 created.append(identifier)
+                if kind == "single-video" {
+                    let manager = CancellationImageManager()
+                    let cancellable = PhotosLibrary(imageManager: manager)
+                    let task = Task { try await cancellable.videoPlayerItem(identifier) }
+                    while !manager.started { await Task.yield() }
+                    task.cancel()
+                    do {
+                        _ = try await task.value
+                        throw ClientError.invalid("Cancelled PhotoKit video request returned a player item.")
+                    } catch is CancellationError {}
+                    guard manager.cancelled else {
+                        throw ClientError.invalid("Swift task cancellation did not cancel the PhotoKit request.")
+                    }
+                    manager.deliver(AVPlayerItem(url: movie))
+                    await Task.yield()
+                    report.append("PASS video request cancellation: cancels PhotoKit and safely ignores late success.")
+                    let failingManager = CancellationImageManager()
+                    let failingPhotos = PhotosLibrary(imageManager: failingManager)
+                    let failed = Task { try await failingPhotos.videoPlayerItem(identifier) }
+                    while !failingManager.started { await Task.yield() }
+                    failingManager.deliver(nil, info: [PHImageErrorKey: NSError(domain: "PhotoKitProbe", code: 7)])
+                    do {
+                        _ = try await failed.value
+                        throw ClientError.invalid("PhotoKit failure was swallowed.")
+                    } catch let error as NSError where error.domain == "PhotoKitProbe" {
+                        report.append("PASS video request errors propagate for explicit viewer retry.")
+                    }
+                }
                 guard let asset = photos.asset(identifier) else {
                     throw ClientError.invalid("Restored \(kind) is not accessible.")
                 }

@@ -1,6 +1,5 @@
 import AVKit
 import Foundation
-import ImageIO
 import Network
 import UIKit
 
@@ -69,15 +68,16 @@ final class MediaCache {
         let bytes = try await HTTP.data(request, maximum: 8 * 1024 * 1024, session: api.session)
         try Task.checkCancellation()
         guard boundary == generation else { throw CancellationError() }
-        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
-            let image = CGImageSourceCreateThumbnailAtIndex(
-                source, 0,
-                [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: size.rawValue,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                ] as CFDictionary)
-        else { throw ClientError.invalid("Preview format is unsupported.") }
+        let worker = Task.detached(priority: .userInitiated) {
+            try ImageDecoding.thumbnail(bytes, maximumPixels: size.rawValue)
+        }
+        let image = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        try Task.checkCancellation()
+        guard boundary == generation else { throw CancellationError() }
         let result = UIImage(cgImage: image)
         images.setObject(result, forKey: key, cost: image.bytesPerRow * image.height)
         return result
@@ -85,6 +85,22 @@ final class MediaCache {
     static func original(_ asset: Asset, api: API, directory: URL, maximum: Int64 = LedgerStore.viewerBudget)
         async throws -> URL
     {
+        let request = try await UploadClient(api: api).originalRequest(asset.id)
+        let session = api.session
+        let worker = Task.detached(priority: .utility) {
+            try await downloadOriginal(
+                asset, request: request, session: session, directory: directory, maximum: maximum)
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+    private nonisolated static func downloadOriginal(
+        _ asset: Asset, request: URLRequest, session: URLSession, directory: URL, maximum: Int64
+    ) async throws -> URL {
+        try Task.checkCancellation()
         guard asset.size > 0, asset.size <= maximum else {
             throw ClientError.invalid(
                 "This original exceeds the image viewer budget. Use Export all originals to save its exact bytes to Files."
@@ -103,8 +119,7 @@ final class MediaCache {
         }
         let handle = try FileHandle(forWritingTo: file)
         do {
-            let request = try await UploadClient(api: api).originalRequest(asset.id)
-            let (stream, response) = try await api.session.bytes(for: request)
+            let (stream, response) = try await session.bytes(for: request)
             try HTTP.check(response)
             guard response.expectedContentLength < 0 || response.expectedContentLength == asset.size else {
                 throw ClientError.invalid("Original size differs from the committed gallery metadata.")
@@ -128,7 +143,7 @@ final class MediaCache {
             }
             try handle.write(contentsOf: buffer)
             try handle.close()
-            let hash = try await Task.detached { try Hashing.file(file) }.value
+            let hash = try Hashing.file(file)
             guard hash.sha256 == asset.sha256 else {
                 throw ClientError.invalid("Downloaded original failed its SHA-256 integrity check.")
             }
@@ -139,20 +154,5 @@ final class MediaCache {
             try? FileManager.default.removeItem(at: file)
             throw error
         }
-    }
-    static func image(_ url: URL) throws -> UIImage {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-            let image = CGImageSourceCreateThumbnailAtIndex(
-                source, 0,
-                [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 4096,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                ] as CFDictionary)
-        else {
-            throw ClientError.invalid(
-                "This original is stored, but its image format cannot be displayed on this device.")
-        }
-        return UIImage(cgImage: image)
     }
 }

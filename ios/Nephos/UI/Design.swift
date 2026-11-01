@@ -20,11 +20,19 @@ struct AppAppearanceModifier: ViewModifier {
 enum NephosStyle {
     static let accent = Color(
         uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
+            if traits.accessibilityContrast == .high {
+                return traits.userInterfaceStyle == .dark
+                    ? UIColor(red: 0.72, green: 0.96, blue: 0.86, alpha: 1)
+                    : UIColor(red: 0.02, green: 0.30, blue: 0.24, alpha: 1)
+            }
+            return traits.userInterfaceStyle == .dark
                 ? UIColor(red: 0.61, green: 0.87, blue: 0.78, alpha: 1)
                 : UIColor(red: 0.08, green: 0.46, blue: 0.39, alpha: 1)
         })
     static let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
+    static func galleryColumns(accessibility: Bool) -> [GridItem] {
+        accessibility ? Array(repeating: GridItem(.flexible(), spacing: 3), count: 2) : columns
+    }
 }
 
 struct AppearancePicker: View {

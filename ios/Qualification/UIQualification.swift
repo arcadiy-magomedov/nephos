@@ -44,6 +44,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                             connection: connection, auth: QualificationTokens("fixture-only"), session: session),
                         subject: "trash-fixture",
                         library: Library(id: TrashQualificationProtocol.library, name: "Trash fixture"))
+                    await model.restore()
                     try await qualifyTrash(model)
                     window.rootViewController = UIHostingController(rootView: RootView(model: model))
                     try report(["ready": true, "screen": "trash-native", "checks": 14, "realAPI": false])
@@ -63,6 +64,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         qualificationAPI: API(
                             connection: connection, auth: QualificationTokens("fixture-only"), session: session),
                         subject: "retry-fixture", library: library)
+                    await model.restore()
                     model.ledger.records = BackupQualificationProtocol.records
                     if env["NEPHOS_UI_SCREEN"] == "backup-attention" {
                         for index in model.ledger.records.indices {
@@ -134,6 +136,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                 }
                 if env["NEPHOS_UI_SCREEN"] == "onboarding-flow" {
                     let model = AppModel()
+                    await model.restore()
                     if env["NEPHOS_UI_SEED_LEGACY"] == "1" {
                         let old = Connection(
                             baseURL: URL(string: "http://192.168.1.10:18080")!,
@@ -174,6 +177,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                     throw ClientError.invalid("The real fixture library was not authorized.")
                 }
                 let model = AppModel(qualificationAPI: api, subject: subject, library: library)
+                await model.restore()
                 await model.loadGallery(reset: true)
                 guard model.gallery.items.count == 2 else {
                     throw ClientError.invalid(model.message ?? "The fixture gallery did not load both originals.")
@@ -192,7 +196,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         throw ClientError.invalid("Preflight changed the real fixture identity.")
                     }
                     let draft = OnboardingDraft(libraryID: library.id, backup: false, allowCellular: false, ready: true)
-                    try model.saveOnboarding(draft)
+                    try await model.saveOnboarding(draft)
                     if screen == "onboarding-5" {
                         try await model.completeOnboarding(library: library.id, backup: false, allowCellular: false)
                         guard !model.needsOnboarding, !model.ledger.settings.automaticBackup,
@@ -233,6 +237,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         try require(model.gallery.items.count == 200, "Initial four-page window was not loaded.")
         let anchor = model.gallery.items[150].id
         model.rememberAnchor(anchor)
+        await model.flushPersistence()
         model.galleryAtTop = false
         BackupQualificationProtocol.setRevision(2)
         await model.loadGallery(reset: true, automatic: true)

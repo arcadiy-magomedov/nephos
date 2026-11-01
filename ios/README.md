@@ -6,6 +6,36 @@ packages. The checked-in Xcode project is generated deterministically by
 `python3 generate_project.py`; generation is only needed after adding source files.
 Core invariants also form a dependency-free Swift package.
 
+## SwiftUI responsiveness and lifecycle
+
+Gallery merging, indexed upload/local matching, filtering, date parsing and day
+grouping produce a cached, cancellable snapshot off MainActor. Scroll targets use
+the same stable string IDs as the grid. PhotoKit gallery enumeration and ImageIO
+preview decoding/cropping also run outside the UI actor; decoded previews retain
+the account/cache-generation fence before publication. Local thumbnails use
+layout pixel dimensions and local viewers request bounded screen-sized images,
+not full-resolution originals.
+
+Both PhotoKit image/video requests and awaited background uploads bridge Swift
+task cancellation to the underlying request. Carousel pages load only while
+selected; late responses and errors cannot update another account or restart
+offscreen playback. Local viewer failures expose retry rather than an indefinite
+spinner. Source badges use scalable semantic fonts, gallery/trash grids reduce
+their columns at accessibility text sizes, selected items expose VoiceOver state,
+and image zoom has adjustable and reset accessibility actions. The accent color
+supports Increase Contrast in light and dark appearances.
+
+Ledger and gallery disk operations are serialized outside MainActor. Critical
+backup/deletion writes are awaited before proceeding; scroll-anchor writes are
+coalesced and flushed when the scene backgrounds. Automatic backup responds to
+Photos, connection, foreground, retry deadlines and system background tasks,
+without a separate once-per-minute polling loop.
+
+These invariants have regression coverage, but do not constitute a measured
+frame-rate guarantee. Profile representative large libraries on a physical
+iPhone using Apple's SwiftUI/Time Profiler Instruments and audit Dynamic Type
+and VoiceOver with Accessibility Inspector before claiming performance budgets.
+
 ## Native design and social journeys
 
 The [approved first-launch wizard](../design/ios/onboarding.html) is now native
@@ -59,7 +89,7 @@ native SwiftUI controls (including the host iOS version's navigation/tab-bar
 appearance), not a web view. There are no decorative subtitles above page titles.
 Existing English UI copy is retained; this is not a complete Russian localization.
 
-- Photos: three-column chronological previews, loaded-window photo/video/shared
+- Photos: three-column chronological previews (two at accessibility text sizes), loaded-window photo/video/shared
   filters, visible shared provenance, selection, date navigation and refresh.
   Backup and Settings are reached from the gallery rather than occupying tabs.
 - Appearance: `@AppStorage` plus `preferredColorScheme`, System by default,
@@ -71,7 +101,7 @@ Existing English UI copy is retained; this is not a complete Russian localizatio
 - Sharing: known-user directory, selected originals or all/future media with
   explicit confirmation, editable selection/scope, incoming read-only media and
   outgoing grant revocation. Originals already downloaded cannot be revoked.
-- Viewer: sized previews on a black canvas, pinch/double-tap zoom, people
+- Viewer: sized previews on a black canvas, pinch/double-tap and VoiceOver zoom, people
   inspection, explicit original export/restore and retention details.
 - Backup: two-column local photo previews, circular per-photo upload progress,
   compact saved/remaining photo counts and persistent pause/resume. Live Photos

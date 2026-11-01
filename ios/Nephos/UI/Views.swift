@@ -71,55 +71,27 @@ struct GalleryView: View {
     @State private var deleteConfirmation = false
     @State private var isDeleting = false
     @State private var carousel: GalleryCarousel?
-    @State private var localAssets: [PHAsset] = []
+    @State private var localAssets: [LocalGalleryAsset] = []
     @State private var sharedAssets: [Asset] = []
-    private var galleryItems: [GalleryMedia] {
-        let records = model.ledger.records.filter { $0.remoteRemoved != true }
-        let localByIdentifier = Dictionary(uniqueKeysWithValues: localAssets.map { ($0.localIdentifier, $0) })
-        let remoteAssets = model.gallery.items + sharedAssets
-        var knownLocalIdentifiers: Set<String> = []
-        var items = remoteAssets.map { asset -> GalleryMedia in
-            let record = model.ledger.records.first { $0.committedAssetID == asset.id }
-            let localIdentifier = record?.source.localIdentifier
-            let localAsset = localIdentifier.flatMap { localByIdentifier[$0] }
-            if let localIdentifier, localAsset != nil { knownLocalIdentifiers.insert(localIdentifier) }
-            let shared =
-                asset.sharedBy != nil
-                || model.libraries.first(where: { $0.id == asset.libraryId })?.isReadOnly == true
-            return GalleryMedia(
-                id: "asset:\(asset.id)", asset: asset, localAsset: localAsset,
-                localIdentifier: localAsset?.localIdentifier, shared: shared,
-                uploaded: true, date: GalleryDates.parse(asset.createdAt))
-        }
-        for local in localAssets where !knownLocalIdentifiers.contains(local.localIdentifier) {
-            let record = records.first { $0.source.localIdentifier == local.localIdentifier }
-            let uploaded = record?.phase == .ready && record?.remoteRemoved != true
-            items.append(
-                GalleryMedia(
-                    id: "local:\(local.localIdentifier)", asset: nil, localAsset: local,
-                    localIdentifier: local.localIdentifier, shared: false, uploaded: uploaded,
-                    date: local.creationDate))
-        }
-        return items.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-    }
-    private var filteredItems: [GalleryMedia] {
-        galleryItems.filter { item in
-            switch filter {
-            case .all: true
-            case .photos: !item.isVideo
-            case .videos: item.isVideo
-            case .shared: item.shared
-            }
-        }
+    @State private var sharedCache: [UUID: (snapshot: GallerySnapshot, items: [Asset])] = [:]
+    @State private var sharedRequest = UUID()
+    @State private var snapshot = UnifiedGallerySnapshot()
+    @State private var snapshotTask: Task<Void, Never>?
+    @State private var snapshotRequest = UUID()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var galleryItems: [GalleryMedia] { snapshot.items }
+    private var filteredItems: [GalleryMedia] { snapshot.filtered }
+    private var snapshotInput: UnifiedGalleryInput {
+        UnifiedGalleryInput(
+            remote: model.gallery.items + sharedAssets, local: localAssets, records: model.ledger.records,
+            readOnlyLibraries: Set(model.libraries.filter(\.isReadOnly).map(\.id)),
+            selectedLibrary: model.ledger.selectedLibraryID, filter: filter)
     }
     private var refreshTrigger: GalleryRefreshTrigger {
         GalleryRefreshTrigger(
             active: scenePhase == .active, connected: NetworkPolicy.shared.isConnected,
             ready: model.signedIn && !model.needsReauthentication && !model.needsOnboarding,
             epoch: model.epoch, library: model.ledger.selectedLibraryID)
-    }
-    private var progress: BackupProgress {
-        BackupProgress(ledger: model.ledger, library: model.ledger.selectedLibraryID)
     }
     private var selectedItems: [GalleryMedia] { galleryItems.filter { selected.contains($0.id) } }
     private var selectedRemoteAssets: [UUID] {
@@ -144,7 +116,7 @@ struct GalleryView: View {
                                 Label(
                                     model.ledger.settings.backupPaused == true
                                         ? "Paused"
-                                        : progress.pending > 0 ? "\(progress.pending) pending" : "Backup",
+                                        : snapshot.pending > 0 ? "\(snapshot.pending) pending" : "Backup",
                                     systemImage: "cloud"
                                 )
                                 .font(.caption.bold()).padding(10)
@@ -170,11 +142,14 @@ struct GalleryView: View {
                                 "No media", systemImage: "photo",
                                 description: Text("Photos on this iPhone and in Nephos appear together here."))
                         }
-                        ForEach(GalleryMediaDay.groups(filteredItems)) { day in
+                        ForEach(snapshot.days) { day in
                             VStack(alignment: .leading, spacing: 9) {
                                 Text(day.date?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date")
                                     .font(.headline)
-                                LazyVGrid(columns: NephosStyle.columns, spacing: 3) {
+                                LazyVGrid(
+                                    columns: NephosStyle.galleryColumns(
+                                        accessibility: dynamicTypeSize.isAccessibilitySize), spacing: 3
+                                ) {
                                     ForEach(day.items) { item in
                                         GalleryMediaCell(
                                             item: item, model: model, selecting: selecting,
@@ -214,17 +189,31 @@ struct GalleryView: View {
                         if model.visibleAnchor != first.id { model.rememberAnchor(first.id) }
                     }
                 }
-                .onChange(of: model.gallery.items.map(\.id) + sharedAssets.map(\.id)) { _, _ in
-                    selected.formIntersection(Set(galleryItems.map(\.id)))
-                    if let id = model.scrollTarget ?? model.visibleAnchor { proxy.scrollTo(id, anchor: .top) }
+                .onChange(of: snapshotInput, initial: true) { _, input in
+                    rebuildSnapshot(input)
                 }
-                .onChange(of: model.photosGeneration) { _, _ in
-                    localAssets = model.photos.recentAssets()
+                .onChange(of: snapshot.filtered.map(\.id)) { _, _ in
                     selected.formIntersection(Set(galleryItems.map(\.id)))
+                    if let id = model.scrollTarget ?? model.visibleAnchor {
+                        proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top)
+                    }
+                }
+                .onChange(of: model.scrollTarget) { _, id in
+                    if let id { proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top) }
+                }
+                .onChange(of: model.epoch) { _, _ in
+                    snapshotTask?.cancel()
+                    snapshotRequest = UUID()
+                    snapshot = UnifiedGallerySnapshot()
+                    sharedAssets = []
+                    sharedCache = [:]
+                    sharedRequest = UUID()
+                    selected = []
+                    carousel = nil
                 }
                 .refreshable {
                     await model.loadGallery(reset: true)
-                    localAssets = model.photos.recentAssets()
+                    await loadLocalAssets()
                     await loadSharedAssets()
                 }
                 .navigationTitle(selecting ? "\(selected.count) selected" : "Library")
@@ -315,15 +304,22 @@ struct GalleryView: View {
                     } else if !model.gallery.hasLoaded {
                         await model.loadGallery(reset: true)
                     }
-                    localAssets = model.photos.recentAssets()
+                    await loadLocalAssets()
                     await loadSharedAssets()
                 }
-                .task(id: model.photosGeneration) { localAssets = model.photos.recentAssets() }
+                .task(id: model.photosGeneration) { await loadLocalAssets() }
+                .onDisappear {
+                    snapshotTask?.cancel()
+                    snapshotRequest = UUID()
+                    sharedRequest = UUID()
+                }
+                .onAppear { rebuildSnapshot(snapshotInput) }
                 .task(id: refreshTrigger) {
                     guard refreshTrigger.enabled else { return }
                     var failures = 0
                     while !Task.isCancelled {
                         await model.loadGallery(reset: true, notifyErrors: false, automatic: true)
+                        await loadSharedAssets()
                         failures = model.galleryRefreshError == nil ? 0 : failures + 1
                         do {
                             try await Task.sleep(for: .seconds(GalleryRefreshPolicy.delay(failures: failures)))
@@ -333,6 +329,40 @@ struct GalleryView: View {
             }
         }
     }
+    private func rebuildSnapshot(_ input: UnifiedGalleryInput) {
+        snapshotTask?.cancel()
+        let request = UUID()
+        snapshotRequest = request
+        let epoch = model.epoch
+        snapshotTask = Task {
+            do {
+                let worker = Task.detached(priority: .userInitiated) { try UnifiedGallerySnapshot.build(input) }
+                let result = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard !Task.isCancelled, snapshotRequest == request, epoch == model.epoch else { return }
+                snapshot = result
+            } catch is CancellationError {
+            } catch {
+                guard snapshotRequest == request, epoch == model.epoch else { return }
+                model.handle(error)
+            }
+        }
+    }
+    private func loadLocalAssets() async {
+        let epoch = model.epoch
+        do {
+            let assets = try await model.photos.galleryAssets()
+            guard epoch == model.epoch, !Task.isCancelled else { return }
+            localAssets = assets
+        } catch is CancellationError {
+        } catch {
+            guard epoch == model.epoch else { return }
+            model.handle(error)
+        }
+    }
     private func toggleSelection(_ item: GalleryMedia) {
         guard !item.shared else { return }
         if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }
@@ -340,23 +370,37 @@ struct GalleryView: View {
     private func loadSharedAssets() async {
         guard let api = model.api else { return }
         let version = model.epoch
+        let request = UUID()
+        sharedRequest = request
+        var cache: [UUID: (snapshot: GallerySnapshot, items: [Asset])] = [:]
         var loaded: [Asset] = []
         do {
             for library in model.libraries where library.isReadOnly && library.id != model.ledger.selectedLibraryID {
                 let snapshot = try await api.snapshot(library: library.id)
-                var cursor: GalleryCursor?
-                repeat {
-                    let page = try await api.assets(library: library.id, snapshot: snapshot.id, cursor: cursor)
-                    guard version == model.epoch, !Task.isCancelled else { return }
-                    loaded.append(contentsOf: page.items)
-                    cursor = page.nextCursor
-                } while cursor != nil
-                    && loaded.filter({ $0.libraryId == library.id }).count < GalleryWindow.maximumCount
+                guard version == model.epoch, sharedRequest == request, !Task.isCancelled else { return }
+                let items: [Asset]
+                if let saved = sharedCache[library.id], GalleryRefreshPolicy.unchanged(saved.snapshot, snapshot) {
+                    items = saved.items
+                } else {
+                    var window = GalleryWindow()
+                    repeat {
+                        let page = try await api.assets(
+                            library: library.id, snapshot: snapshot.id, cursor: window.nextCursor)
+                        guard version == model.epoch, sharedRequest == request, !Task.isCancelled else { return }
+                        try window.append(page, libraryID: library.id)
+                    } while window.nextCursor != nil && window.items.count < GalleryWindow.maximumCount
+                    items = window.items
+                }
+                loaded.append(contentsOf: items)
+                cache[library.id] = (snapshot, items)
             }
-            guard version == model.epoch else { return }
+            guard version == model.epoch, sharedRequest == request, !Task.isCancelled else { return }
+            sharedCache = cache
             sharedAssets = loaded
         } catch {
-            guard version == model.epoch, !(error is CancellationError) else { return }
+            guard version == model.epoch, sharedRequest == request, !Task.isCancelled,
+                !(error is CancellationError)
+            else { return }
             model.galleryRefreshError = "Shared media could not be refreshed: \(error.localizedDescription)"
         }
     }
@@ -391,7 +435,7 @@ struct GalleryView: View {
                 let result = try await model.deleteMediaEverywhere(
                     assetIDs: remoteIDs, localIdentifiers: localIdentifiers)
                 guard version == model.epoch else { return }
-                localAssets = model.photos.recentAssets()
+                await loadLocalAssets()
                 selected = Set(
                     items.compactMap { item -> String? in
                         if let asset = item.asset, result.failed[asset.id] != nil { return item.id }
@@ -421,6 +465,7 @@ private struct TrashView: View {
     @State private var selecting = false
     @State private var selected: Set<UUID> = []
     @State private var viewer: TrashViewerSelection?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var busy: Bool { model.isRestoringTrash || model.isLoadingTrash }
     private var groups: [(date: Date, items: [TrashItem])] {
         Dictionary(grouping: model.trashItems) {
@@ -450,7 +495,10 @@ private struct TrashView: View {
                             Spacer()
                             Text("\(group.items.count)").font(.caption).foregroundStyle(.secondary)
                         }
-                        LazyVGrid(columns: NephosStyle.columns, spacing: 3) {
+                        LazyVGrid(
+                            columns: NephosStyle.galleryColumns(accessibility: dynamicTypeSize.isAccessibilitySize),
+                            spacing: 3
+                        ) {
                             ForEach(group.items) { item in
                                 TrashPreview(item: item, model: model)
                                     .overlay(alignment: .topTrailing) {
@@ -474,7 +522,19 @@ private struct TrashView: View {
                                         selecting = true
                                         selected.insert(item.id)
                                     }
-                                    .accessibilityAddTraits(.isButton)
+                                    .accessibilityAddTraits(
+                                        selecting && selected.contains(item.id) ? [.isButton, .isSelected] : .isButton
+                                    )
+                                    .accessibilityValue(
+                                        selecting ? (selected.contains(item.id) ? "Selected" : "Not selected") : ""
+                                    )
+                                    .accessibilityAction(.default) {
+                                        if selecting {
+                                            toggle(item.id)
+                                        } else {
+                                            viewer = TrashViewerSelection(startID: item.id)
+                                        }
+                                    }
                                     .accessibilityAction(named: "Select") {
                                         selecting = true
                                         selected.insert(item.id)
@@ -689,32 +749,6 @@ private struct TrashCarouselView: View {
     }
 }
 
-private struct GalleryMedia: Identifiable {
-    let id: String
-    let asset: Asset?
-    let localAsset: PHAsset?
-    let localIdentifier: String?
-    let shared: Bool
-    let uploaded: Bool
-    let date: Date?
-    var positionID: String { id }
-    var isVideo: Bool { asset?.isVideo ?? (localAsset?.mediaType == .video) }
-}
-
-private struct GalleryMediaDay: Identifiable {
-    let id: String
-    let date: Date?
-    let items: [GalleryMedia]
-    static func groups(_ items: [GalleryMedia]) -> [GalleryMediaDay] {
-        let grouped = Dictionary(grouping: items) { item in
-            item.date.map { Calendar.current.startOfDay(for: $0).timeIntervalSince1970.description } ?? "unknown"
-        }
-        return grouped.map { key, values in
-            GalleryMediaDay(id: key, date: values.first?.date, items: values)
-        }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-    }
-}
-
 private struct GalleryCarousel: Identifiable {
     let id = UUID()
     let items: [GalleryMedia]
@@ -731,9 +765,9 @@ private struct GalleryCarouselView: View {
             ForEach(selection.items) { item in
                 Group {
                     if let asset = item.asset {
-                        OriginalView(asset: asset, model: model)
-                    } else if let localAsset = item.localAsset {
-                        LocalOriginalView(asset: localAsset, model: model)
+                        OriginalView(asset: asset, model: model, isActive: currentID == item.id)
+                    } else if item.localIdentifier != nil {
+                        LocalOriginalView(item: item, model: model, isActive: currentID == item.id)
                     }
                 }
                 .tag(Optional(item.id))
@@ -750,36 +784,74 @@ private struct GalleryCarouselView: View {
 }
 
 private struct LocalOriginalView: View {
-    let asset: PHAsset
+    let item: GalleryMedia
     let model: AppModel
+    let isActive: Bool
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var player: AVPlayer?
+    @State private var failure: String?
+    @State private var retry = 0
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let player {
-                VideoPlayer(player: player)
-            } else if let image {
-                Image(uiImage: image).resizable().scaledToFit()
-            } else {
-                ProgressView().tint(.white)
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let player {
+                    VideoPlayer(player: player)
+                } else if let image {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else if let failure {
+                    VStack {
+                        ContentUnavailableView(
+                            "Original unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
+                        Button("Retry") { retry += 1 }
+                    }.foregroundStyle(.white)
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .task(
+                id:
+                    "\(model.epoch)/\(item.id)/\(retry)/\(isActive)/\(item.isVideo ? "" : String(describing: geometry.size))"
+            ) {
+                stop()
+                guard isActive, let identifier = item.localIdentifier else { return }
+                let epoch = model.epoch
+                failure = nil
+                image = nil
+                do {
+                    if item.isVideo {
+                        let playerItem = try await model.photos.videoPlayerItem(identifier)
+                        try Task.checkCancellation()
+                        guard epoch == model.epoch, isActive else { return }
+                        player = AVPlayer(playerItem: playerItem)
+                        player?.play()
+                    } else {
+                        let size = CGSize(
+                            width: min(4096, max(1, geometry.size.width * displayScale)),
+                            height: min(4096, max(1, geometry.size.height * displayScale)))
+                        let preview = try await model.photos.thumbnail(
+                            identifier, targetSize: size, contentMode: .aspectFit, networkAllowed: true)
+                        try Task.checkCancellation()
+                        guard epoch == model.epoch, isActive else { return }
+                        image = preview
+                    }
+                } catch is CancellationError {
+                } catch {
+                    guard epoch == model.epoch, !Task.isCancelled, isActive else { return }
+                    failure = error.localizedDescription
+                }
             }
         }
-        .navigationTitle(asset.creationDate?.formatted(date: .abbreviated, time: .omitted) ?? "Photo")
+        .navigationTitle(item.date?.formatted(date: .abbreviated, time: .omitted) ?? "Photo")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
-        .task(id: asset.localIdentifier) {
-            if asset.mediaType == .video {
-                if let item = try? await model.photos.videoPlayerItem(asset.localIdentifier) {
-                    player = AVPlayer(playerItem: item)
-                    player?.play()
-                }
-            } else {
-                image = try? await model.photos.thumbnail(
-                    asset.localIdentifier, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit)
-            }
-        }
-        .onDisappear { player?.pause() }
+        .onChange(of: isActive) { _, active in if !active { stop() } }
+        .onDisappear { stop() }
+    }
+    private func stop() {
+        player?.pause()
+        player = nil
     }
 }
 
@@ -787,6 +859,10 @@ private struct GalleryMediaTile: View {
     let item: GalleryMedia
     let model: AppModel
     @State private var image: UIImage?
+    @State private var failure: String?
+    @State private var retry = 0
+    @State private var pixels: CGFloat = 1
+    @Environment(\.displayScale) private var displayScale
     private var accessibilityDescription: String {
         let name =
             item.asset?.fileName ?? item.date?.formatted(date: .abbreviated, time: .shortened) ?? "Local original"
@@ -802,8 +878,11 @@ private struct GalleryMediaTile: View {
                     if let image {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
-                        Image(systemName: item.isVideo ? "video" : "photo")
-                            .font(.title).foregroundStyle(.secondary)
+                        Image(
+                            systemName: failure == nil
+                                ? (item.isVideo ? "video" : "photo") : "photo.badge.exclamationmark"
+                        )
+                        .font(.title).foregroundStyle(.secondary)
                     }
 
                     if item.isVideo {
@@ -823,19 +902,62 @@ private struct GalleryMediaTile: View {
                         Image(systemName: "person.2.fill").accessibilityLabel("Shared")
                     }
                 }
-                .font(.system(size: 10, weight: .semibold)).padding(4)
+                .font(.caption2.bold()).padding(4)
                 .foregroundStyle(.white).background(.black.opacity(0.55), in: Capsule()).padding(4)
             }
             .clipped().clipShape(RoundedRectangle(cornerRadius: 3))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityDescription)
-            .task(id: "\(model.photosGeneration)/\(item.id)") {
+            .accessibilityHint(failure.map { "Preview unavailable. \($0)" } ?? "")
+            .accessibilityAction(named: "Retry preview") { retry += 1 }
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                max(1, geometry.size.width * displayScale)
+            } action: {
+                pixels = $0
+            }
+            .task(
+                id:
+                    "\(model.epoch)/\(model.mediaGeneration)/\(item.localIdentifier == nil ? "" : model.photosGeneration.uuidString)/\(item.id)/\(retry)/\(pixels)"
+            ) {
                 image = nil
+                failure = nil
+                let epoch = model.epoch
+                let generation = model.mediaGeneration
+                var localError: Error?
                 if let identifier = item.localIdentifier {
-                    image = try? await model.photos.thumbnail(identifier)
+                    do {
+                        let preview = try await model.photos.thumbnail(
+                            identifier, targetSize: CGSize(width: pixels, height: pixels))
+                        try Task.checkCancellation()
+                        guard epoch == model.epoch, generation == model.mediaGeneration else { return }
+                        image = preview
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        guard !Task.isCancelled, epoch == model.epoch, generation == model.mediaGeneration else {
+                            return
+                        }
+                        localError = error
+                    }
                 }
                 if image == nil, let asset = item.asset, let api = model.api, let account = model.account {
-                    image = try? await MediaCache.shared.preview(asset, api: api, account: account)
+                    do {
+                        let preview = try await MediaCache.shared.preview(asset, api: api, account: account)
+                        try Task.checkCancellation()
+                        guard epoch == model.epoch, generation == model.mediaGeneration, account == model.account else {
+                            return
+                        }
+                        image = preview
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        guard !Task.isCancelled, epoch == model.epoch, generation == model.mediaGeneration else {
+                            return
+                        }
+                        failure = error.localizedDescription
+                    }
+                } else if let localError, image == nil {
+                    failure = localError.localizedDescription
                 }
             }
     }
@@ -859,14 +981,15 @@ private struct GalleryMediaCell: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
             .onLongPressGesture(minimumDuration: 0.45, perform: onLongPress)
-            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(selecting && isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityValue(selecting ? (isSelected ? "Selected" : "Not selected") : "")
             .accessibilityAction(.default, onTap)
             .id(item.id)
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(
                         key: GalleryPositions.self,
-                        value: [item.positionID: geometry.frame(in: .named("gallery")).minY])
+                        value: [item.id: geometry.frame(in: .named("gallery")).minY])
                 }
             }
     }
@@ -1030,6 +1153,10 @@ struct AssetTile: View {
 struct OriginalView: View {
     let asset: Asset
     let model: AppModel
+    var isActive = true
+    @Environment(\.displayScale) private var displayScale
+    @State private var viewportPixels = 0
+    @State private var viewerRequest = UUID()
     @State private var file: URL?
     @State private var image: UIImage?
     @State private var player: AVPlayer?
@@ -1067,6 +1194,19 @@ struct OriginalView: View {
                                 }.onEnded { _ in lastZoom = zoom }
                             )
                             .accessibilityLabel(asset.fileName)
+                            .accessibilityValue("Zoom \(Int(zoom * 100)) percent")
+                            .accessibilityAdjustableAction { direction in
+                                switch direction {
+                                case .increment: zoom = min(4, zoom + 1)
+                                case .decrement: zoom = max(1, zoom - 1)
+                                @unknown default: break
+                                }
+                                lastZoom = zoom
+                            }
+                            .accessibilityAction(named: "Reset zoom") {
+                                zoom = 1
+                                lastZoom = 1
+                            }
                     }
                 }
             } else if let player {
@@ -1082,6 +1222,11 @@ struct OriginalView: View {
             }
         }
         .navigationTitle(GalleryDates.parse(asset.createdAt)?.formatted(date: .abbreviated, time: .omitted) ?? "Photo")
+        .onGeometryChange(for: Int.self) { geometry in
+            Int(max(geometry.size.width, geometry.size.height) * displayScale)
+        } action: {
+            viewportPixels = $0
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -1128,18 +1273,29 @@ struct OriginalView: View {
                 }.font(.title3).labelStyle(.iconOnly).buttonStyle(.bordered)
             }.padding().foregroundStyle(.white).background(.black)
         }
-        .task(id: retry) {
-            guard let api = model.api else { return }
+        .task(
+            id:
+                "\(model.epoch)/\(model.mediaGeneration)/\(asset.id)/\(retry)/\(isActive)/\(asset.isVideo ? 1 : viewportPixels)"
+        ) {
+            guard isActive, asset.isVideo || viewportPixels > 0, let api = model.api else { return }
+            let request = UUID()
+            viewerRequest = request
             let version = model.epoch
+            let generation = model.mediaGeneration
             failure = nil
+            loading = true
             do {
                 manifest = try await api.resources(asset)
-                guard version == model.epoch else { return }
+                guard version == model.epoch, generation == model.mediaGeneration, viewerRequest == request,
+                    !Task.isCancelled
+                else { return }
                 manifestLoaded = true
                 if asset.isVideo {
                     rangedPlayer?.stop()
                     let ranged = RangedPlayer(asset: asset, api: api)
                     ranged.onError = { error in
+                        guard version == model.epoch, generation == model.mediaGeneration, viewerRequest == request
+                        else { return }
                         failure = error.localizedDescription
                         player?.pause()
                         player = nil
@@ -1154,13 +1310,17 @@ struct OriginalView: View {
                     player = AVPlayer(playerItem: item)
                 } else {
                     guard let account = model.account else { throw ClientError.signedOut }
-                    let pixels = max(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
                     let preview = try await MediaCache.shared.preview(
-                        asset, api: api, account: account, size: pixels <= 1280 ? .screen : .detail)
-                    guard version == model.epoch else { return }
+                        asset, api: api, account: account, size: viewportPixels <= 1280 ? .screen : .detail)
+                    guard version == model.epoch, generation == model.mediaGeneration, viewerRequest == request,
+                        !Task.isCancelled
+                    else { return }
                     image = preview
                 }
             } catch {
+                guard version == model.epoch, generation == model.mediaGeneration, viewerRequest == request,
+                    !Task.isCancelled
+                else { return }
                 if !(error is CancellationError) { failure = error.localizedDescription }
                 if let file {
                     try? FileManager.default.removeItem(at: file)
@@ -1173,7 +1333,18 @@ struct OriginalView: View {
             }
             loading = false
         }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                viewerRequest = UUID()
+                rangedPlayer?.stop()
+                rangedPlayer = nil
+                player?.pause()
+                player = nil
+                image = nil
+            }
+        }
         .onDisappear {
+            viewerRequest = UUID()
             exportTask?.cancel()
             exportTask = nil
             rangedPlayer?.stop()
@@ -1526,9 +1697,11 @@ struct BackupItemDetails: View {
                                 && !model.ledger.settings.allowCellular
                             {
                                 Button("Use cellular data") {
-                                    var settings = model.ledger.settings
-                                    settings.allowCellular = true
-                                    model.setSettings(settings)
+                                    Task {
+                                        var settings = model.ledger.settings
+                                        settings.allowCellular = true
+                                        await model.setSettings(settings)
+                                    }
                                 }.buttonStyle(.borderedProminent)
                             }
                             if item.sourceChanged {
@@ -1581,10 +1754,12 @@ struct BackupOptionsView: View {
     private func setting(_ key: WritableKeyPath<BackupSettings, Bool>) -> Binding<Bool> {
         Binding(
             get: { model.ledger.settings[keyPath: key] },
-            set: {
-                var settings = model.ledger.settings
-                settings[keyPath: key] = $0
-                model.setSettings(settings)
+            set: { value in
+                Task {
+                    var settings = model.ledger.settings
+                    settings[keyPath: key] = value
+                    await model.setSettings(settings)
+                }
             })
     }
     var body: some View {
@@ -1628,10 +1803,12 @@ struct SettingsView: View {
     private func setting(_ path: WritableKeyPath<BackupSettings, Bool>) -> Binding<Bool> {
         Binding(
             get: { model.ledger.settings[keyPath: path] },
-            set: {
-                var settings = model.ledger.settings
-                settings[keyPath: path] = $0
-                model.setSettings(settings)
+            set: { value in
+                Task {
+                    var settings = model.ledger.settings
+                    settings[keyPath: path] = value
+                    await model.setSettings(settings)
+                }
             })
     }
     var body: some View {
@@ -1656,9 +1833,11 @@ struct SettingsView: View {
                                 if enabled {
                                     cleanupOptIn = true
                                 } else {
-                                    var settings = model.ledger.settings
-                                    settings.automaticCleanup = false
-                                    model.setSettings(settings)
+                                    Task {
+                                        var settings = model.ledger.settings
+                                        settings.automaticCleanup = false
+                                        await model.setSettings(settings)
+                                    }
                                 }
                             }))
                     Text(
@@ -1696,10 +1875,12 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .alert("Enable cleanup offers?", isPresented: $cleanupOptIn) {
                 Button("Enable", role: .destructive) {
-                    var settings = model.ledger.settings
-                    settings.automaticCleanup = true
-                    settings.cleanupWarningsAcknowledged = true
-                    model.setSettings(settings)
+                    Task {
+                        var settings = model.ledger.settings
+                        settings.automaticCleanup = true
+                        settings.cleanupWarningsAcknowledged = true
+                        await model.setSettings(settings)
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {

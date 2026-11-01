@@ -29,11 +29,17 @@ final class BackgroundTransfers: NSObject, URLSessionTaskDelegate, URLSessionDel
         request.allowsCellularAccess = cellular
         request.allowsExpensiveNetworkAccess = cellular
         request.allowsConstrainedNetworkAccess = false
-        try await withCheckedThrowingContinuation { continuation in
-            let task = session.uploadTask(with: request, fromFile: file)
-            task.taskDescription = identity
-            continuations[task.taskIdentifier] = continuation
-            task.resume()
+        try Task.checkCancellation()
+        let task = session.uploadTask(with: request, fromFile: file)
+        task.taskDescription = identity
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                continuations[task.taskIdentifier] = continuation
+                task.resume()
+            }
+            try Task.checkCancellation()
+        } onCancel: {
+            task.cancel()
         }
     }
     func activeTasks() async -> [URLSessionTask] { await session.allTasks }

@@ -2,7 +2,7 @@ import Foundation
 import Photos
 import UniformTypeIdentifiers
 
-struct VerifiedExport {
+struct VerifiedExport: Sendable {
     let directory: URL
     let files: [URL]
     let manifest: ResourceManifest?
@@ -10,7 +10,6 @@ struct VerifiedExport {
     let createdAt: String
     var shareFiles: [URL] { files + [directory.appendingPathComponent("manifest.json")] }
 
-    @MainActor
     static func download(asset: Asset, manifest: ResourceManifest?, api: API, root: URL) async throws -> VerifiedExport
     {
         if let manifest { try manifest.validate(primary: asset) }

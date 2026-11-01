@@ -53,11 +53,19 @@ final class AppModel {
     private(set) var epoch = UUID()
     let photos = PhotosLibrary()
     private var auth: AuthSession
-    private var store: LedgerStore?
+    private let persistence: AccountPersistence
+    private var bootstrapTask: Task<Void, Error>?
+    private var ledgerRevision: UInt64 = 0
+    private var galleryRevision: UInt64 = 0
+    private var connectionRevision: UInt64 = 0
+    private var viewerRevision: UInt64 = 0
+    private var pendingGallery: (account: String, revision: UInt64, cache: RetainedGallery?)?
+    private var anchorSaveTask: Task<Void, Never>?
     private var root: URL
     private var networkObserver: NSObjectProtocol?
     private var automaticTask: Task<Void, Never>?
     private var automaticRunID: UUID?
+    private var scanContinuationEpoch: UUID?
     var activeBackupItems: Set<UUID> = []
     private let retryWakeup = BackupRetryWakeup()
     private let preparation = BackupPreparation()
@@ -161,8 +169,9 @@ final class AppModel {
             }
         }
         do {
-            try persist()
+            try await persist()
         } catch {
+            guard version == epoch, boundary == account, !(error is CancellationError) else { return }
             trashRestoreNotice =
                 "Restored \(trashRestoreCompleted) of \(trashRestoreTotal) on the server; "
                 + "\(trashRestoreFailures.count) failed. Local backup status could not be saved: \(error.localizedDescription)"
@@ -202,10 +211,12 @@ final class AppModel {
         let records = ledger.records
         let previous = ledger
         ledger.suppressDeletion(assetIDs: remoteIDs, localIdentifiers: localIdentifiers)
+        let revision = ledgerRevision + 1
         do {
-            try persist()
+            try await persist()
         } catch {
-            ledger = previous
+            if error is CancellationError { throw error }
+            if version == epoch, boundary == account, revision == ledgerRevision { ledger = previous }
             throw ClientError.invalid(
                 "Could not save backup suppression. Nothing was deleted. \(error.localizedDescription)")
         }
@@ -254,13 +265,14 @@ final class AppModel {
                 result.photosError = error.localizedDescription
             }
         }
-        if let retainedGallery, let store, let boundary {
+        if retainedGallery != nil, boundary != nil {
             do {
-                try store.saveGallery(retainedGallery, account: boundary)
+                try await saveGallery()
             } catch {
                 result.localStatusError = error.localizedDescription
             }
         }
+        try check(version)
         operationFinished = true
         isDeletingMedia = false
         await loadGallery(reset: true, notifyErrors: false)
@@ -334,36 +346,11 @@ final class AppModel {
         }
     }
     init() {
-        root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Nephos", isDirectory: true)
+        root = directory
+        persistence = AccountPersistence(root: directory)
         auth = AuthSession()
-        do {
-            try FileManager.default.createDirectory(
-                at: root, withIntermediateDirectories: true,
-                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try root.setResourceValues(values)
-            let marker = root.appendingPathComponent("installation")
-            if !FileManager.default.fileExists(atPath: marker.path) {
-                try Keychain.remove()
-                try Data(UUID().uuidString.utf8).write(to: marker, options: .atomic)
-            }
-            store = try LedgerStore(root: root.appendingPathComponent("Accounts", isDirectory: true))
-            let file = root.appendingPathComponent("connection.json")
-            if FileManager.default.fileExists(atPath: file.path) {
-                connection = try JSONDecoder().decode(Connection.self, from: Data(contentsOf: file))
-            }
-            if let credentials = try Keychain.load(), credentials.connection == connection {
-                restoredCredentials = credentials
-            }
-            // Originals/previews are deliberately ephemeral; only upload staging survives launch.
-            let viewer = root.appendingPathComponent("Viewer", isDirectory: true)
-            try? FileManager.default.removeItem(at: viewer)
-            try FileManager.default.createDirectory(at: viewer, withIntermediateDirectories: true)
-        } catch {
-            message = "Local state could not be loaded: \(error.localizedDescription). Existing files were preserved."
-        }
         photos.onChange = { [weak self] in
             guard let self else { return }
             self.photosGeneration = UUID()
@@ -375,17 +362,53 @@ final class AppModel {
     }
     private var restoredCredentials: Credentials?
 
-    func restore() async {
-        guard let restoredCredentials else { return }
-        self.restoredCredentials = nil
+    private func bootstrap() async throws {
+        if let bootstrapTask {
+            try await bootstrapTask.value
+            return
+        }
+        let version = epoch
+        let task = Task { @MainActor in
+            let loaded = try await persistence.bootstrap()
+            guard version == epoch else { throw CancellationError() }
+            #if UI_QUALIFICATION
+                if qualificationSubject != nil { return }
+            #endif
+            let credentials = try await Task.detached {
+                if loaded.newInstallation { try Keychain.remove() }
+                return try Keychain.load()
+            }.value
+            guard version == epoch else { throw CancellationError() }
+            if loaded.newInstallation {
+                try await persistence.markInstallation()
+                guard version == epoch else { throw CancellationError() }
+            }
+            connection = loaded.connection
+            if let credentials, credentials.connection == connection {
+                restoredCredentials = credentials
+            }
+        }
+        bootstrapTask = task
         do {
+            try await task.value
+        } catch {
+            bootstrapTask = nil
+            throw error
+        }
+    }
+
+    func restore() async {
+        do {
+            try await bootstrap()
+            guard let restoredCredentials else { return }
+            self.restoredCredentials = nil
             try await establish(AuthSession(credentials: restoredCredentials))
             scheduleAutomaticRun()
         } catch { handle(error) }
     }
     private var activeAuth: AuthSession?
     private func establish(_ session: AuthSession) async throws {
-        guard let connection, let subject = session.subject, let store else {
+        guard let connection, let subject = session.subject else {
             throw ClientError.invalid("No valid server/account storage is configured.")
         }
         let startingEpoch = epoch
@@ -407,25 +430,22 @@ final class AppModel {
             )
         }
         let key = LedgerStore.accountKey(connection: connection, subject: subject)
-        var loaded = try store.load(account: key)
-        if loaded.resumePhotosNetworkFailures() { try store.save(loaded, account: key) }
-        if !offline, loaded.resumeLegacyPhotoKitPublications() {
-            try store.save(loaded, account: key)
-        }
-        if loaded.settings.onboardingCompleted == nil {
-            loaded.settings.onboardingCompleted = OnboardingPolicy.completed(
-                settings: loaded.settings, selectedLibrary: loaded.selectedLibraryID,
-                hasResources: !loaded.records.isEmpty || loaded.resourceSets?.isEmpty == false)
-            try store.save(loaded, account: key)
-        }
+        try await flushDurablePersistence()
+        guard startingEpoch == epoch else { throw CancellationError() }
         epoch = UUID()
+        let boundary = epoch
+        signedIn = false
+        automaticTask?.cancel()
+        automaticTask = nil
+        retryWakeup.cancel()
+        let loaded = try await persistence.load(account: key, offline: offline)
+        guard boundary == epoch else { throw CancellationError() }
         resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
         galleryRefreshError = nil
         api?.invalidate()
         mediaGeneration = UUID()
-        let boundary = epoch
         await BackgroundTransfers.shared.cancelOutside(account: key)
         guard epoch == boundary else { throw CancellationError() }
         gallery.reset()
@@ -437,16 +457,24 @@ final class AppModel {
         MediaCache.shared.clear()
         cleanupReport = ""
         showCleanupConfirmation = false
-        try? FileManager.default.removeItem(at: viewerDirectory())
-        try FileManager.default.createDirectory(at: viewerDirectory(), withIntermediateDirectories: true)
+        try await resetViewer()
+        guard epoch == boundary else { throw CancellationError() }
+        try await pruneOrphanStaging(account: key, ledger: loaded)
+        guard boundary == epoch else { throw CancellationError() }
+        let cached: RetainedGallery?
+        if let library = loaded.selectedLibraryID {
+            cached = try await persistence.loadGallery(account: key, library: library)
+        } else {
+            cached = nil
+        }
+        guard boundary == epoch else { throw CancellationError() }
         activeAuth = session
         account = key
         ledger = loaded
         api = API(connection: connection, auth: session)
         signedIn = true
         needsReauthentication = false
-        try await pruneOrphanStaging(account: key, ledger: loaded)
-        if let library = loaded.selectedLibraryID, let cached = try store.loadGallery(account: key, library: library) {
+        if let cached {
             retainedGallery = cached
             gallery = cached.window
             visibleAnchor = cached.anchor?.id
@@ -464,6 +492,7 @@ final class AppModel {
         }
     }
     func probe(url: String, allowHTTP: Bool) async throws {
+        try await bootstrap()
         proposedConnection = nil
         let version = epoch
         do {
@@ -496,26 +525,37 @@ final class AppModel {
         }
     }
     func approveConnection() async {
+        do { try await bootstrap() } catch {
+            handle(error)
+            return
+        }
         guard let proposedConnection else { return }
         do {
             try await signOut()
-            try JSONEncoder().encode(proposedConnection).write(
-                to: root.appendingPathComponent("connection.json"), options: .atomic)
+            let version = epoch
+            connectionRevision += 1
+            try await persistence.saveConnection(proposedConnection, revision: connectionRevision)
+            guard version == epoch else { throw CancellationError() }
             connection = proposedConnection
             self.proposedConnection = nil
         } catch { handle(error) }
     }
     func beginServerChange() async throws {
+        try await bootstrap()
         try await signOut()
-        let file = root.appendingPathComponent("connection.json")
-        if FileManager.default.fileExists(atPath: file.path) {
-            try FileManager.default.removeItem(at: file)
-        }
+        let version = epoch
+        connectionRevision += 1
+        try await persistence.saveConnection(nil, revision: connectionRevision)
+        guard version == epoch else { throw CancellationError() }
         connection = nil
         proposedConnection = nil
     }
     @discardableResult
     func login() async -> Bool {
+        do { try await bootstrap() } catch {
+            handle(error)
+            return false
+        }
         guard let connection, !isSigningIn else { return false }
         isSigningIn = true
         defer { isSigningIn = false }
@@ -535,12 +575,14 @@ final class AppModel {
         }
     }
     func signOut() async throws {
+        try await flushDurablePersistence()
         signedIn = false
         retryWakeup.cancel()
         backupNotice = nil
         backupDiagnostic = nil
         backupAccessBlocked = false
         epoch = UUID()
+        let version = epoch
         resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
@@ -550,6 +592,7 @@ final class AppModel {
         automaticTask?.cancel()
         automaticTask = nil
         await BackgroundTransfers.shared.cancelAll()
+        guard version == epoch else { throw CancellationError() }
         var signOutError: Error?
         do { try activeAuth?.signOut() } catch { signOutError = error }
         do { try auth.signOut() } catch { signOutError = error }
@@ -566,9 +609,8 @@ final class AppModel {
         libraryCursor = nil
         cleanupReport = ""
         showCleanupConfirmation = false
-        try? FileManager.default.removeItem(at: root.appendingPathComponent("Viewer"))
-        try FileManager.default.createDirectory(
-            at: root.appendingPathComponent("Viewer"), withIntermediateDirectories: true)
+        try await resetViewer()
+        guard version == epoch else { throw CancellationError() }
         MediaCache.shared.clear()
         if let signOutError { throw signOutError }
     }
@@ -592,6 +634,13 @@ final class AppModel {
     }
     @discardableResult
     func selectLibrary(_ id: UUID) async -> Bool {
+        do {
+            try await bootstrap()
+            try await flushDurablePersistence()
+        } catch {
+            handle(error)
+            return false
+        }
         guard libraries.contains(where: { $0.id == id }), !isRunning, !isDeletingMedia, !isRestoringTrash else {
             return false
         }
@@ -603,6 +652,7 @@ final class AppModel {
         backupAccessBlocked = false
         let previous = ledger
         epoch = UUID()
+        let version = epoch
         resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
@@ -610,8 +660,12 @@ final class AppModel {
         isLoadingGallery = false
         ledger.selectedLibraryID = id
         ledger.scanAfter = nil
-        do { try persist() } catch {
-            ledger = previous
+        gallery.reset()
+        retainedGallery = nil
+        visibleAnchor = nil
+        let revision = ledgerRevision + 1
+        do { try await persist() } catch {
+            if version == epoch, revision == ledgerRevision, !(error is CancellationError) { ledger = previous }
             handle(error)
             return false
         }
@@ -623,17 +677,23 @@ final class AppModel {
         timeline = []
         timelineYear = nil
         timelineMonth = nil
-        if let store, let account {
+        if let account {
             do {
-                if let cached = try store.loadGallery(account: account, library: id) {
+                let cached = try await persistence.loadGallery(account: account, library: id)
+                try check(version)
+                if let cached {
                     retainedGallery = cached
                     gallery = cached.window
                     galleryIsStale = true
                     visibleAnchor = cached.anchor?.id
                 }
-            } catch { handle(error) }
+            } catch {
+                if version == epoch { handle(error) }
+                return false
+            }
         }
         await loadGallery(reset: true)
+        guard version == epoch else { return false }
         scheduleAutomaticRun()
         return true
     }
@@ -672,8 +732,10 @@ final class AppModel {
                     var refreshed = old
                     refreshed.snapshot = target
                     refreshed.updatedAt = Date()
-                    if let store, let account { try store.saveGallery(refreshed, account: account) }
                     retainedGallery = refreshed
+                    try await saveGallery()
+                    try check(version)
+                    guard mutationVersion == mediaMutationGeneration else { return }
                     galleryRefreshError = nil
                     return
                 }
@@ -715,7 +777,7 @@ final class AppModel {
                     }
                 } else if old != nil {
                     anchor = nil
-                    clearGalleryAccess()
+                    clearGalleryAccess(invalidateLoad: false)
                 }
                 var window = GalleryWindow()
                 let cursor: GalleryCursor?
@@ -774,7 +836,7 @@ final class AppModel {
             }
             try check(version)
             guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library,
-                var candidate, let store, let account
+                var candidate, account != nil
             else { return }
             if !reset, let visibleAnchor, let item = candidate.window.items.first(where: { $0.id == visibleAnchor }) {
                 candidate.anchor = GalleryCursor(createdAt: item.createdAt, id: item.id)
@@ -792,13 +854,22 @@ final class AppModel {
                     ledger.records[index].remoteRemoved = removed ? true : nil
                 }
             }
-            try persist()
-            try store.saveGallery(candidate, account: account)
+            try await persist()
+            guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library else { return }
+            // Scrolling may have advanced while the ledger was being saved.
+            if !reset || candidate.anchor != nil || (automatic && !galleryAtTop),
+                let visibleAnchor, let item = candidate.window.items.first(where: { $0.id == visibleAnchor })
+            {
+                candidate.anchor = GalleryCursor(createdAt: item.createdAt, id: item.id)
+            }
             retainedGallery = candidate
             gallery = candidate.window
+            try await saveGallery()
+            try check(version)
+            guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library else { return }
             galleryIsStale = false
             galleryRefreshError = nil
-            scrollTarget = reset ? candidate.anchor?.id ?? candidate.window.items.first?.id : visibleAnchor
+            scrollTarget = reset ? retainedGallery?.anchor?.id ?? gallery.items.first?.id : visibleAnchor
         } catch ClientError.http(410, _) where allowRebase {
             guard version == epoch, mutationVersion == mediaMutationGeneration,
                 ledger.selectedLibraryID == library
@@ -836,7 +907,8 @@ final class AppModel {
         if case ClientError.http(let status, _) = error { return [403, 404].contains(status) }
         return false
     }
-    func clearGalleryAccess() {
+    func clearGalleryAccess(invalidateLoad: Bool = true) {
+        if invalidateLoad { beginMediaMutation() }
         gallery.reset()
         retainedGallery = nil
         timeline = []
@@ -845,19 +917,36 @@ final class AppModel {
         galleryAtTop = true
         mediaGeneration = UUID()
         MediaCache.shared.clear()
-        if let account, let store {
-            do { try store.clearGallery(account: account) } catch { message = error.localizedDescription }
+        queueGallerySave()
+        let version = epoch
+        Task { [weak self] in
+            guard let self, version == self.epoch else { return }
+            do {
+                try await self.flushGallery()
+                guard version == self.epoch else { return }
+                try await self.resetViewer()
+            } catch { if version == self.epoch { self.message = error.localizedDescription } }
         }
-        try? FileManager.default.removeItem(at: viewerDirectory())
-        try? FileManager.default.createDirectory(at: viewerDirectory(), withIntermediateDirectories: true)
     }
     func rememberAnchor(_ id: UUID) {
+        guard signedIn else { return }
         visibleAnchor = id
-        guard var retainedGallery, let asset = gallery.items.first(where: { $0.id == id }), let account, let store
+        guard var retainedGallery, let asset = gallery.items.first(where: { $0.id == id }), account != nil
         else { return }
         retainedGallery.anchor = GalleryCursor(createdAt: asset.createdAt, id: id)
         self.retainedGallery = retainedGallery
-        do { try store.saveGallery(retainedGallery, account: account) } catch { handle(error) }
+        queueGallerySave()
+        anchorSaveTask?.cancel()
+        let version = epoch
+        anchorSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+                guard let self, version == self.epoch else { return }
+                try await self.flushGallery()
+            } catch {
+                if let self, version == self.epoch, !(error is CancellationError) { self.handle(error) }
+            }
+        }
     }
     func loadTimeline(year: Int? = nil, month: Int? = nil, allowRebase: Bool = true) async {
         guard let api, let cache = retainedGallery else { return }
@@ -887,11 +976,13 @@ final class AppModel {
             handle(error)
         }
     }
-    func setSettings(_ settings: BackupSettings) {
+    func setSettings(_ settings: BackupSettings) async {
         let old = ledger.settings
+        let version = epoch
         ledger.settings = settings
-        do { try persist() } catch {
-            ledger.settings = old
+        let revision = ledgerRevision + 1
+        do { try await persist() } catch {
+            if version == epoch, revision == ledgerRevision, !(error is CancellationError) { ledger.settings = old }
             handle(error)
             return
         }
@@ -899,14 +990,18 @@ final class AppModel {
         scheduleRetry()
         scheduleBackground()
     }
-    func saveOnboarding(_ draft: OnboardingDraft) throws {
+    func saveOnboarding(_ draft: OnboardingDraft) async throws {
         guard needsOnboarding, libraries.contains(where: { $0.id == draft.libraryID }) else {
             throw ClientError.invalid("Select an accessible library before continuing.")
         }
         let previous = ledger.onboarding
+        let version = epoch
         ledger.onboarding = draft
-        do { try persist() } catch {
-            ledger.onboarding = previous
+        let revision = ledgerRevision + 1
+        do { try await persist() } catch {
+            if version == epoch, revision == ledgerRevision, !(error is CancellationError) {
+                ledger.onboarding = previous
+            }
             throw error
         }
     }
@@ -926,13 +1021,17 @@ final class AppModel {
             throw ClientError.invalid("Library selection failed or the account changed. Try again.")
         }
         let previous = ledger.settings
+        let version = epoch
         ledger.settings.automaticBackup = backup
         ledger.settings.automaticCleanup = false
         ledger.settings.allowCellular = allowCellular
         ledger.settings.backupPaused = false
         ledger.settings.onboardingCompleted = true
-        do { try persist() } catch {
-            ledger.settings = previous
+        let revision = ledgerRevision + 1
+        do { try await persist() } catch {
+            if version == epoch, revision == ledgerRevision, !(error is CancellationError) {
+                ledger.settings = previous
+            }
             throw error
         }
         if backup { scheduleAutomaticRun() }
@@ -941,7 +1040,9 @@ final class AppModel {
     func setBackupPaused(_ paused: Bool) async {
         var settings = ledger.settings
         settings.backupPaused = paused
-        setSettings(settings)
+        let version = epoch
+        await setSettings(settings)
+        guard version == epoch else { return }
         guard ledger.settings.backupPaused == paused else { return }
         if paused {
             retryWakeup.cancel()
@@ -962,11 +1063,67 @@ final class AppModel {
             throw CancellationError()
         }
     }
-    private func persist() throws {
-        guard let store, let account else { throw ClientError.invalid("Sign in before changing account settings.") }
-        try store.save(ledger, account: account)
+    private func persist() async throws {
+        guard signedIn, let account else { throw ClientError.invalid("Sign in before changing account settings.") }
+        let version = epoch
+        ledgerRevision += 1
+        let revision = ledgerRevision
+        let snapshot = ledger
+        try await persistence.save(snapshot, account: account, revision: revision)
+        guard version == epoch, self.account == account else { throw CancellationError() }
+        try Task.checkCancellation()
     }
-    private func update(_ record: UploadRecord) throws {
+
+    private func resetViewer() async throws {
+        let version = epoch
+        viewerRevision += 1
+        try await persistence.resetViewer(revision: viewerRevision)
+        guard version == epoch else { throw CancellationError() }
+    }
+
+    private func queueGallerySave() {
+        guard let account else { return }
+        galleryRevision += 1
+        pendingGallery = (account, galleryRevision, retainedGallery)
+    }
+
+    private func saveGallery() async throws {
+        queueGallerySave()
+        try await flushGallery()
+    }
+
+    private func flushGallery() async throws {
+        while let pending = pendingGallery {
+            try await persistence.saveGallery(
+                pending.cache, account: pending.account, revision: pending.revision)
+            if pendingGallery?.revision == pending.revision { pendingGallery = nil }
+        }
+    }
+
+    /// Await this before releasing a background execution allowance.
+    func flushPersistence() async {
+        let version = epoch
+        do { try await flushDurablePersistence() } catch {
+            if version == epoch { handle(error) }
+        }
+    }
+
+    private func flushDurablePersistence() async throws {
+        anchorSaveTask?.cancel()
+        anchorSaveTask = nil
+        let version = epoch
+        while true {
+            let revision = ledgerRevision + (account != nil && signedIn ? 1 : 0)
+            if account != nil, signedIn {
+                try await persist()
+            }
+            try await flushGallery()
+            guard version == epoch else { throw CancellationError() }
+            if ledgerRevision == revision, pendingGallery == nil { return }
+        }
+    }
+
+    private func update(_ record: UploadRecord) async throws {
         if let index = ledger.records.firstIndex(where: { $0.id == record.id }) {
             var merged = record
             if ledger.records[index].remoteRemoved == true { merged.remoteRemoved = true }
@@ -974,24 +1131,17 @@ final class AppModel {
         } else {
             ledger.records.append(record)
         }
-        try persist()
+        try await persist()
     }
     private func pruneOrphanStaging(account: String, ledger: AccountLedger) async throws {
-        guard let store else { return }
+        let version = epoch
         let active = await BackgroundTransfers.shared.activeTasks()
+        try Task.checkCancellation()
+        guard version == epoch else { throw CancellationError() }
         guard !active.contains(where: { $0.taskDescription?.hasPrefix(account + "/") == true }) else { return }
-        let directory = try store.accountDirectory(account)
-        let expected = Set(
-            ledger.records.filter { $0.phase != .ready || $0.evidence == nil }.map {
-                $0.id.uuidString.lowercased() + ".original"
-            })
-        for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
-            if file.pathExtension == "part"
-                || (file.pathExtension == "original" && !expected.contains(file.lastPathComponent))
-            {
-                try FileManager.default.removeItem(at: file)
-            }
-        }
+        try await persistence.pruneOrphanStaging(account: account, ledger: ledger)
+        try Task.checkCancellation()
+        guard version == epoch else { throw CancellationError() }
     }
     private func check(_ version: UUID) throws {
         try Task.checkCancellation()
@@ -1102,12 +1252,17 @@ final class AppModel {
         backupNotice = nil
         backupDiagnostic = nil
         let version = epoch
+        var continueScan = false
         defer {
             isRunning = false
             activity = ""
             offerCleanup()
             scheduleBackground()
             scheduleRetry()
+            if version == epoch, continueScan {
+                scanContinuationEpoch = version
+                if UIApplication.shared.applicationState == .active { scheduleAutomaticRun() }
+            }
         }
         do {
             let groupedRecords = Dictionary(grouping: ledger.records, by: \.resourceSetId)
@@ -1130,7 +1285,7 @@ final class AppModel {
                 try checkBackup(version)
                 do { try await publishGroup(group.id, version: version) } catch {
                     if version == epoch {
-                        try recordGroupFailure(group.id, error: error)
+                        try await recordGroupFailure(group.id, error: error)
                         handleBackupError(error)
                     }
                 }
@@ -1194,7 +1349,7 @@ final class AppModel {
                         try await stageAndUpload(source, version: version, ignoreBackoff: ignoreBackoff)
                     } else {
                         do { try await publishGroup(group.id, version: version) } catch {
-                            if version == epoch { try recordGroupFailure(group.id, error: error) }
+                            if version == epoch { try await recordGroupFailure(group.id, error: error) }
                             throw error
                         }
                     }
@@ -1222,12 +1377,13 @@ final class AppModel {
                     try checkBackup(version)
                 }
                 ledger.scanAfter = batch.assets.last?.localIdentifier ?? ledger.scanAfter
-                try persist()
+                try await persist()
                 if batch.atEnd {
                     ledger.scanAfter = nil
-                    try persist()
+                    try await persist()
                 } else {
                     activity = "More accessible originals remain; the next scan will continue here."
+                    continueScan = true
                 }
             }
             await loadGallery(reset: true, notifyErrors: false, automatic: true)
@@ -1237,7 +1393,7 @@ final class AppModel {
     }
     private func stageAndUpload(_ asset: PHAsset, version: UUID, ignoreBackoff: Bool = false) async throws {
         try checkBackup(version)
-        guard let store, let account, let library = ledger.selectedLibraryID, let connection else {
+        guard let account, let library = ledger.selectedLibraryID, let connection else {
             throw ClientError.signedOut
         }
         guard !ledger.suppresses(asset.localIdentifier, library: library) else { return }
@@ -1259,7 +1415,7 @@ final class AppModel {
                 ledger.resourceSets?[index].nextRetryAt = nil
                 ledger.resourceSets?[index].error = nil
                 ledger.resourceSets?[index].recoveryMessage = nil
-                try persist()
+                try await persist()
             }
         } else {
             guard (ledger.resourceSets?.count ?? 0) < 50_000 else {
@@ -1270,7 +1426,7 @@ final class AppModel {
             group = ResourceSetRecord(id: UUID(), libraryId: library, source: revision, kind: photos.kind(asset))
             if ledger.resourceSets == nil { ledger.resourceSets = [] }
             ledger.resourceSets?.append(group)
-            try persist()
+            try await persist()
         }
         activeBackupItems.insert(group.id)
         defer { if version == epoch { activeBackupItems.remove(group.id) } }
@@ -1300,7 +1456,7 @@ final class AppModel {
                     existing.resourceSetId = group.id
                     existing.resourceRole = photos.role(resource)
                     existing.uniformTypeIdentifier = resource.uniformTypeIdentifier
-                    try update(existing)
+                    try await update(existing)
                     if existing.needsTransfer {
                         try await transfer(existing, version: version)
                     }
@@ -1312,11 +1468,13 @@ final class AppModel {
                     )
                 }
                 let id = UUID()
-                let file = try store.staging(account: account, id: id)
+                let file = try await persistence.staging(account: account, id: id)
+                try checkBackup(version)
                 do {
                     let record = try await preparation.run {
                         try checkBackup(version)
-                        let remaining = try exportBudget(store: store, maximum: connection.config.maxUploadBytes)
+                        let remaining = try await exportBudget(maximum: connection.config.maxUploadBytes)
+                        try checkBackup(version)
                         activity =
                             "Exporting original \(resource.originalFilename). iCloud-only originals may need a download."
                         try await photos.export(
@@ -1336,13 +1494,13 @@ final class AppModel {
                         record.resourceSetId = group.id
                         record.resourceRole = photos.role(resource)
                         record.uniformTypeIdentifier = resource.uniformTypeIdentifier
-                        try update(record)
+                        try await update(record)
                         return record
                     }
                     try await transfer(record, version: version)
                 } catch {
                     if !ledger.records.contains(where: { $0.id == id }) {
-                        try? FileManager.default.removeItem(at: file)
+                        try? await persistence.remove(file)
                     }
                     throw error
                 }
@@ -1354,11 +1512,11 @@ final class AppModel {
             else { return }
             try await publishGroup(group.id, version: version)
         } catch {
-            if version == epoch { try recordGroupFailure(group.id, error: error) }
+            if version == epoch { try await recordGroupFailure(group.id, error: error) }
             throw error
         }
     }
-    private func recordGroupFailure(_ id: UUID, error: Error) throws {
+    private func recordGroupFailure(_ id: UUID, error: Error) async throws {
         guard let index = ledger.resourceSets?.firstIndex(where: { $0.id == id }) else { return }
         if ledger.settings.backupPaused == true,
             error is CancellationError || (error as? URLError)?.code == .cancelled
@@ -1366,7 +1524,7 @@ final class AppModel {
             ledger.resourceSets?[index].error = nil
             ledger.resourceSets?[index].recoveryMessage = nil
             ledger.resourceSets?[index].nextRetryAt = nil
-            try persist()
+            try await persist()
             return
         }
         let retries = (ledger.resourceSets?[index].retryCount ?? 0) + 1
@@ -1378,7 +1536,7 @@ final class AppModel {
         ledger.resourceSets?[index].nextRetryAt =
             retry
             ? Date().addingTimeInterval(min(3600, 30 * pow(2, Double(min(retries - 1, 7))))) : nil
-        try persist()
+        try await persist()
     }
     private func publishGroup(_ id: UUID, version: UUID) async throws {
         try checkBackup(version)
@@ -1397,26 +1555,20 @@ final class AppModel {
         ledger.resourceSets?[index].retryCount = 0
         ledger.resourceSets?[index].nextRetryAt = nil
         ledger.resourceSets?[index].requiresUserAction = nil
-        try persist()
+        try await persist()
     }
-    private func exportBudget(store: LedgerStore, maximum: Int64) throws -> Int64 {
-        let free =
-            try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage ?? 0
+    private func exportBudget(maximum: Int64) async throws -> Int64 {
+        let version = epoch
         let partReserve = Int64(BackupQueue.concurrency * 2) * Int64(connection?.config.chunkSize ?? 4_194_304)
-        let budget = min(
-            maximum, LedgerStore.stagingBudget - (try store.usedBytes()) - partReserve,
-            free - max(64 * 1024 * 1024, partReserve))
-        guard budget > 0 else {
-            throw ClientError.invalid(
-                "Staging is full or device storage is low. Pending originals are preserved; no new export was started.")
-        }
+        let budget = try await persistence.exportBudget(
+            maximum: maximum, partReserve: partReserve)
+        try checkBackup(version)
         return budget
     }
     private func transfer(_ original: UploadRecord, version: UUID) async throws {
         try checkBackup(version)
         guard !ledger.suppresses(original.source.localIdentifier, library: original.libraryId) else { return }
-        guard let store, let account, let api, let connection else { throw ClientError.signedOut }
+        guard let account, let api, let connection else { throw ClientError.signedOut }
         let client = UploadClient(api: api)
         var record = original
         let activityID = record.id
@@ -1425,16 +1577,18 @@ final class AppModel {
         record.lastAttemptAt = Date()
         record.requiresUserAction = nil
         record.recoveryMessage = nil
-        let staged = try store.staging(account: account, id: record.id)
+        let staged = try await persistence.staging(account: account, id: record.id)
         do {
             try check(version)
             activity = "Reconciling \(record.fileName)…"
             let status = try await client.begin(record)
             try check(version)
             try record.reconcile(status, chunkSize: connection.config.chunkSize)
-            try update(record)
+            try await update(record)
             if record.phase == .uploading {
-                if !FileManager.default.fileExists(atPath: staged.path) {
+                let hasStaging = await persistence.exists(staged)
+                try checkBackup(version)
+                if !hasStaging {
                     guard let asset = photos.asset(record.source.localIdentifier),
                         record.source.matchesCurrentRevision(photos.revision(asset)),
                         photos.resources(asset).indices.contains(record.resourceIndex)
@@ -1446,7 +1600,7 @@ final class AppModel {
                         try checkBackup(version)
                         try await photos.export(
                             photos.resources(asset)[record.resourceIndex], to: staged,
-                            maximum: try exportBudget(store: store, maximum: record.size),
+                            maximum: try await exportBudget(maximum: record.size),
                             allowNetwork: NetworkPolicy.shared.allowsBackup(cellular: ledger.settings.allowCellular))
                     }
                     try check(version)
@@ -1461,7 +1615,8 @@ final class AppModel {
                 let parts = Chunking.count(size: record.size, chunkSize: connection.config.chunkSize)
                 for index in 0..<parts where !record.receivedParts.contains(index) {
                     try checkBackup(version)
-                    let chunk = try store.chunk(account: account, id: record.id, part: index)
+                    let chunk = try await persistence.chunk(account: account, id: record.id, part: index)
+                    try checkBackup(version)
                     let length = try Chunking.length(
                         index: index, size: record.size, chunkSize: connection.config.chunkSize)
                     try await Task.detached {
@@ -1483,13 +1638,14 @@ final class AppModel {
                     }
                     try check(version)
                     record.receivedParts.append(index)
-                    try update(record)
-                    try? FileManager.default.removeItem(at: chunk)
+                    try await update(record)
+                    try? await persistence.remove(chunk)
+                    try checkBackup(version)
                 }
                 let completed = try await client.complete(record.id)
                 try check(version)
                 try record.reconcile(completed, chunkSize: connection.config.chunkSize)
-                try update(record)
+                try await update(record)
             }
             // Bound foreground polling. Verification can continue on the server after this run ends.
             for attempt in 0..<5 where record.phase == .verifying {
@@ -1498,7 +1654,7 @@ final class AppModel {
                 let checked = try await client.status(record.id)
                 try check(version)
                 try record.reconcile(checked, chunkSize: connection.config.chunkSize)
-                try update(record)
+                try await update(record)
             }
             if record.phase == .ready {
                 let evidence = try await client.evidence(record.committedAssetID)
@@ -1514,16 +1670,20 @@ final class AppModel {
                 record.retryCount = 0
                 record.nextRetryAt = nil
                 record.requiresUserAction = nil
-                try update(record)
-                try? FileManager.default.removeItem(at: staged)
+                try await update(record)
+                try? await persistence.remove(staged)
+                try check(version)
                 for part in 0..<Chunking.count(size: record.size, chunkSize: connection.config.chunkSize) {
-                    try? FileManager.default.removeItem(at: store.chunk(account: account, id: record.id, part: part))
+                    let chunk = try await persistence.chunk(account: account, id: record.id, part: part)
+                    try check(version)
+                    try? await persistence.remove(chunk)
                 }
+                try check(version)
             } else if record.phase == .failed {
                 throw ClientError.invalid(record.error ?? "Server verification failed. The device source is untouched.")
             } else if record.phase == .verifying {
                 record.nextRetryAt = Date().addingTimeInterval(30)
-                try update(record)
+                try await update(record)
             }
         } catch {
             if version == epoch {
@@ -1543,7 +1703,7 @@ final class AppModel {
                     }
                 }
                 if record.phase != .sourceChanged && record.phase != .ready { record.phase = .paused }
-                try update(record)
+                try await update(record)
             }
             throw error
         }
@@ -1564,7 +1724,7 @@ final class AppModel {
         try check(version)
         if let index = ledger.resourceSets?.firstIndex(where: { $0.id == manifest.id }) {
             ledger.resourceSets?[index].retention = hold
-            try persist()
+            try await persist()
         }
         return
             "Every original has a matching server retention hold through \(hold.retainedUntil). Single-volume storage is NOT an independent backup. Compound/edited cleanup remains blocked."
@@ -1577,7 +1737,7 @@ final class AppModel {
         }
     }
     func removeConfirmedCopies() async {
-        guard !isRunning, let api, let account, let store,
+        guard !isRunning, let api, let account,
             UIApplication.shared.applicationState == .active
         else { return }
         isRunning = true
@@ -1588,6 +1748,7 @@ final class AppModel {
         }
         var removed = 0
         for var record in cleanupCandidates.prefix(10) {
+            var cleanupFile: URL?
             do {
                 try check(version)
                 guard photos.authorization == .authorized || photos.authorization == .limited,
@@ -1598,11 +1759,12 @@ final class AppModel {
                 }
                 activity = "Rechecking original bytes before removal: \(record.fileName)"
                 let exportID = UUID()
-                let file = try store.staging(account: account, id: exportID)
-                defer { try? FileManager.default.removeItem(at: file) }
+                let file = try await persistence.staging(account: account, id: exportID)
+                cleanupFile = file
+                try check(version)
                 try await photos.export(
                     photos.resources(source)[0], to: file,
-                    maximum: try exportBudget(store: store, maximum: record.size),
+                    maximum: try await exportBudget(maximum: record.size),
                     allowNetwork: ledger.settings.allowCellular || !NetworkPolicy.shared.isExpensive)
                 let hash = try await Task.detached { try Hashing.file(file) }.value
                 try check(version)
@@ -1619,24 +1781,34 @@ final class AppModel {
                 if let block = record.cleanupBlock(current: fresh.map(photos.revision)) {
                     throw ClientError.invalid(block)
                 }
-                guard UIApplication.shared.applicationState == .active, let fresh else {
+                guard UIApplication.shared.applicationState == .active, fresh != nil else {
                     throw ClientError.invalid("Return to the foreground to confirm removal.")
                 }
                 record.cleanupState = "awaiting-system-confirmation"
-                try update(record)
+                try await update(record)
+                record = ledger.records.first(where: { $0.id == record.id }) ?? record
+                guard UIApplication.shared.applicationState == .active,
+                    let confirmedSource = photos.asset(record.source.localIdentifier),
+                    record.cleanupBlock(current: photos.revision(confirmedSource)) == nil
+                else {
+                    throw ClientError.invalid("Return to the foreground and recheck the original before removal.")
+                }
                 try await PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.deleteAssets([fresh] as NSArray)
+                    PHAssetChangeRequest.deleteAssets([confirmedSource] as NSArray)
                 }
                 try check(version)
                 record.cleanupState = "removed"
                 record.error = nil
-                try update(record)
+                try await update(record)
+                try? await persistence.remove(file)
+                try check(version)
                 removed += 1
             } catch {
+                if let cleanupFile { try? await persistence.remove(cleanupFile) }
                 if version == epoch {
                     record.cleanupState = "failed"
                     record.error = error.localizedDescription
-                    do { try update(record) } catch { handle(error) }
+                    do { try await update(record) } catch { handle(error) }
                     cleanupReport = "\(removed) removed. Stopped: \(error.localizedDescription)"
                     handle(error)
                 }
@@ -1656,6 +1828,7 @@ final class AppModel {
         else { return }
         let version = epoch
         let runID = UUID()
+        scanContinuationEpoch = nil
         automaticRunID = runID
         automaticTask = Task { [weak self] in
             guard let self else { return }
@@ -1663,6 +1836,11 @@ final class AppModel {
                 if self.automaticRunID == runID {
                     self.automaticTask = nil
                     self.automaticRunID = nil
+                    if self.scanContinuationEpoch == self.epoch,
+                        UIApplication.shared.applicationState == .active
+                    {
+                        self.scheduleAutomaticRun()
+                    }
                 }
             }
             do { try await Task.sleep(for: .seconds(2)) } catch { return }

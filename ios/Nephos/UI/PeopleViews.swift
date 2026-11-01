@@ -20,6 +20,8 @@ struct FacePortrait: View {
             .clipShape(Circle())
             .accessibilityLabel(failure ?? "Recognized face")
             .task(id: "\(model.mediaGeneration)/\(personID?.uuidString ?? observation?.id.uuidString ?? "")") {
+                image = nil
+                failure = nil
                 guard let api = model.api, let account = model.account else { return }
                 let epoch = model.epoch
                 let generation = model.mediaGeneration
@@ -36,9 +38,14 @@ struct FacePortrait: View {
                     let asset = try await api.asset(face.assetId)
                     let preview = try await MediaCache.shared.preview(asset, api: api, account: account, size: .screen)
                     guard let source = preview.cgImage,
-                        let rect = face.cropRect(pixelWidth: source.width, pixelHeight: source.height),
-                        let crop = source.cropping(to: rect)
+                        let rect = face.cropRect(pixelWidth: source.width, pixelHeight: source.height)
                     else { throw ClientError.invalid("The face crop is unavailable.") }
+                    let worker = Task.detached(priority: .userInitiated) { try ImageDecoding.crop(source, rect: rect) }
+                    let crop = try await withTaskCancellationHandler {
+                        try await worker.value
+                    } onCancel: {
+                        worker.cancel()
+                    }
                     guard epoch == model.epoch, generation == model.mediaGeneration, !Task.isCancelled else { return }
                     image = UIImage(cgImage: crop)
                 } catch {

@@ -336,7 +336,7 @@ struct OnboardingView: View {
                             if !canReadPhotos { await model.requestPhotos() }
                             permission = model.photos.authorization
                             if canReadPhotos {
-                                try saveDraft(ready: true)
+                                try await saveDraft(ready: true)
                                 step = .ready
                             }
                         }
@@ -462,15 +462,15 @@ struct OnboardingView: View {
             step = .library
         }
     }
-    private func saveDraft(ready: Bool) throws {
+    private func saveDraft(ready: Bool) async throws {
         guard let selectedLibrary else { throw ClientError.invalid("Choose a library.") }
-        try model.saveOnboarding(
+        try await model.saveOnboarding(
             OnboardingDraft(libraryID: selectedLibrary, backup: backup, allowCellular: !wifiOnly, ready: ready))
     }
     private func chooseMode(_ enabled: Bool) {
         perform {
             backup = enabled
-            try saveDraft(ready: !enabled)
+            try await saveDraft(ready: !enabled)
             permission = model.photos.authorization
             step = enabled ? .photos : .ready
         }

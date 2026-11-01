@@ -83,19 +83,17 @@ struct NephosApp: App {
                 .task {
                     delegate.model = model
                     await model.restore()
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(60))
-                        if scenePhase == .active && model.ledger.settings.automaticBackup {
-                            model.scheduleAutomaticRun()
-                        }
-                    }
+                    if scenePhase == .active { model.scheduleAutomaticRun() }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         model.updatePhotosStatus()
                         model.scheduleAutomaticRun()
                     }
-                    if phase == .background { model.scheduleBackground() }
+                    if phase == .background {
+                        model.scheduleBackground()
+                        Task { await model.flushPersistence() }
+                    }
                 }
                 .onChange(of: NetworkPolicy.shared.isConnected) { _, connected in
                     if connected && scenePhase == .active { model.scheduleAutomaticRun() }

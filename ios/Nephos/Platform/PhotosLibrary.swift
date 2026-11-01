@@ -63,14 +63,14 @@ final class ExportSink: @unchecked Sendable {
 final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
     var onChange: (() -> Void)?
     private var observing = false
-    private let imageManager = PHCachingImageManager()
+    private let imageManager: PHCachingImageManager
     #if UI_QUALIFICATION
         var qualificationThumbnail: UIImage?
     #endif
 
     func thumbnail(
         _ identifier: String, targetSize: CGSize = CGSize(width: 360, height: 360),
-        contentMode: PHImageContentMode = .aspectFill
+        contentMode: PHImageContentMode = .aspectFill, networkAllowed: Bool = false
     ) async throws -> UIImage {
         #if UI_QUALIFICATION
             if let qualificationThumbnail { return qualificationThumbnail }
@@ -81,8 +81,27 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         guard let asset = asset(identifier) else {
             throw ClientError.invalid("This original is no longer available on the iPhone.")
         }
-        return try await PhotosThumbnailRequest(manager: imageManager).image(
-            for: asset, targetSize: targetSize, contentMode: contentMode)
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = networkAllowed
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        return try await PhotosRequest<UIImage>(manager: imageManager).value { completion in
+            imageManager.requestImage(
+                for: asset, targetSize: targetSize, contentMode: contentMode, options: options
+            ) { image, info in
+                if info?[PHImageCancelledKey] as? Bool == true {
+                    completion(.failure(CancellationError()))
+                } else if let error = info?[PHImageErrorKey] as? Error {
+                    completion(.failure(error))
+                } else if info?[PHImageResultIsDegradedKey] as? Bool != true {
+                    if let image {
+                        completion(.success(image))
+                    } else {
+                        completion(.failure(ClientError.invalid("The photo preview is not available on this iPhone.")))
+                    }
+                }
+            }
+        }
     }
     func videoPlayerItem(_ identifier: String) async throws -> AVPlayerItem {
         guard authorization == .authorized || authorization == .limited else {
@@ -93,66 +112,45 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         }
         let options = PHVideoRequestOptions()
         options.isNetworkAccessAllowed = true
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await PhotosRequest<AVPlayerItem>(manager: imageManager).value { completion in
             imageManager.requestPlayerItem(forVideo: asset, options: options) { item, info in
                 if let error = info?[PHImageErrorKey] as? Error {
-                    continuation.resume(throwing: error)
+                    completion(.failure(error))
                 } else if info?[PHImageCancelledKey] as? Bool == true {
-                    continuation.resume(throwing: CancellationError())
+                    completion(.failure(CancellationError()))
                 } else if let item {
-                    continuation.resume(returning: item)
+                    completion(.success(item))
                 } else {
-                    continuation.resume(
-                        throwing: ClientError.invalid("The video is not available in Photos."))
+                    completion(.failure(ClientError.invalid("The video is not available in Photos.")))
                 }
             }
         }
     }
-    override init() {
+    override convenience init() {
+        self.init(imageManager: PHCachingImageManager())
+    }
+    init(imageManager: PHCachingImageManager) {
+        self.imageManager = imageManager
         super.init()
         refreshObservation()
     }
 
     @MainActor
-    private final class PhotosThumbnailRequest {
+    private final class PhotosRequest<Value> {
         let manager: PHImageManager
         private var requestID: PHImageRequestID?
-        private var continuation: CheckedContinuation<UIImage, Error>?
+        private var continuation: CheckedContinuation<Value, Error>?
         private var finished = false
 
         init(manager: PHImageManager) { self.manager = manager }
 
-        func image(for asset: PHAsset, targetSize: CGSize, contentMode: PHImageContentMode) async throws -> UIImage {
+        func value(_ start: (@escaping (Result<Value, Error>) -> Void) -> PHImageRequestID) async throws -> Value {
             try Task.checkCancellation()
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     self.continuation = continuation
-                    let options = PHImageRequestOptions()
-                    options.isNetworkAccessAllowed = false
-                    options.deliveryMode = .highQualityFormat
-                    options.resizeMode = .fast
-                    requestID = manager.requestImage(
-                        for: asset, targetSize: targetSize, contentMode: contentMode,
-                        options: options
-                    ) { image, info in
-                        let error = info?[PHImageErrorKey] as? Error
-                        let cancelled = info?[PHImageCancelledKey] as? Bool == true
-                        let degraded = info?[PHImageResultIsDegradedKey] as? Bool == true
-                        Task { @MainActor in
-                            if cancelled {
-                                self.finish(.failure(CancellationError()))
-                            } else if let error {
-                                self.finish(.failure(error))
-                            } else if !degraded {
-                                if let image {
-                                    self.finish(.success(image))
-                                } else {
-                                    self.finish(
-                                        .failure(
-                                            ClientError.invalid("The photo preview is not available on this iPhone.")))
-                                }
-                            }
-                        }
+                    requestID = start { result in
+                        Task { @MainActor in self.finish(result) }
                     }
                 }
             } onCancel: {
@@ -163,7 +161,7 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
             }
         }
 
-        private func finish(_ result: Result<UIImage, Error>) {
+        private func finish(_ result: Result<Value, Error>) {
             guard !finished else { return }
             finished = true
             continuation?.resume(with: result)
@@ -204,6 +202,30 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
             PHAssetMediaType.video.rawValue)
         let result = PHAsset.fetchAssets(with: options)
         return (0..<result.count).map { result.object(at: $0) }
+    }
+    func galleryAssets(limit: Int = 300) async throws -> [LocalGalleryAsset] {
+        guard authorization == .authorized || authorization == .limited else { return [] }
+        let worker = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let options = PHFetchOptions()
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            options.fetchLimit = limit
+            options.predicate = NSPredicate(
+                format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue,
+                PHAssetMediaType.video.rawValue)
+            let result = PHAsset.fetchAssets(with: options)
+            return try (0..<result.count).map { index in
+                try Task.checkCancellation()
+                let asset = result.object(at: index)
+                return LocalGalleryAsset(
+                    identifier: asset.localIdentifier, date: asset.creationDate, isVideo: asset.mediaType == .video)
+            }
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
     func deleteFromPhotos(_ identifiers: [String]) async throws {
         guard authorization == .authorized || authorization == .limited else {

@@ -110,7 +110,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-enum MediaFilter: String, CaseIterable, Identifiable {
+enum MediaFilter: String, CaseIterable, Identifiable, Sendable {
     case all, photos, videos, shared
     var id: String { rawValue }
     var title: String {
