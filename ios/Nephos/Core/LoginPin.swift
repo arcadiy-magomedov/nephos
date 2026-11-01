@@ -7,7 +7,8 @@ enum LoginPinError: LocalizedError {
         case .invalidEmail: "Enter a valid email address."
         case .invalidRequest: "The server rejected the email address or sign-in client."
         case .unknownAccount: "This email is not an enabled known account. Contact your administrator."
-        case .rateLimited: "A PIN was requested recently. Wait before requesting another."
+        case .rateLimited:
+            "Too many PIN requests. Wait one minute before requesting again. If you already requested a PIN, you can still enter it."
         case .invalidExpiry: "The server returned an invalid PIN expiry."
         case .expiredRequest: "Request a new PIN before signing in."
         }
@@ -41,6 +42,27 @@ struct LoginPinReceipt: Decodable, Sendable {
         guard (1...1800).contains(expiresIn) else {
             throw LoginPinError.invalidExpiry
         }
+    }
+}
+
+struct LoginPinRequest: Codable, Sendable {
+    let connection: Connection
+    let email: String
+    let requestedAt: Date
+    let expiresAt: Date
+
+    init(connection: Connection, email: String, receipt: LoginPinReceipt, requestedAt: Date = Date()) throws {
+        try receipt.validate()
+        self.connection = connection
+        self.email = try LoginPinPolicy.email(email)
+        self.requestedAt = requestedAt
+        expiresAt = requestedAt.addingTimeInterval(TimeInterval(receipt.expiresIn))
+    }
+
+    func isValid(for connection: Connection, now: Date = Date()) -> Bool {
+        self.connection == connection && requestedAt <= now && expiresAt > now
+            && expiresAt.timeIntervalSince(requestedAt) <= 1800
+            && (try? LoginPinPolicy.email(email)) == email
     }
 }
 

@@ -7,7 +7,11 @@ struct RootView: View {
     @State private var tab = 0
     var body: some View {
         Group {
-            if model.signedIn && !model.needsOnboarding && !model.needsReauthentication {
+            if !model.hasRestoredSession {
+                ProgressView("Restoring session…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("startup.restoring")
+            } else if model.signedIn && !model.isSigningIn && !model.needsOnboarding && !model.needsReauthentication {
                 TabView(selection: $tab) {
                     GalleryView(model: model)
                         .tabItem { Label("Photos", systemImage: "square.grid.2x2") }.tag(0)

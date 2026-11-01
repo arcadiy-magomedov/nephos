@@ -8,6 +8,7 @@ import UIKit
 final class AppModel {
     var connection: Connection?
     var proposedConnection: Connection?
+    private(set) var hasRestoredSession = false
     var signedIn = false
     var needsReauthentication = false
     var libraries: [Library] = []
@@ -56,6 +57,7 @@ final class AppModel {
     private var auth: AuthSession
     private let persistence: AccountPersistence
     private var bootstrapTask: Task<Void, Error>?
+    private var restorationTask: Task<Void, Never>?
     private var ledgerRevision: UInt64 = 0
     private var galleryRevision: UInt64 = 0
     private var connectionRevision: UInt64 = 0
@@ -399,13 +401,23 @@ final class AppModel {
     }
 
     func restore() async {
-        do {
-            try await bootstrap()
-            guard let restoredCredentials else { return }
-            self.restoredCredentials = nil
-            try await establish(AuthSession(credentials: restoredCredentials))
-            scheduleAutomaticRun()
-        } catch { handle(error) }
+        if let restorationTask {
+            await restorationTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            defer { hasRestoredSession = true }
+            do {
+                try await bootstrap()
+                guard let restoredCredentials else { return }
+                self.restoredCredentials = nil
+                try await establish(AuthSession(credentials: restoredCredentials))
+                scheduleAutomaticRun()
+            } catch { handle(error) }
+        }
+        restorationTask = task
+        await task.value
+        restorationTask = nil
     }
     private var activeAuth: AuthSession?
     private func establish(_ session: AuthSession) async throws {

@@ -65,7 +65,53 @@ final class LoginPinTests: XCTestCase {
         for expiry in [-1, 0, 1801, Int.max] {
             XCTAssertThrowsError(try LoginPinReceipt(expiresIn: expiry).validate())
         }
+    }
 
+    func testAcceptedRequestSurvivesRelaunchWithoutPersistingPINOrTokens() throws {
+        let now = Date()
+        let accepted = try LoginPinRequest(
+            connection: connection(), email: " Known@Example.test ", receipt: LoginPinReceipt(expiresIn: 1800),
+            requestedAt: now)
+        let data = try JSONEncoder().encode(accepted)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(fields.keys), ["connection", "email", "requestedAt", "expiresAt"])
+        let restored = try JSONDecoder().decode(LoginPinRequest.self, from: data)
+        XCTAssertEqual(restored.email, "known@example.test")
+        XCTAssertEqual(restored.expiresAt, accepted.expiresAt)
+        XCTAssertTrue(restored.isValid(for: connection(), now: now.addingTimeInterval(30)))
+        XCTAssertFalse(restored.isValid(for: connection(), now: now.addingTimeInterval(1800)))
+        XCTAssertFalse(restored.isValid(for: connection(), now: now.addingTimeInterval(-1)))
+        let other = Connection(
+            baseURL: URL(string: "https://other.example.test")!, config: connection().config,
+            allowDevelopmentHTTP: false)
+        XCTAssertFalse(restored.isValid(for: other, now: now))
+    }
+
+    func testReusedReceiptRetainsOriginalDeadlineAndRejectsInvalidReceipt() throws {
+        let now = Date()
+        let first = try LoginPinRequest(
+            connection: connection(), email: "known@example.test", receipt: LoginPinReceipt(expiresIn: 1800),
+            requestedAt: now)
+        let resumed = try LoginPinRequest(
+            connection: connection(), email: first.email, receipt: LoginPinReceipt(expiresIn: 1780),
+            requestedAt: now.addingTimeInterval(20))
+        XCTAssertEqual(first.expiresAt, resumed.expiresAt)
+        XCTAssertThrowsError(
+            try LoginPinRequest(
+                connection: connection(), email: first.email, receipt: LoginPinReceipt(expiresIn: 0)))
+    }
+
+    func testRateLimitDoesNotInvalidateAnAlreadyAcceptedRequest() async throws {
+        let accepted = try LoginPinRequest(
+            connection: connection(), email: "wait@example.test", receipt: LoginPinReceipt(expiresIn: 1800))
+        let session = session(email: accepted.email)
+        defer { session.invalidateAndCancel() }
+        do {
+            _ = try await LoginPinClient.request(connection: connection(), email: accepted.email, session: session)
+            XCTFail("The IP cooldown must still reject excess requests.")
+        } catch LoginPinError.rateLimited {
+            XCTAssertTrue(accepted.isValid(for: connection()))
+        }
     }
 
     func testAccountAndRateLimitErrorsAreVisibleGuidanceNotHiddenTechnicalDetails() {

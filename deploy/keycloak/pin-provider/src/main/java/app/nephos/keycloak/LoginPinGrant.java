@@ -59,16 +59,28 @@ public final class LoginPinGrant extends OAuth2GrantTypeBase {
         try {
             user = session.users().getUserById(realm, user.getId());
             if (user == null || !user.isEnabled()) return invalidGrant();
-            Map<String, String> attempts = singleUse.get(PinSupport.attemptsKey(realm.getName(), user.getId()));
+            String attemptsKey = PinSupport.attemptsKey(realm.getName(), user.getId());
+            Map<String, String> attempts = singleUse.get(attemptsKey);
+            long now = java.time.Instant.now().getEpochSecond();
+            long attemptsExpireAt = attempts == null ? now + 15 * 60
+                    : Long.parseLong(attempts.getOrDefault("expiresAt", "0"));
+            if (attempts != null && attemptsExpireAt <= now) {
+                singleUse.remove(attemptsKey);
+                attempts = null;
+                attemptsExpireAt = now + 15 * 60;
+            }
             int count = attempts == null ? 0 : Integer.parseInt(attempts.getOrDefault("count", "0"));
             if (count >= 10) {
                 return invalidGrant();
             }
-            String attemptsKey = PinSupport.attemptsKey(realm.getName(), user.getId());
             if (attempts == null) {
-                singleUse.put(attemptsKey, 15 * 60, Map.of("count", "1"));
-            } else {
-                singleUse.replace(attemptsKey, Map.of("count", Integer.toString(count + 1)));
+                // put() is transactional and rolls back when an invalid grant throws.
+                // Reserve immediately, like the lock, so rejected guesses still count.
+                if (!singleUse.putIfAbsent(attemptsKey, 15 * 60)) return temporarilyUnavailable();
+            }
+            if (!singleUse.replace(attemptsKey, Map.of("count", Integer.toString(count + 1),
+                    "expiresAt", Long.toString(attemptsExpireAt)))) {
+                return temporarilyUnavailable();
             }
 
             String scope = getRequestedScopes();

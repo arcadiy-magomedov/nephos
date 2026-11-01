@@ -49,8 +49,15 @@ first validates an email against enabled known accounts, then requests a
 one-time 8-digit PIN. Only the private admin console displays the generated PIN
 for manual delivery; the unauthenticated requester never receives it. A separate
 PIN-entry screen exchanges it for standard Keycloak OIDC access, identity, and
-offline refresh tokens. PINs expire after 30 minutes;
-reissuing one replaces its predecessor. The public client does not use a client
+offline refresh tokens. PINs expire after 30 minutes. Repeating an accepted public
+request reuses its unconsumed PIN and original expiry, even during the email
+issuance cooldown. Only explicit administrator reissue replaces a pending PIN.
+Accepted email/server/expiry metadata (never the PIN or tokens) survives app
+restart and is cleared on success, expiry, or changing email/server. Request
+rate limits show a one-minute countdown without hiding an already accepted PIN
+entry; without an accepted request they never unlock PIN entry. Per-IP request,
+per-email issuance, and PIN-exchange attempt limits remain enforced.
+The public client does not use a client
 secret or receive a password. Initial ID tokens require the generated nonce.
 Refresh ID tokens may omit it (OIDC Core 12.2), but cannot change it or the
 account subject. Signature, issuer, audience and lifetime validation still
@@ -58,6 +65,13 @@ apply before refreshed credentials are saved. Offline refresh sessions survive
 idle time and are revoked by disabling the account or revoking that device in
 the admin console. Associated Domains and passkeys are not part of this login
 flow.
+
+Cold launch shows a neutral session-restoration indicator until the saved
+Keychain session and account state have resolved. Concurrent restoration callers
+share that work; an authenticated relaunch does not briefly show the login wizard.
+Manual sign-in keeps its view alive until account setup finishes, so switching
+to the gallery cannot cancel a returning account's session setup.
+Explicit sign-out and rejected sessions still enter the email-first flow.
 
 **Find nearby servers** starts an optional Bonjour search on the first step.
 The host advertises `_nephos._tcp` with a versioned TXT record containing its
@@ -228,8 +242,12 @@ python3 onboarding_qualification.py --simulator <booted-simulator-UUID> \
 ```
 
 Add `--complete-signin` for a disposable account provisioned through the private
-admin console: the driver obtains its PIN privately, enters it in the native UI,
-and requires the writable-library setup screen. Temporary test configuration is
+admin console: the driver obtains its PIN privately, exercises immediate retries,
+app relaunch, and the real IP cooldown while keeping PIN entry accessible. It
+opens the writable library, revokes that fixture's device session, then verifies
+email → PIN → library reauthentication and a final signed-in relaunch. The
+identity service key remains in the host-side driver, never in the app or XCTest.
+Temporary test configuration is
 removed afterward. Never use this option with a personal or production account.
 
 The simulator must trust the development CA. The test seeds an old IP/localhost

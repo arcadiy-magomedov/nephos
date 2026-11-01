@@ -68,9 +68,6 @@ public final class NephosAdminResource implements RealmResourceProvider {
             if (client == null || !client.isEnabled() || !client.isPublicClient()) {
                 return failure(400, "invalid_client");
             }
-            if (!singleUse.putIfAbsent(PinSupport.requestKey("email", REALM + ":" + email), 60)) {
-                return failure(429, "rate_limited");
-            }
             UserModel user = session.users().getUserByEmail(session.getContext().getRealm(), email);
             if (user == null || !user.isEnabled()) return failure(404, "account_unavailable");
             String lock = PinSupport.lockKey(REALM, user.getId());
@@ -84,6 +81,11 @@ public final class NephosAdminResource implements RealmResourceProvider {
                 if (record != null && record.containsKey("cipher")) {
                     long remaining = Long.parseLong(record.get("expiresAt")) - now;
                     if (remaining > 0) return publicReceipt(remaining);
+                }
+                // Resuming an accepted request neither issues a PIN nor extends its lifetime.
+                // Only new issuance consumes the email cooldown; the IP budget covers every request.
+                if (!singleUse.putIfAbsent(PinSupport.requestKey("email", REALM + ":" + email), 60)) {
+                    return failure(429, "rate_limited");
                 }
                 String pin = PinSupport.newPin();
                 singleUse.put(key, PinSupport.PIN_TTL_SECONDS, Map.of(
