@@ -66,8 +66,50 @@ struct GalleryView: View {
     @State private var datePicker = false
     @State private var filter: MediaFilter = .all
     @State private var selecting = false
-    @State private var selected: Set<UUID> = []
+    @State private var selected: Set<String> = []
     @State private var shareSelection: ShareSelection?
+    @State private var deleteConfirmation = false
+    @State private var carousel: GalleryCarousel?
+    @State private var localAssets: [PHAsset] = []
+    @State private var sharedAssets: [Asset] = []
+    private var galleryItems: [GalleryMedia] {
+        let records = model.ledger.records.filter { $0.remoteRemoved != true }
+        let localByIdentifier = Dictionary(uniqueKeysWithValues: localAssets.map { ($0.localIdentifier, $0) })
+        let remoteAssets = model.gallery.items + sharedAssets
+        var knownLocalIdentifiers: Set<String> = []
+        var items = remoteAssets.map { asset -> GalleryMedia in
+            let record = records.first { $0.committedAssetID == asset.id }
+            let localIdentifier = record?.source.localIdentifier
+            let localAsset = localIdentifier.flatMap { localByIdentifier[$0] }
+            if let localIdentifier, localAsset != nil { knownLocalIdentifiers.insert(localIdentifier) }
+            let shared = asset.sharedBy != nil
+                || model.libraries.first(where: { $0.id == asset.libraryId })?.isReadOnly == true
+            return GalleryMedia(
+                id: "asset:\(asset.id)", asset: asset, localAsset: localAsset,
+                localIdentifier: localAsset?.localIdentifier, shared: shared,
+                uploaded: true, date: GalleryDates.parse(asset.createdAt))
+        }
+        for local in localAssets where !knownLocalIdentifiers.contains(local.localIdentifier) {
+            let record = records.first { $0.source.localIdentifier == local.localIdentifier }
+            let uploaded = record?.phase == .ready && record?.remoteRemoved != true
+            items.append(
+                GalleryMedia(
+                    id: "local:\(local.localIdentifier)", asset: nil, localAsset: local,
+                    localIdentifier: local.localIdentifier, shared: false, uploaded: uploaded,
+                    date: local.creationDate))
+        }
+        return items.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+    private var filteredItems: [GalleryMedia] {
+        galleryItems.filter { item in
+            switch filter {
+            case .all: true
+            case .photos: !item.isVideo
+            case .videos: item.isVideo
+            case .shared: item.shared
+            }
+        }
+    }
     private var refreshTrigger: GalleryRefreshTrigger {
         GalleryRefreshTrigger(
             active: scenePhase == .active, connected: NetworkPolicy.shared.isConnected,
@@ -77,6 +119,13 @@ struct GalleryView: View {
     private var progress: BackupProgress {
         BackupProgress(ledger: model.ledger, library: model.ledger.selectedLibraryID)
     }
+    private var selectedItems: [GalleryMedia] { galleryItems.filter { selected.contains($0.id) } }
+    private var selectedRemoteAssets: [UUID] {
+        selectedItems.compactMap { item in
+            guard !item.shared else { return nil }
+            return item.asset?.id
+        }
+    }
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -84,12 +133,7 @@ struct GalleryView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                if let library = model.selectedLibrary {
-                                    Text(library.name).font(.subheadline).foregroundStyle(.secondary)
-                                }
-                                if let count = model.retainedGallery?.snapshot.totalCount {
-                                    Text("\(count) items").font(.caption).foregroundStyle(.secondary)
-                                }
+                                Text("\(filteredItems.count) items").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             NavigationLink {
@@ -119,52 +163,28 @@ struct GalleryView: View {
                         }
                         if model.ledger.selectedLibraryID == nil {
                             LibrarySelector(model: model)
-                        } else if model.gallery.items.filter({ filter.includes($0) }).isEmpty && !model.isLoadingGallery
-                        {
+                        } else if filteredItems.isEmpty && !model.isLoadingGallery {
                             ContentUnavailableView(
-                                "No matching media loaded", systemImage: "photo",
-                                description: Text(
-                                    "New photos appear automatically. Try another filter or load older items."))
+                                "No media", systemImage: "photo",
+                                description: Text("Photos on this iPhone and in Nephos appear together here."))
                         }
-                        ForEach(MediaDay.groups(model.gallery.items, filter: filter)) { day in
+                        ForEach(GalleryMediaDay.groups(filteredItems)) { day in
                             VStack(alignment: .leading, spacing: 9) {
                                 Text(day.date?.formatted(date: .abbreviated, time: .omitted) ?? "Unknown date")
                                     .font(.headline)
                                 LazyVGrid(columns: NephosStyle.columns, spacing: 3) {
-                                    ForEach(day.assets) { asset in
-                                        Group {
-                                            if selecting {
-                                                Button {
-                                                    if selected.contains(asset.id) {
-                                                        selected.remove(asset.id)
-                                                    } else {
-                                                        selected.insert(asset.id)
-                                                    }
-                                                } label: {
-                                                    AssetTile(asset: asset, model: model)
-                                                        .overlay(alignment: .topTrailing) {
-                                                            Image(
-                                                                systemName: selected.contains(asset.id)
-                                                                    ? "checkmark.circle.fill" : "circle"
-                                                            )
-                                                            .foregroundStyle(.white).shadow(radius: 2).padding(5)
-                                                        }
-                                                }.disabled(
-                                                    asset.sharedBy != nil || model.selectedLibrary?.isReadOnly == true)
-                                            } else {
-                                                NavigationLink {
-                                                    OriginalView(asset: asset, model: model)
-                                                } label: {
-                                                    AssetTile(asset: asset, model: model)
-                                                }
-                                            }
-                                        }
-                                        .id(asset.id)
-                                        .background(
-                                            GeometryReader { geometry in
-                                                Color.clear.preference(
-                                                    key: GalleryPositions.self,
-                                                    value: [asset.id: geometry.frame(in: .named("gallery")).minY])
+                                    ForEach(day.items) { item in
+                                        GalleryMediaCell(
+                                            item: item, model: model, selecting: selecting,
+                                            isSelected: selected.contains(item.id),
+                                            onTap: {
+                                                if selecting { toggleSelection(item) }
+                                                else { carousel = GalleryCarousel(items: filteredItems, startID: item.id) }
+                                            },
+                                            onLongPress: {
+                                                guard !item.shared else { return }
+                                                if !selecting { selecting = true }
+                                                toggleSelection(item)
                                             })
                                     }
                                 }
@@ -183,48 +203,76 @@ struct GalleryView: View {
                 }
                 .coordinateSpace(name: "gallery")
                 .onPreferenceChange(GalleryPositions.self) { positions in
-                    let displayed = model.gallery.items.filter { filter.includes($0) }
-                    if let first = displayed.first(where: { positions[$0.id].map { $0 >= -40 } == true }) {
+                    let displayed = model.gallery.items
+                    if let first = displayed.first(where: { positions["asset:\($0.id)"].map { $0 >= -40 } == true }) {
                         model.galleryAtTop = first.id == displayed.first?.id
                         if model.visibleAnchor != first.id { model.rememberAnchor(first.id) }
                     }
                 }
-                .onChange(of: model.gallery.items.map(\.id)) { _, _ in
-                    selected.formIntersection(Set(model.gallery.items.map(\.id)))
+                .onChange(of: model.gallery.items.map(\.id) + sharedAssets.map(\.id)) { _, _ in
+                    selected.formIntersection(Set(galleryItems.map(\.id)))
                     if let id = model.scrollTarget ?? model.visibleAnchor { proxy.scrollTo(id, anchor: .top) }
                 }
-                .refreshable { await model.loadGallery(reset: true) }
-                .navigationTitle("Library")
+                .onChange(of: model.photosGeneration) { _, _ in
+                    localAssets = model.photos.recentAssets()
+                    selected.formIntersection(Set(galleryItems.map(\.id)))
+                }
+                .refreshable {
+                    await model.loadGallery(reset: true)
+                    localAssets = model.photos.recentAssets()
+                    await loadSharedAssets()
+                }
+                .navigationTitle(selecting ? "\(selected.count) selected" : "Library")
                 .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Menu {
-                            Button(selecting ? "Cancel selection" : "Select photos") {
+                    if selecting {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Cancel") {
                                 selected = []
-                                selecting.toggle()
-                            }.disabled(model.selectedLibrary == nil || model.selectedLibrary?.isReadOnly == true)
-                            Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
-                            Button("Jump to date") { datePicker = true }.disabled(model.retainedGallery == nil)
-                            if let error = model.galleryRefreshError {
-                                Button("Update details") { model.message = error }
+                                selecting = false
                             }
-                        } label: {
-                            Label("Library actions", systemImage: "ellipsis.circle")
                         }
-                        NavigationLink {
-                            SettingsView(model: model)
-                        } label: {
-                            Label("Settings", systemImage: "gearshape")
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                deleteConfirmation = true
+                            }.disabled(selected.isEmpty)
+                        }
+                    } else {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            Menu {
+                                Button("Select photos") {
+                                    selected = []
+                                    selecting = true
+                                }
+                                Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
+                                Button("Jump to date") { datePicker = true }.disabled(model.retainedGallery == nil)
+                                if let error = model.galleryRefreshError {
+                                    Button("Update details") { model.message = error }
+                                }
+                            } label: {
+                                Label("Library actions", systemImage: "ellipsis.circle")
+                            }
+                            NavigationLink {
+                                SettingsView(model: model)
+                            } label: {
+                                Label("Settings", systemImage: "gearshape")
+                            }
                         }
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
                     if selecting {
-                        Button("Share \(selected.count) selected") {
+                        HStack {
+                            Button("Share \(selectedRemoteAssets.count)") {
                             if let library = model.selectedLibrary {
-                                shareSelection = ShareSelection(library: library, assets: Array(selected))
+                                    shareSelection = ShareSelection(library: library, assets: selectedRemoteAssets)
+                                }
                             }
+                            .buttonStyle(.bordered).disabled(selectedRemoteAssets.isEmpty)
+                            Spacer()
+                            Button("Delete selected", systemImage: "trash", role: .destructive) {
+                                deleteConfirmation = true
+                            }.buttonStyle(.borderedProminent).disabled(selected.isEmpty)
                         }
-                        .buttonStyle(.borderedProminent).disabled(selected.isEmpty)
                         .padding().frame(maxWidth: .infinity).background(.regularMaterial)
                     }
                 }
@@ -232,13 +280,35 @@ struct GalleryView: View {
                 .sheet(item: $shareSelection) { selection in
                     NavigationStack { ShareComposer(model: model, selection: selection) }
                 }
+                .fullScreenCover(item: $carousel) { selection in
+                    NavigationStack {
+                        GalleryCarouselView(selection: selection, model: model)
+                    }
+                }
+                .confirmationDialog(
+                    "Delete \(selected.count) selected item(s)?", isPresented: $deleteConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete everywhere", role: .destructive) {
+                        deleteEverywhere()
+                    }
+                    if selectedItems.contains(where: { $0.localIdentifier != nil }) {
+                        Button("Delete from Photos", role: .destructive) {
+                            deleteFromPhotos()
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
                 .task {
                     if model.ledger.selectedLibraryID == nil, let library = model.libraries.first {
                         await model.selectLibrary(library.id)
                     } else if !model.gallery.hasLoaded {
                         await model.loadGallery(reset: true)
                     }
+                    localAssets = model.photos.recentAssets()
+                    await loadSharedAssets()
                 }
+                .task(id: model.photosGeneration) { localAssets = model.photos.recentAssets() }
                 .task(id: refreshTrigger) {
                     guard refreshTrigger.enabled else { return }
                     var failures = 0
@@ -253,11 +323,234 @@ struct GalleryView: View {
             }
         }
     }
+    private func toggleSelection(_ item: GalleryMedia) {
+        guard !item.shared else { return }
+        if selected.contains(item.id) { selected.remove(item.id) }
+        else { selected.insert(item.id) }
+    }
+    private func loadSharedAssets() async {
+        guard let api = model.api else { return }
+        let version = model.epoch
+        var loaded: [Asset] = []
+        do {
+            for library in model.libraries where library.isReadOnly && library.id != model.ledger.selectedLibraryID {
+                let snapshot = try await api.snapshot(library: library.id)
+                var cursor: GalleryCursor?
+                repeat {
+                    let page = try await api.assets(library: library.id, snapshot: snapshot.id, cursor: cursor)
+                    guard version == model.epoch, !Task.isCancelled else { return }
+                    loaded.append(contentsOf: page.items)
+                    cursor = page.nextCursor
+                } while cursor != nil && loaded.filter({ $0.libraryId == library.id }).count < GalleryWindow.maximumCount
+            }
+            guard version == model.epoch else { return }
+            sharedAssets = loaded
+        } catch {
+            guard version == model.epoch, !(error is CancellationError) else { return }
+            model.galleryRefreshError = "Shared media could not be refreshed: \(error.localizedDescription)"
+        }
+    }
+    private func deleteFromPhotos() {
+        let identifiers = selectedItems.compactMap(\.localIdentifier)
+        Task {
+            do {
+                try await model.photos.deleteFromPhotos(identifiers)
+                selected.removeAll()
+                selecting = false
+            } catch { model.handle(error) }
+        }
+    }
+    private func deleteEverywhere() {
+        guard selectedItems.allSatisfy({ $0.asset == nil }) else {
+            model.message = "Deleting media from Nephos is not supported by the server yet."
+            return
+        }
+        deleteFromPhotos()
+    }
+}
+
+private struct GalleryMedia: Identifiable {
+    let id: String
+    let asset: Asset?
+    let localAsset: PHAsset?
+    let localIdentifier: String?
+    let shared: Bool
+    let uploaded: Bool
+    let date: Date?
+    var positionID: String { id }
+    var isVideo: Bool { asset?.isVideo ?? (localAsset?.mediaType == .video) }
+}
+
+private struct GalleryMediaDay: Identifiable {
+    let id: String
+    let date: Date?
+    let items: [GalleryMedia]
+    static func groups(_ items: [GalleryMedia]) -> [GalleryMediaDay] {
+        let grouped = Dictionary(grouping: items) { item in
+            item.date.map { Calendar.current.startOfDay(for: $0).timeIntervalSince1970.description } ?? "unknown"
+        }
+        return grouped.map { key, values in
+            GalleryMediaDay(id: key, date: values.first?.date, items: values)
+        }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+}
+
+private struct GalleryCarousel: Identifiable {
+    let id = UUID()
+    let items: [GalleryMedia]
+    let startID: String
+}
+
+private struct GalleryCarouselView: View {
+    let selection: GalleryCarousel
+    let model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentID: String?
+    var body: some View {
+        TabView(selection: $currentID) {
+            ForEach(selection.items) { item in
+                Group {
+                    if let asset = item.asset {
+                        OriginalView(asset: asset, model: model)
+                    } else if let localAsset = item.localAsset {
+                        LocalOriginalView(asset: localAsset, model: model)
+                    }
+                }
+                .tag(Optional(item.id))
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .onAppear { currentID = selection.startID }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Close") { dismiss() }
+            }
+        }
+    }
+}
+
+private struct LocalOriginalView: View {
+    let asset: PHAsset
+    let model: AppModel
+    @State private var image: UIImage?
+    @State private var player: AVPlayer?
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+            } else if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .navigationTitle(asset.creationDate?.formatted(date: .abbreviated, time: .omitted) ?? "Photo")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .task(id: asset.localIdentifier) {
+            if asset.mediaType == .video {
+                if let item = try? await model.photos.videoPlayerItem(asset.localIdentifier) {
+                    player = AVPlayer(playerItem: item)
+                    player?.play()
+                }
+            } else {
+                image = try? await model.photos.thumbnail(
+                    asset.localIdentifier, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit)
+            }
+        }
+        .onDisappear { player?.pause() }
+    }
+}
+
+private struct GalleryMediaTile: View {
+    let item: GalleryMedia
+    let model: AppModel
+    @State private var image: UIImage?
+    var body: some View {
+        Color.clear.aspectRatio(1, contentMode: .fit)
+            .overlay {
+                ZStack {
+                    Rectangle().fill(.quaternary)
+                    if let image {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Image(systemName: item.isVideo ? "video" : "photo")
+                            .font(.title).foregroundStyle(.secondary)
+                    }
+
+                    if item.isVideo {
+                        Image(systemName: "play.circle.fill").font(.title).foregroundStyle(.white).shadow(radius: 3)
+                    }
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 3) {
+                    if item.localIdentifier != nil {
+                        Image(systemName: "iphone").accessibilityLabel("On this iPhone")
+                    }
+                    if item.uploaded {
+                        Image(systemName: "icloud.and.arrow.up").accessibilityLabel("Uploaded")
+                    }
+                    if item.shared {
+                        Image(systemName: "person.2.fill").accessibilityLabel("Shared")
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold)).padding(4)
+                .foregroundStyle(.white).background(.black.opacity(0.55), in: Capsule()).padding(4)
+            }
+            .clipped().clipShape(RoundedRectangle(cornerRadius: 3))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(item.isVideo ? "Video" : "Photo")\(item.localIdentifier == nil ? "" : ", on this iPhone")"
+                    + "\(item.uploaded ? ", uploaded" : "")\(item.shared ? ", shared with you" : "")"
+            )
+            .task(id: "\(model.photosGeneration)/\(item.id)") {
+                image = nil
+                if let identifier = item.localIdentifier {
+                    image = try? await model.photos.thumbnail(identifier)
+                }
+                if image == nil, let asset = item.asset, let api = model.api, let account = model.account {
+                    image = try? await MediaCache.shared.preview(asset, api: api, account: account)
+                }
+            }
+    }
+}
+
+private struct GalleryMediaCell: View {
+    let item: GalleryMedia
+    let model: AppModel
+    let selecting: Bool
+    let isSelected: Bool
+    let onTap: () -> Void
+    let onLongPress: () -> Void
+    var body: some View {
+        GalleryMediaTile(item: item, model: model)
+            .overlay(alignment: .topTrailing) {
+                if selecting {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(.white).shadow(radius: 2).padding(5)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+            .onLongPressGesture(minimumDuration: 0.45, perform: onLongPress)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, onTap)
+            .id(item.id)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: GalleryPositions.self,
+                        value: [item.positionID: geometry.frame(in: .named("gallery")).minY])
+                }
+            }
+    }
 }
 
 struct GalleryPositions: PreferenceKey {
-    static var defaultValue: [UUID: CGFloat] { [:] }
-    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) {
+    static var defaultValue: [String: CGFloat] { [:] }
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }

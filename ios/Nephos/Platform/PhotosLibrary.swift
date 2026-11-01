@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Photos
 import UIKit
 import UniformTypeIdentifiers
@@ -67,7 +68,10 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         var qualificationThumbnail: UIImage?
     #endif
 
-    func thumbnail(_ identifier: String) async throws -> UIImage {
+    func thumbnail(
+        _ identifier: String, targetSize: CGSize = CGSize(width: 360, height: 360),
+        contentMode: PHImageContentMode = .aspectFill
+    ) async throws -> UIImage {
         #if UI_QUALIFICATION
             if let qualificationThumbnail { return qualificationThumbnail }
         #endif
@@ -77,7 +81,32 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         guard let asset = asset(identifier) else {
             throw ClientError.invalid("This original is no longer available on the iPhone.")
         }
-        return try await PhotosThumbnailRequest(manager: imageManager).image(for: asset)
+        return try await PhotosThumbnailRequest(manager: imageManager).image(
+            for: asset, targetSize: targetSize, contentMode: contentMode)
+    }
+    func videoPlayerItem(_ identifier: String) async throws -> AVPlayerItem {
+        guard authorization == .authorized || authorization == .limited else {
+            throw ClientError.invalid("Allow Photos access to play this video.")
+        }
+        guard let asset = asset(identifier), asset.mediaType == .video else {
+            throw ClientError.invalid("This video is no longer available on the iPhone.")
+        }
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        return try await withCheckedThrowingContinuation { continuation in
+            imageManager.requestPlayerItem(forVideo: asset, options: options) { item, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                } else if info?[PHImageCancelledKey] as? Bool == true {
+                    continuation.resume(throwing: CancellationError())
+                } else if let item {
+                    continuation.resume(returning: item)
+                } else {
+                    continuation.resume(
+                        throwing: ClientError.invalid("The video is not available in Photos."))
+                }
+            }
+        }
     }
     override init() {
         super.init()
@@ -93,7 +122,7 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
 
         init(manager: PHImageManager) { self.manager = manager }
 
-        func image(for asset: PHAsset) async throws -> UIImage {
+        func image(for asset: PHAsset, targetSize: CGSize, contentMode: PHImageContentMode) async throws -> UIImage {
             try Task.checkCancellation()
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
@@ -103,7 +132,7 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
                     options.deliveryMode = .highQualityFormat
                     options.resizeMode = .fast
                     requestID = manager.requestImage(
-                        for: asset, targetSize: CGSize(width: 360, height: 360), contentMode: .aspectFill,
+                        for: asset, targetSize: targetSize, contentMode: contentMode,
                         options: options
                     ) { image, info in
                         let error = info?[PHImageErrorKey] as? Error
@@ -164,6 +193,30 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
     }
     func asset(_ identifier: String) -> PHAsset? {
         PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject
+    }
+    func recentAssets(limit: Int = 300) -> [PHAsset] {
+        guard authorization == .authorized || authorization == .limited else { return [] }
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        options.fetchLimit = limit
+        options.predicate = NSPredicate(
+            format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue,
+            PHAssetMediaType.video.rawValue)
+        let result = PHAsset.fetchAssets(with: options)
+        return (0..<result.count).map { result.object(at: $0) }
+    }
+    func deleteFromPhotos(_ identifiers: [String]) async throws {
+        guard authorization == .authorized || authorization == .limited else {
+            throw ClientError.invalid("Allow Photos access to remove selected items.")
+        }
+        guard !identifiers.isEmpty else { return }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        guard result.count == Set(identifiers).count else {
+            throw ClientError.invalid("One or more selected items are no longer available in Photos.")
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets(result)
+        }
     }
     func revision(_ asset: PHAsset) -> SourceRevision {
         let resources = PHAssetResource.assetResources(for: asset)

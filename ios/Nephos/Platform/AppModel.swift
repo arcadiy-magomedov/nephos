@@ -25,6 +25,7 @@ final class AppModel {
     var timelineMonth: Int?
     var timelineError: String?
     var mediaGeneration = UUID()
+    var photosGeneration = UUID()
     var message: String?
     var activity = ""
     var backupNotice: String?
@@ -149,6 +150,7 @@ final class AppModel {
         }
         photos.onChange = { [weak self] in
             guard let self else { return }
+            self.photosGeneration = UUID()
             self.updatePhotosStatus()
             self.scheduleAutomaticRun()
         }
