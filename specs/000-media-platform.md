@@ -620,8 +620,24 @@ and stale holds. Deleting one asset or revoking one share must not remove bytes
 required by another asset.
 
 R33 cleanup moves assets to recoverable trash before final deletion. Trashed
-assets retain references through the advertised recovery deadline; expiry and
-restore must be fenced against each other before reference release and GC.
+assets retain references for 30 days from the first successful logical deletion.
+Repeated delete requests must not restart this deadline. Logical deletion hides
+assets immediately but never releases storage references or deletes original
+bytes.
+
+A separate cleanup service runs on a schedule and claims only assets whose
+30-day deadline has elapsed. Compose/Swarm deploy it independently with a daily
+scheduled run; Kubernetes deploys it as a daily CronJob. Durable, idempotent
+cleanup state, leases, and retries make missed runs and overlapping executions
+safe. Expiry and restore must be fenced against each other before reference
+release and GC. Preserve synchronization tombstones after physical cleanup so
+late events and stale clients cannot resurrect deleted assets.
+
+The cleanup service coordinates through service contracts and repository
+interfaces, not direct cross-service database writes. Storage reclaims originals
+and derivatives only after all durable references and active upload, processing,
+and retention holds are gone. Therefore 30 days is the earliest eligible purge
+time, not a guarantee that shared bytes are reclaimed exactly at that time.
 
 ### 3.17 R17 - Whole-library and selected-media sharing
 
@@ -1700,8 +1716,8 @@ insufficient. Return explicit per-item outcomes and conflicts. A shared viewer
 cannot delete the owner's asset by accepting a suggestion.
 
 Trash removes media from ordinary gallery/search/shared views with normal R29
-removals, but retains bytes and metadata for a deployment-configured recovery
-period whose deadline is returned before confirmation. Authorized restore
+removals, but retains bytes and metadata for a 30-day recovery period measured
+from the first successful logical deletion. Authorized restore
 within that period preserves the asset identity and user decisions; it does not
 reactivate subsequently revoked grants. Final deletion follows R16 reference
 and retention rules, never a direct classifier call to storage.

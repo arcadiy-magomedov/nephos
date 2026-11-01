@@ -370,9 +370,15 @@ Never silently empty an OS recovery bin to inflate reported savings.
 | Evict app cache | Remove regenerable application previews/downloads; do not alter either media library |
 | Export/restore to device | Explicitly create an OS-library copy; do not mark it as a new unbacked original merely by filename |
 
-Local deletion, whether initiated by this app or elsewhere, does not delete the
-backup. Server deletion does not instruct the app to erase an independently held
-device original. A "delete from both" operation is not established scope.
+Separate local deletion does not delete the server copy. Separate server deletion
+does not instruct the app to erase an independently held device original. The
+explicit delete-everywhere action performs both in order but is not atomic:
+surface partial completion if server removal succeeds and Photos deletion fails.
+Server deletion is a durable logical tombstone. Server originals remain for at
+least 30 days from the first successful deletion; repeat requests do not extend
+the deadline. A separate scheduled cleanup service performs physical purge
+after expiry, subject to other references and retention holds. This server grace
+period does not delay an explicitly requested Photos-library deletion.
 
 Persist source-to-backup mappings and removal/import history independently of
 the evictable cache. Reconcile server trash/deletion with still-present device
