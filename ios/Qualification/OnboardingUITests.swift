@@ -141,6 +141,30 @@ final class BackupUITests: XCTestCase {
         app.buttons["Back up now"].tap()
     }
 
+    func testAutomaticGalleryRefreshDoesNotSnapVisibleCellToTop() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-gallery", "NEPHOS_UI_SCROLL_REGRESSION": "1"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 20), app.debugDescription)
+        app.swipeUp()
+        let cells = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "gallery.item."))
+        let cell = try XCTUnwrap(
+            cells.allElementsBoundByIndex.first {
+                $0.isHittable && $0.frame.minY > 220 && $0.frame.maxY < app.frame.height - 180
+            })
+        let identifier = cell.identifier
+        let before = cell.frame.minY
+        let newItem = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "new-photo.jpg")
+        ).firstMatch
+        XCTAssertTrue(newItem.waitForExistence(timeout: 25), app.debugDescription)
+        let retained = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+        XCTAssertTrue(retained.exists, app.debugDescription)
+        XCTAssertEqual(retained.frame.minY, before, accuracy: 4, app.debugDescription)
+    }
+
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
         for _ in 0..<6 {
             if element.exists, element.isHittable, element.frame.minY > 140,

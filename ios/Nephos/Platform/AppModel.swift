@@ -877,7 +877,9 @@ final class AppModel {
             guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library else { return }
             galleryIsStale = false
             galleryRefreshError = nil
-            scrollTarget = reset ? retainedGallery?.anchor?.id ?? gallery.items.first?.id : visibleAnchor
+            if !automatic || galleryAtTop {
+                scrollTarget = reset ? retainedGallery?.anchor?.id ?? gallery.items.first?.id : visibleAnchor
+            }
         } catch ClientError.http(410, _) where allowRebase {
             guard version == epoch, mutationVersion == mediaMutationGeneration,
                 ledger.selectedLibraryID == library

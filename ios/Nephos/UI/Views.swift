@@ -183,10 +183,13 @@ struct GalleryView: View {
                 }
                 .coordinateSpace(name: "gallery")
                 .onPreferenceChange(GalleryPositions.self) { positions in
-                    let displayed = model.gallery.items
-                    if let first = displayed.first(where: { positions["asset:\($0.id)"].map { $0 >= -40 } == true }) {
-                        model.galleryAtTop = first.id == displayed.first?.id
-                        if model.visibleAnchor != first.id { model.rememberAnchor(first.id) }
+                    if let first = filteredItems.first, let position = positions[first.id] {
+                        model.galleryAtTop = position >= -40
+                    }
+                    if let first = filteredItems.first(where: { positions[$0.id].map { $0 >= -40 } == true }),
+                        let id = first.asset?.id, model.visibleAnchor != id
+                    {
+                        model.rememberAnchor(id)
                     }
                 }
                 .onChange(of: snapshotInput, initial: true) { _, input in
@@ -194,12 +197,18 @@ struct GalleryView: View {
                 }
                 .onChange(of: snapshot.filtered.map(\.id)) { _, _ in
                     selected.formIntersection(Set(galleryItems.map(\.id)))
-                    if let id = model.scrollTarget ?? model.visibleAnchor {
+                    if let id = model.scrollTarget,
+                        filteredItems.contains(where: { $0.id == GalleryMedia.remoteID(id) })
+                    {
                         proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top)
+                        model.scrollTarget = nil
                     }
                 }
                 .onChange(of: model.scrollTarget) { _, id in
-                    if let id { proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top) }
+                    if let id, filteredItems.contains(where: { $0.id == GalleryMedia.remoteID(id) }) {
+                        proxy.scrollTo(GalleryMedia.remoteID(id), anchor: .top)
+                        model.scrollTarget = nil
+                    }
                 }
                 .onChange(of: model.epoch) { _, _ in
                     snapshotTask?.cancel()
@@ -985,6 +994,7 @@ private struct GalleryMediaCell: View {
             .accessibilityValue(selecting ? (isSelected ? "Selected" : "Not selected") : "")
             .accessibilityAction(.default, onTap)
             .id(item.id)
+            .accessibilityIdentifier("gallery.item." + item.id)
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(

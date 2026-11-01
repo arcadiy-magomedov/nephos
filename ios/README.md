@@ -141,7 +141,11 @@ The visible, active gallery checks for changes on opening, foreground return and
 reconnection, then every 15 seconds. This is independent of automatic backup,
 pause and read-only sharing. Unchanged revisions avoid refetching asset pages.
 New photos appear at the newest view; older browsing retains its anchor and
-loaded window, bounded to 300 items. Historical/date windows remain historical.
+loaded window, bounded to 300 items. Automatic refresh does not issue a command
+to align the visible photo to the viewport top.
+Explicit navigation/restoration scroll requests are consumed once, not replayed
+whenever upload-state changes rebuild the unified gallery.
+Historical/date windows remain historical.
 Failures keep cached metadata and use inline recovery with polling backoff up to
 five minutes, not repeated alerts. Media still requires current authorization.
 

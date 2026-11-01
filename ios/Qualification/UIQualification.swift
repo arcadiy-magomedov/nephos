@@ -118,7 +118,7 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         window.rootViewController = UIHostingController(
                             rootView: QualificationGalleryHost(model: model))
                         Task {
-                            try await Task.sleep(for: .seconds(3))
+                            try await Task.sleep(for: .seconds(env["NEPHOS_UI_SCROLL_REGRESSION"] == "1" ? 12 : 3))
                             BackupQualificationProtocol.setRevision(2)
                         }
                         try report(["ready": true, "screen": "backup-gallery", "realAPI": false])
@@ -237,18 +237,20 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         try require(model.gallery.items.count == 200, "Initial four-page window was not loaded.")
         let anchor = model.gallery.items[150].id
         model.rememberAnchor(anchor)
+        model.scrollTarget = nil
         await model.flushPersistence()
         model.galleryAtTop = false
         BackupQualificationProtocol.setRevision(2)
         await model.loadGallery(reset: true, automatic: true)
         try require(
-            model.gallery.items.count == 200 && model.scrollTarget == anchor,
-            "Automatic refresh lost the loaded window or anchor.")
+            model.gallery.items.count == 200 && model.visibleAnchor == anchor && model.scrollTarget == nil,
+            "Automatic refresh lost the loaded window or issued an unsolicited scroll.")
         let requests = BackupQualificationProtocol.assetPageCount
         await model.loadGallery(reset: true, automatic: true)
         try require(
-            BackupQualificationProtocol.assetPageCount == requests && model.scrollTarget == anchor,
-            "Unchanged snapshot refetched pages or changed the anchor.")
+            BackupQualificationProtocol.assetPageCount == requests && model.visibleAnchor == anchor
+                && model.scrollTarget == nil,
+            "Unchanged snapshot refetched pages or issued an unsolicited scroll.")
         model.galleryAtTop = true
         BackupQualificationProtocol.setRevision(3)
         await model.loadGallery(reset: true, automatic: true)
