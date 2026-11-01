@@ -1,0 +1,25 @@
+{
+  "cvlface_repository_revision": "308142aa50adf2e187711354f7524635d3414f1e",
+  "adaface_huggingface_revision": "54f602a0737bd1ee4a4e7e9fd089a485f397fefd",
+  "arcface_sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
+  "resources": [
+    {
+      "file": "buffalo_l.zip",
+      "url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
+      "sha256": "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f",
+      "license": "InsightFace pretrained models: non-commercial research only; code MIT is not the weight license"
+    },
+    {
+      "file": "adaface/model.safetensors",
+      "url": "https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m/resolve/54f602a0737bd1ee4a4e7e9fd089a485f397fefd/model.safetensors",
+      "sha256": "2ea535a43877bd3de8091903935c783ce335be66a9f8917fae9a7a18ae4bbf56",
+      "license": "Card requires following training dataset license; WebFace12M terms need separate review; not cleared for deployment"
+    },
+    {
+      "file": "adaface/model.py",
+      "url": "https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m/raw/54f602a0737bd1ee4a4e7e9fd089a485f397fefd/models/iresnet/model.py",
+      "sha256": "e31be55c60b538c15151887e911b7535e2f0e1114a13427ba06483e1cd2a63f9",
+      "license": "CVLFace code MIT; fetched code is checksum-verified before import"
+    }
+  ]
+}

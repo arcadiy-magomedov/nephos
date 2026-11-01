@@ -1,0 +1,1934 @@
+{
+  "schema": 1,
+  "model": "sface",
+  "checkpoint": {
+    "bytes": 38696353,
+    "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+  },
+  "runtime": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python": "3.10.12",
+    "threads": 1,
+    "provider": "CPU only; no MPS/CoreML/CUDA",
+    "versions": {
+      "numpy": "2.2.6",
+      "opencv-python-headless": "4.12.0.88",
+      "Pillow": "12.2.0",
+      "pillow-heif": "1.8.1",
+      "torch": "2.6.0",
+      "onnxruntime": "1.23.2"
+    }
+  },
+  "alignment": {
+    "contract": "production decode/YuNet max1280 score0.9; SFace alignCrop ArcFace-template BGR112x112",
+    "crop_sha256": {
+      "obama-2009": "cdfad3e7a92989128c7f307a92c9067e2c35ba5e9a789e33c8ccdc150bb6d80e",
+      "obama-2012": "51318951ae527da95f17dd880fba4f9468fa0e83cfdb4abaddb2df1f35636d29",
+      "biden-2013": "59f3decfbf79f4bded220ce477e2d92936b4084c255446366c379254ac18dad9",
+      "biden-2021": "4e83f50c7e8da1b8908cf97d88f3a482a56140b575b6ad2a401a919b7e2ff09a",
+      "trump-2017": "71627084feaebdfa1c1a3c8fb20e9447460627eff1e29b5a74174298148bfe20",
+      "trump-2025": "1d14076ec312eba225c074aae5f5615701df59628c09ef79ba710b2b48e9dd72",
+      "bush-2003": "986f5c0b5c736a280873e9b104387c6d33f70e3d791c3dd1152877dee693e710",
+      "bush-2001": "dbe001f05fe8df64c8eeb9749700bbd8f5c2bf92574c84493c720dec39abb1b3",
+      "clinton-1992": "ad5f55729f1a3dda94721253f23efac9d8dbf05798f8594e0035c0de8d878b77",
+      "carter-1977": "46c43c2d3f6361ba86c281380918a13a603d90715e6688a4f77b8a5e1999bc83"
+    },
+    "decoder_sha256": "a1639b76a5bb05f6b54a1336af4ad5685266293cd5de562af6b0f7c3edb3435a",
+    "yunet_sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    "heic_provenance_sha256": "db8966da23a8382ab3fb34e4e6c8763f564da72b3eff44878a7f84e17de43c1f"
+  },
+  "latency": {
+    "load_ms": 70.74899994768202,
+    "feature_warmed_ms": {
+      "count": 200,
+      "min": 16.59095799550414,
+      "p50": 17.34858355484903,
+      "p95": 19.272320927120745,
+      "max": 20.416917046532035
+    },
+    "feature_warmup_passes": 3,
+    "decode_detect_align_warmed_ms": {
+      "count": 18,
+      "min": 31.339250039309263,
+      "p50": 172.75968752801418,
+      "p95": 210.59191093081608,
+      "max": 217.37983403727412
+    },
+    "pipeline_note": "6 original JPEGs, 3 passes after initial fixture loading; excludes model load/hash/feature",
+    "memory_peak_process_bytes": 1519894528,
+    "memory_peak_before_candidate_load_bytes": 1173372928,
+    "memory_note": "Isolated-process high-water RSS, including imports, detector/SFace aligner, decode and crops"
+  },
+  "base_six": {
+    "images": 6,
+    "identities": 3,
+    "ids": [
+      "obama-2009",
+      "obama-2012",
+      "biden-2013",
+      "biden-2021",
+      "trump-2017",
+      "trump-2025"
+    ],
+    "pairs": [
+      {
+        "left": "obama-2009",
+        "right": "obama-2012",
+        "same_identity": true,
+        "cosine": 0.7847391366958618
+      },
+      {
+        "left": "obama-2009",
+        "right": "biden-2013",
+        "same_identity": false,
+        "cosine": 0.23031124472618103
+      },
+      {
+        "left": "obama-2009",
+        "right": "biden-2021",
+        "same_identity": false,
+        "cosine": 0.26884615421295166
+      },
+      {
+        "left": "obama-2009",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": -0.004548691678792238
+      },
+      {
+        "left": "obama-2009",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.09234406054019928
+      },
+      {
+        "left": "obama-2012",
+        "right": "biden-2013",
+        "same_identity": false,
+        "cosine": 0.12951625883579254
+      },
+      {
+        "left": "obama-2012",
+        "right": "biden-2021",
+        "same_identity": false,
+        "cosine": 0.14113016426563263
+      },
+      {
+        "left": "obama-2012",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.018278956413269043
+      },
+      {
+        "left": "obama-2012",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": -0.006276838947087526
+      },
+      {
+        "left": "biden-2013",
+        "right": "biden-2021",
+        "same_identity": true,
+        "cosine": 0.6646946668624878
+      },
+      {
+        "left": "biden-2013",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.22354651987552643
+      },
+      {
+        "left": "biden-2013",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.10825921595096588
+      },
+      {
+        "left": "biden-2021",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.22672098875045776
+      },
+      {
+        "left": "biden-2021",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.1460828185081482
+      },
+      {
+        "left": "trump-2017",
+        "right": "trump-2025",
+        "same_identity": true,
+        "cosine": 0.5249389410018921
+      }
+    ],
+    "same_identity_cosine": {
+      "count": 3,
+      "min": 0.5249389410018921,
+      "p50": 0.6646946668624878,
+      "p95": 0.7727346897125245,
+      "max": 0.7847391366958618
+    },
+    "different_identity_cosine": {
+      "count": 12,
+      "min": -0.006276838947087526,
+      "p50": 0.13532321155071259,
+      "p95": 0.2476519539952278,
+      "max": 0.26884615421295166
+    },
+    "sweep": [
+      {
+        "threshold": 0.15,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 4,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 4.0,
+            "p95": 12.0,
+            "max": 12
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.2,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 4,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 4.0,
+            "p95": 12.0,
+            "max": 12
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.25,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 1,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 4.0,
+            "max": 4
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.3,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.35,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.4,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.45,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.5,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 3,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.55,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "max": 1
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1,
+          "clusters": 4,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.6,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "max": 1
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1,
+          "clusters": 4,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.65,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "max": 1
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 1,
+          "clusters": 4,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.7,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 2
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 2,
+            "p50": 2.0,
+            "p95": 2.0,
+            "max": 2
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 2,
+          "clusters": 5,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.75,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 2
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 2,
+            "p50": 2.0,
+            "p95": 2.0,
+            "max": 2
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 2,
+          "clusters": 5,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.8,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 3
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 3,
+            "p50": 3.0,
+            "p95": 3.0,
+            "max": 3
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 3,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.85,
+        "pair_classification": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 3
+        },
+        "greedy": {
+          "orders": 720,
+          "false_merges": {
+            "count": 720,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 720,
+            "min": 3,
+            "p50": 3.0,
+            "p95": 3.0,
+            "max": 3
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 3,
+          "different_pairs": 12,
+          "false_merges": 0,
+          "false_splits": 3,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      }
+    ]
+  },
+  "expanded": {
+    "images": 10,
+    "identities": 6,
+    "ids": [
+      "obama-2009",
+      "obama-2012",
+      "biden-2013",
+      "biden-2021",
+      "trump-2017",
+      "trump-2025",
+      "bush-2003",
+      "bush-2001",
+      "clinton-1992",
+      "carter-1977"
+    ],
+    "pairs": [
+      {
+        "left": "obama-2009",
+        "right": "obama-2012",
+        "same_identity": true,
+        "cosine": 0.7847393751144409
+      },
+      {
+        "left": "obama-2009",
+        "right": "biden-2013",
+        "same_identity": false,
+        "cosine": 0.23031122982501984
+      },
+      {
+        "left": "obama-2009",
+        "right": "biden-2021",
+        "same_identity": false,
+        "cosine": 0.2688460350036621
+      },
+      {
+        "left": "obama-2009",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": -0.004548691213130951
+      },
+      {
+        "left": "obama-2009",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.09234406054019928
+      },
+      {
+        "left": "obama-2009",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": 0.1446964293718338
+      },
+      {
+        "left": "obama-2009",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": 0.0985184907913208
+      },
+      {
+        "left": "obama-2009",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.12057653069496155
+      },
+      {
+        "left": "obama-2009",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.07461416721343994
+      },
+      {
+        "left": "obama-2012",
+        "right": "biden-2013",
+        "same_identity": false,
+        "cosine": 0.12951622903347015
+      },
+      {
+        "left": "obama-2012",
+        "right": "biden-2021",
+        "same_identity": false,
+        "cosine": 0.14113017916679382
+      },
+      {
+        "left": "obama-2012",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.01827896386384964
+      },
+      {
+        "left": "obama-2012",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": -0.006276855710893869
+      },
+      {
+        "left": "obama-2012",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": 0.07133476436138153
+      },
+      {
+        "left": "obama-2012",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": 0.06614119559526443
+      },
+      {
+        "left": "obama-2012",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.11296866089105606
+      },
+      {
+        "left": "obama-2012",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.06231435015797615
+      },
+      {
+        "left": "biden-2013",
+        "right": "biden-2021",
+        "same_identity": true,
+        "cosine": 0.6646945476531982
+      },
+      {
+        "left": "biden-2013",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.22354653477668762
+      },
+      {
+        "left": "biden-2013",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.1082591861486435
+      },
+      {
+        "left": "biden-2013",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": 0.27378296852111816
+      },
+      {
+        "left": "biden-2013",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": 0.17432594299316406
+      },
+      {
+        "left": "biden-2013",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.028556397184729576
+      },
+      {
+        "left": "biden-2013",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.12528258562088013
+      },
+      {
+        "left": "biden-2021",
+        "right": "trump-2017",
+        "same_identity": false,
+        "cosine": 0.22672100365161896
+      },
+      {
+        "left": "biden-2021",
+        "right": "trump-2025",
+        "same_identity": false,
+        "cosine": 0.1460828185081482
+      },
+      {
+        "left": "biden-2021",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": 0.39645278453826904
+      },
+      {
+        "left": "biden-2021",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": 0.28284314274787903
+      },
+      {
+        "left": "biden-2021",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.08115684241056442
+      },
+      {
+        "left": "biden-2021",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.14997604489326477
+      },
+      {
+        "left": "trump-2017",
+        "right": "trump-2025",
+        "same_identity": true,
+        "cosine": 0.5249389410018921
+      },
+      {
+        "left": "trump-2017",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": -0.039082109928131104
+      },
+      {
+        "left": "trump-2017",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": 0.019478801637887955
+      },
+      {
+        "left": "trump-2017",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.06331546604633331
+      },
+      {
+        "left": "trump-2017",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.09323806315660477
+      },
+      {
+        "left": "trump-2025",
+        "right": "bush-2003",
+        "same_identity": false,
+        "cosine": -0.08056312054395676
+      },
+      {
+        "left": "trump-2025",
+        "right": "bush-2001",
+        "same_identity": false,
+        "cosine": -0.04816901683807373
+      },
+      {
+        "left": "trump-2025",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.1830856204032898
+      },
+      {
+        "left": "trump-2025",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.1500592976808548
+      },
+      {
+        "left": "bush-2003",
+        "right": "bush-2001",
+        "same_identity": true,
+        "cosine": 0.6287451982498169
+      },
+      {
+        "left": "bush-2003",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.07501164078712463
+      },
+      {
+        "left": "bush-2003",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.08260614424943924
+      },
+      {
+        "left": "bush-2001",
+        "right": "clinton-1992",
+        "same_identity": false,
+        "cosine": 0.10710395127534866
+      },
+      {
+        "left": "bush-2001",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.18088339269161224
+      },
+      {
+        "left": "clinton-1992",
+        "right": "carter-1977",
+        "same_identity": false,
+        "cosine": 0.19448204338550568
+      }
+    ],
+    "same_identity_cosine": {
+      "count": 4,
+      "min": 0.5249389410018921,
+      "p50": 0.6467198729515076,
+      "p95": 0.7667326509952544,
+      "max": 0.7847393751144409
+    },
+    "different_identity_cosine": {
+      "count": 41,
+      "min": -0.08056312054395676,
+      "p50": 0.1082591861486435,
+      "p95": 0.27378296852111816,
+      "max": 0.39645278453826904
+    },
+    "sweep": [
+      {
+        "threshold": 0.15,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 12,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 12.0,
+            "p95": 41.0,
+            "max": 41
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 5,
+          "false_splits": 0,
+          "clusters": 4,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.2,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 7,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 4.0,
+            "p95": 24.0,
+            "max": 24
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.25,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 4,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 4.0,
+            "p95": 12.0,
+            "max": 12
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.3,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 1,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 4.0,
+            "max": 4
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.35,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 1,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 4.0,
+            "max": 4
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.4,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.45,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.5,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 0,
+          "clusters": 6,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.55,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 1
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "max": 1
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 1,
+          "clusters": 7,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.6,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 1
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "max": 1
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 1,
+          "clusters": 7,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.65,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 2
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 2,
+            "p50": 2.0,
+            "p95": 2.0,
+            "max": 2
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 2,
+          "clusters": 8,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.7,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 3
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 3,
+            "p50": 3.0,
+            "p95": 3.0,
+            "max": 3
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 3,
+          "clusters": 9,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.75,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 3
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 3,
+            "p50": 3.0,
+            "p95": 3.0,
+            "max": 3
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 3,
+          "clusters": 9,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.8,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 4
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 4,
+            "p50": 4.0,
+            "p95": 4.0,
+            "max": 4
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 4,
+          "clusters": 10,
+          "cannot_links": 0
+        }
+      },
+      {
+        "threshold": 0.85,
+        "pair_classification": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 4
+        },
+        "greedy": {
+          "orders": 100,
+          "false_merges": {
+            "count": 100,
+            "min": 0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "max": 0
+          },
+          "false_splits": {
+            "count": 100,
+            "min": 4,
+            "p50": 4.0,
+            "p95": 4.0,
+            "max": 4
+          }
+        },
+        "complete_link_constrained_graph": {
+          "same_pairs": 4,
+          "different_pairs": 41,
+          "false_merges": 0,
+          "false_splits": 4,
+          "clusters": 10,
+          "cannot_links": 0
+        }
+      }
+    ]
+  },
+  "rejected_originals": [
+    {
+      "id": "clinton-1993",
+      "reason": "Expected exactly one publisher-labelled subject: clinton-1993.jpg"
+    },
+    {
+      "id": "carter-1971",
+      "reason": "payload_limit"
+    },
+    {
+      "id": "obama-2010-speech",
+      "reason": "Face too small: obama-2010-speech.jpg"
+    },
+    {
+      "id": "biden-2023-speech",
+      "reason": "Expected exactly one publisher-labelled subject: biden-2023-speech.jpg"
+    }
+  ],
+  "codec_variants": [
+    {
+      "file": "obama-2009.heic",
+      "source": "obama-2009",
+      "cosine": 0.9841269254684448,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-48mp.heic",
+      "source": "obama-2009",
+      "cosine": 0.9620893597602844,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-1.heic",
+      "source": "obama-2009",
+      "cosine": 0.9637422561645508,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-2.heic",
+      "source": "obama-2009",
+      "cosine": 0.9633639454841614,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-3.heic",
+      "source": "obama-2009",
+      "cosine": 0.9621655941009521,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-4.heic",
+      "source": "obama-2009",
+      "cosine": 0.9644355773925781,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-5.heic",
+      "source": "obama-2009",
+      "cosine": 0.9633268117904663,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-6.heic",
+      "source": "obama-2009",
+      "cosine": 0.9660304188728333,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-7.heic",
+      "source": "obama-2009",
+      "cosine": 0.9640403389930725,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-orientation-8.heic",
+      "source": "obama-2009",
+      "cosine": 0.9635618925094604,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-grid.heic",
+      "source": "obama-2009",
+      "cosine": 0.9637768864631653,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-10bit.heic",
+      "source": "obama-2009",
+      "cosine": 0.9628613591194153,
+      "status": "ok"
+    },
+    {
+      "file": "obama-2009-multiple.heic",
+      "status": "rejected",
+      "reason": "animated_image"
+    },
+    {
+      "file": "obama-2012.heic",
+      "source": "obama-2012",
+      "cosine": 0.9993746280670166,
+      "status": "ok"
+    },
+    {
+      "file": "biden-2013.heic",
+      "source": "biden-2013",
+      "cosine": 0.9882236123085022,
+      "status": "ok"
+    },
+    {
+      "file": "biden-2021.heic",
+      "source": "biden-2021",
+      "cosine": 0.9937121272087097,
+      "status": "ok"
+    },
+    {
+      "file": "trump-2017.heic",
+      "source": "trump-2017",
+      "cosine": 0.9634500741958618,
+      "status": "ok"
+    },
+    {
+      "file": "trump-2025.heic",
+      "source": "trump-2025",
+      "cosine": 0.9946662783622742,
+      "status": "ok"
+    }
+  ],
+  "same_crop_transformations": [
+    {
+      "source": "obama-2009",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9220514297485352
+    },
+    {
+      "source": "obama-2009",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9549160003662109
+    },
+    {
+      "source": "obama-2009",
+      "transformation": "downsample56",
+      "cosine": 0.964594841003418
+    },
+    {
+      "source": "obama-2009",
+      "transformation": "brightness_half",
+      "cosine": 0.984221875667572
+    },
+    {
+      "source": "obama-2009",
+      "transformation": "bottom30_black",
+      "cosine": 0.9309611320495605
+    },
+    {
+      "source": "obama-2012",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9155534505844116
+    },
+    {
+      "source": "obama-2012",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.945240318775177
+    },
+    {
+      "source": "obama-2012",
+      "transformation": "downsample56",
+      "cosine": 0.9585188627243042
+    },
+    {
+      "source": "obama-2012",
+      "transformation": "brightness_half",
+      "cosine": 0.9721394181251526
+    },
+    {
+      "source": "obama-2012",
+      "transformation": "bottom30_black",
+      "cosine": 0.9588569402694702
+    },
+    {
+      "source": "biden-2013",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9287018775939941
+    },
+    {
+      "source": "biden-2013",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.942811131477356
+    },
+    {
+      "source": "biden-2013",
+      "transformation": "downsample56",
+      "cosine": 0.9508724808692932
+    },
+    {
+      "source": "biden-2013",
+      "transformation": "brightness_half",
+      "cosine": 0.9813896417617798
+    },
+    {
+      "source": "biden-2013",
+      "transformation": "bottom30_black",
+      "cosine": 0.932654082775116
+    },
+    {
+      "source": "biden-2021",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.8831729888916016
+    },
+    {
+      "source": "biden-2021",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9520052671432495
+    },
+    {
+      "source": "biden-2021",
+      "transformation": "downsample56",
+      "cosine": 0.9665687680244446
+    },
+    {
+      "source": "biden-2021",
+      "transformation": "brightness_half",
+      "cosine": 0.963860273361206
+    },
+    {
+      "source": "biden-2021",
+      "transformation": "bottom30_black",
+      "cosine": 0.8856253623962402
+    },
+    {
+      "source": "trump-2017",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.8901880979537964
+    },
+    {
+      "source": "trump-2017",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.93421471118927
+    },
+    {
+      "source": "trump-2017",
+      "transformation": "downsample56",
+      "cosine": 0.9437824487686157
+    },
+    {
+      "source": "trump-2017",
+      "transformation": "brightness_half",
+      "cosine": 0.97767573595047
+    },
+    {
+      "source": "trump-2017",
+      "transformation": "bottom30_black",
+      "cosine": 0.9404837489128113
+    },
+    {
+      "source": "trump-2025",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.929377555847168
+    },
+    {
+      "source": "trump-2025",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9063535928726196
+    },
+    {
+      "source": "trump-2025",
+      "transformation": "downsample56",
+      "cosine": 0.9388207197189331
+    },
+    {
+      "source": "trump-2025",
+      "transformation": "brightness_half",
+      "cosine": 0.9700744152069092
+    },
+    {
+      "source": "trump-2025",
+      "transformation": "bottom30_black",
+      "cosine": 0.9516428709030151
+    },
+    {
+      "source": "bush-2003",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9237374067306519
+    },
+    {
+      "source": "bush-2003",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9547359943389893
+    },
+    {
+      "source": "bush-2003",
+      "transformation": "downsample56",
+      "cosine": 0.9578226208686829
+    },
+    {
+      "source": "bush-2003",
+      "transformation": "brightness_half",
+      "cosine": 0.9864739179611206
+    },
+    {
+      "source": "bush-2003",
+      "transformation": "bottom30_black",
+      "cosine": 0.920988142490387
+    },
+    {
+      "source": "bush-2001",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9298528432846069
+    },
+    {
+      "source": "bush-2001",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9568034410476685
+    },
+    {
+      "source": "bush-2001",
+      "transformation": "downsample56",
+      "cosine": 0.9655460715293884
+    },
+    {
+      "source": "bush-2001",
+      "transformation": "brightness_half",
+      "cosine": 0.9808955192565918
+    },
+    {
+      "source": "bush-2001",
+      "transformation": "bottom30_black",
+      "cosine": 0.9443742036819458
+    },
+    {
+      "source": "clinton-1992",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9139645099639893
+    },
+    {
+      "source": "clinton-1992",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9582948684692383
+    },
+    {
+      "source": "clinton-1992",
+      "transformation": "downsample56",
+      "cosine": 0.9701110124588013
+    },
+    {
+      "source": "clinton-1992",
+      "transformation": "brightness_half",
+      "cosine": 0.9872457385063171
+    },
+    {
+      "source": "clinton-1992",
+      "transformation": "bottom30_black",
+      "cosine": 0.9338890314102173
+    },
+    {
+      "source": "carter-1977",
+      "transformation": "jpeg_quality30",
+      "cosine": 0.9474555253982544
+    },
+    {
+      "source": "carter-1977",
+      "transformation": "blur_sigma1.2",
+      "cosine": 0.9554797410964966
+    },
+    {
+      "source": "carter-1977",
+      "transformation": "downsample56",
+      "cosine": 0.9533465504646301
+    },
+    {
+      "source": "carter-1977",
+      "transformation": "brightness_half",
+      "cosine": 0.9792724251747131
+    },
+    {
+      "source": "carter-1977",
+      "transformation": "bottom30_black",
+      "cosine": 0.9347715377807617
+    }
+  ],
+  "transformation_cosine": {
+    "blur_sigma1.2": {
+      "count": 10,
+      "min": 0.9063535928726196,
+      "p50": 0.9533706307411194,
+      "p95": 0.9576237261295318,
+      "max": 0.9582948684692383
+    },
+    "bottom30_black": {
+      "count": 10,
+      "min": 0.8856253623962402,
+      "p50": 0.9343302845954895,
+      "p95": 0.9556106090545654,
+      "max": 0.9588569402694702
+    },
+    "brightness_half": {
+      "count": 10,
+      "min": 0.963860273361206,
+      "p50": 0.9800839722156525,
+      "p95": 0.9868984192609787,
+      "max": 0.9872457385063171
+    },
+    "downsample56": {
+      "count": 10,
+      "min": 0.9388207197189331,
+      "p50": 0.9581707417964935,
+      "p95": 0.9685170024633407,
+      "max": 0.9701110124588013
+    },
+    "jpeg_quality30": {
+      "count": 10,
+      "min": 0.8831729888916016,
+      "p50": 0.9228944182395935,
+      "p95": 0.939534318447113,
+      "max": 0.9474555253982544
+    }
+  },
+  "limitations": [
+    "Only public publisher-labelled adult male US politicians; not population, child or family evidence.",
+    "Three original genuine pairs; expanded pairs and thresholds are exploratory, not a held-out calibration.",
+    "Codec/crop transformations are correlated with their source and never added to independent pair counts.",
+    "Constrained graph uses complete-link gating; no real co-occurrence/manual cannot-links in these portraits.",
+    "Greedy models root-max and 0.05 ambiguity, not SQL representative caps or manual merge/exclusion state.",
+    "No private media, database, live clustering, training or production inference change.",
+    "CPU timings are on this shared Mac, not the deployment home-server or a universal backbone comparison.",
+    "ViT KP-RPE not run: bounded three-embedding-model experiment selects requested IR101 candidate."
+  ]
+}
