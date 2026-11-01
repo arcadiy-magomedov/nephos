@@ -696,7 +696,7 @@ def main():
 
                 admin_access(owner_id, False)
                 disabled = True
-                request(API + "/v1/analysis/access", token=owner, expected=403)
+                request(API + "/v1/analysis/access", token=owner, expected=401)
                 for path in (
                     "/people",
                     "/jobs",
@@ -706,20 +706,32 @@ def main():
                     f"/people/{primary}/assets",
                     "/jobs/" + jobs[0]["id"],
                 ):
-                    request(API + "/v1/faces" + path, token=owner, expected=403)
-                request(API + "/v1/faces/jobs/" + assets[0]["id"], token=owner, method="POST", expected=403)
+                    request(API + "/v1/faces" + path, token=owner, expected=401)
+                request(API + "/v1/faces/jobs/" + assets[0]["id"], token=owner, method="POST", expected=401)
                 request(
                     API + f"/v1/faces/people/{primary}/name",
                     token=owner,
                     method="PUT",
                     data={"name": "Forbidden after disablement", "aliases": []},
-                    expected=403,
+                    expected=401,
                 )
                 request(API + "/v1/assets/" + assets[0]["id"] + "/original", token=reader, expected=404)
                 assert face_for(reader, independent["id"])["personId"] == private_person
                 report["disabledExistingJwtDenied"] = True
                 admin_access(owner_id, True)
                 disabled = False
+                admin_url = smoke.IDENTITY + "/admin/realms/nephos"
+                fixture_user = request(admin_url + "/users/" + owner_id, token=smoke.admin_token())
+                client_id = fixture_user["username"].removeprefix("service-account-")
+                fixture_client = request(
+                    admin_url + "/clients?clientId=" + urllib.parse.quote(client_id), token=smoke.admin_token()
+                )[0]["id"]
+                secret = request(admin_url + f"/clients/{fixture_client}/client-secret", token=smoke.admin_token())[
+                    "value"
+                ]
+                owner = smoke.token_for(
+                    "nephos", {"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}
+                )
                 assert media["raw"]("/v1/assets/" + assets[0]["id"] + "/original", owner)[0] == originals[0]
                 report["originalUnmodifiedAfterAnalysisAndCorrections"] = True
                 report["status"] = "passed"

@@ -45,12 +45,22 @@ def main():
     def submit(values):
         return admin.submit(values)
 
+    def invite(*, complete_profile=False):
+        # Passkey enrollment is an isolated Keycloak fixture, not the PIN-only admin UI.
+        smoke.request(
+            admin_url + f"/users/{subject}/execute-actions-email",
+            method="PUT",
+            token=smoke.admin_token(),
+            data=["webauthn-register-passwordless"] + (["UPDATE_PROFILE"] if complete_profile else []),
+            expected=204,
+        )
+
     try:
         submit({"action": "create", "username": username, "email": username + "@example.test"})
         subject = smoke.request(admin_url + "/users?exact=true&username=" + username, token=smoke.admin_token())[0][
             "id"
         ]
-        submit({"action": "invite", "subject": subject})
+        invite(complete_profile=True)
 
         def delivered():
             return next(
@@ -77,6 +87,7 @@ def main():
                 "enabled": True,
                 "standardFlowEnabled": True,
                 "directAccessGrantsEnabled": False,
+                "defaultClientScopes": ["basic"],
                 "redirectUris": [callback],
                 "attributes": {"pkce.code.challenge.method": "S256"},
                 "protocolMappers": [
@@ -85,7 +96,16 @@ def main():
                         "protocol": "openid-connect",
                         "protocolMapper": "oidc-audience-mapper",
                         "config": {"included.custom.audience": "nephos-api", "access.token.claim": "true"},
-                    }
+                    },
+                    {
+                        "name": "introspection",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": "nephos-api-introspection",
+                            "access.token.claim": "true",
+                        },
+                    },
                 ],
             },
         )
@@ -119,10 +139,10 @@ def main():
             proceed = page.get_by_role("link", name=re.compile("proceed", re.I))
             if proceed.count():
                 proceed.click()
-            page.get_by_role("button", name=re.compile("^Register", re.I)).click()
             page.locator("#firstName").fill("Acceptance")
             page.locator("#lastName").fill("Fixture")
             page.get_by_role("button", name="Submit", exact=True).click()
+            page.get_by_role("button", name=re.compile("^Register", re.I)).click()
             page.get_by_text("Your account has been updated.").wait_for()
             credentials = session.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})["credentials"]
             assert len(credentials) == 1
@@ -165,7 +185,8 @@ def main():
                 },
             )
             assert len(smoke.request(smoke.API + "/v1/libraries", token=token)["items"]) == 1
-            submit({"action": "access", "subject": subject})
+            # Exercise membership denial independently of full identity/session revocation.
+            smoke.sql("UPDATE principals SET enabled=false WHERE subject=:'subject';", subject=subject)
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
             provider_credentials = smoke.request(
                 admin_url + "/users/" + subject + "/credentials", token=smoke.admin_token()
@@ -183,7 +204,7 @@ def main():
                 {"authenticatorId": authenticator, "credentialId": credentials[0]["credentialId"]},
             )
             context.clear_cookies()
-            submit({"action": "invite", "subject": subject})
+            invite()
 
             def replacement_delivered():
                 candidate = delivered()
@@ -204,9 +225,11 @@ def main():
             page.get_by_text("Your account has been updated.").wait_for()
             assert len(session.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})["credentials"]) == 1
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
+            submit({"action": "access", "subject": subject})
+            smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
             browser.close()
             print(
-                "PASS: fresh passkey login, Code+PKCE, API authorization, disablement and operator recovery without enabling platform access"
+                "PASS: fresh passkey login, Code+PKCE, membership denial, recovery without platform access and full account revocation"
             )
     finally:
         server.shutdown()

@@ -290,8 +290,10 @@ validate real JWT/JWKS and immediate Keycloak session revocation, PostgreSQL, im
 verification failure, deduplication, authorization, original/ranged bytes,
 previews, retention, paging, first-login PIN issue/one-use exchange and stored correlated telemetry.
 The browser suite uses Keycloak's virtual authenticator to exercise the existing
-passkey flow, signs in with Code+PKCE, verifies API access/disablement, and
-exercises operator recovery. This is not a physical iOS passkey or real Photos
+passkey flow through disposable Keycloak enrollment emails (not the PIN-only admin
+console), signs in with Code+PKCE, verifies membership denial (403) and full account
+revocation (401), and exercises credential recovery without restoring platform
+membership. This is not a physical iOS passkey or real Photos
 removal test. The edge suite exercises the actual Caddy route configuration
 on a temporary loopback HTTP listener; it does not certify DNS or certificates.
 The restore exercise pauses writers, restores isolated PostgreSQL/RabbitMQ/media
