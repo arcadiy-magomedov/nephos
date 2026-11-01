@@ -13,6 +13,7 @@ public static class Pipeline
 
 public sealed record AnalysisSource(Guid Id, Guid LibraryId, string Subject, string MediaType, long Size, string Sha256);
 public sealed record EnqueueRequest(Guid AssetId, string Subject);
+public sealed record DeleteAssetRequest(string Subject);
 public sealed record NameRequest(string? Name, string[]? Aliases);
 public sealed record MergeRequest(Guid TargetId);
 public sealed record AssignmentRequest(Guid? PersonId, bool NewPerson = false);
@@ -27,9 +28,11 @@ public sealed record InferenceResult(string ModelVersion, string PreprocessVersi
     int Width, int Height, string CoordinateSpace, Detection[] Faces);
 public sealed record Page<T>(IReadOnlyList<T> Items, Guid? Next);
 public sealed record Correction(Guid Id, string Kind, Guid SubjectId, Guid? TargetId, DateTimeOffset CreatedAt);
+public sealed class FaceAssetDeletedException() : Exception("Face analysis has been removed for this media.");
 
 public interface IFaceRepository
 {
+    Task DeleteAssetAsync(string owner, Guid assetId, CancellationToken ct);
     Task<FaceJob> EnqueueAsync(string owner, AnalysisSource source, CancellationToken ct);
     Task<FaceJob?> ClaimAsync(CancellationToken ct);
     Task CompleteAsync(FaceJob job, InferenceResult result, CancellationToken ct);

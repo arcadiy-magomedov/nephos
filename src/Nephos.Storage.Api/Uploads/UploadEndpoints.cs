@@ -98,7 +98,8 @@ public static class UploadEndpoints
             });
         });
         app.MapInternalV1("/assets/{id:guid}/{kind}", ["GET", "HEAD"], async (Guid id, string kind, int? size,
-            HttpContext context, IConfiguration config, IUploadRepository repository, IVolumeStore volume, CancellationToken token) =>
+            HttpContext context, IConfiguration config, IUploadRepository repository, IVolumeStore volume,
+            BlobCleanupRepository cleanup, CancellationToken token) =>
         {
             if (!MediaProtocol.IsInternal(context, config)) return Results.Unauthorized();
             if (kind is not ("original" or "preview")) return Results.NotFound();
@@ -110,7 +111,7 @@ public static class UploadEndpoints
                 return Results.NotFound();
             var path = kind == "preview" ? volume.PreviewPath(upload.Sha256, side) : volume.OriginalPath(upload.Sha256);
             if (kind == "preview" && !File.Exists(path) &&
-                !await volume.CreatePreviewAsync(upload.Sha256, upload.MediaType, token, side))
+                !await cleanup.EnsurePreviewAsync(id, side, token))
                 return Results.Problem(statusCode: 503, title: "Preview is unavailable. The original has not been modified.");
             if (!File.Exists(path)) return Results.Problem(statusCode: 503, title: "Original storage is unavailable.");
             context.Response.Headers.CacheControl = "private, no-store";

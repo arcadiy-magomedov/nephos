@@ -8,6 +8,62 @@ struct AccountLedger: Codable, Sendable {
     var scanAfter: String?
     var resourceSets: [ResourceSetRecord]?
     var onboarding: OnboardingDraft?
+    var suppressedSources: [SuppressedBackupSource]?
+
+    func suppresses(_ identifier: String, library: UUID) -> Bool {
+        suppressedSources?.contains { $0.localIdentifier == identifier && $0.libraryId == library } == true
+            || records.contains {
+                $0.libraryId == library && $0.source.localIdentifier == identifier && $0.remoteRemoved == true
+            }
+    }
+
+    func deletionAssets(assetIDs: Set<UUID>, localIdentifiers: Set<String>) -> Set<UUID> {
+        assetIDs.union(records.filter {
+            localIdentifiers.contains($0.source.localIdentifier) && ($0.phase == .ready || $0.assetId != nil)
+        }.map(\.committedAssetID))
+    }
+
+    func trackedRecords(for assetID: UUID) -> Set<UUID> {
+        var result: Set<UUID> = []
+        for record in records where record.committedAssetID == assetID {
+            if let group = resourceSets?.first(where: { $0.id == record.resourceSetId }) {
+                if group.manifest?.primaryAssetId == assetID {
+                    result.formUnion(records.filter { $0.resourceSetId == group.id }.map(\.id))
+                }
+            } else {
+                result.insert(record.id)
+            }
+        }
+        return result
+    }
+
+    mutating func suppressDeletion(assetIDs: Set<UUID>, localIdentifiers: Set<String>) {
+        let identifiers = localIdentifiers.union(records.filter {
+            assetIDs.contains($0.committedAssetID)
+        }.map { $0.source.localIdentifier })
+        var sources = Set(suppressedSources ?? [])
+        for index in records.indices {
+            let record = records[index]
+            if identifiers.contains(record.source.localIdentifier) || assetIDs.contains(record.committedAssetID) {
+                sources.insert(SuppressedBackupSource(
+                    libraryId: record.libraryId, localIdentifier: record.source.localIdentifier))
+                records[index].remoteRemoved = true
+            }
+        }
+        if let library = selectedLibraryID {
+            sources.formUnion(localIdentifiers.map {
+                SuppressedBackupSource(libraryId: library, localIdentifier: $0)
+            })
+        }
+        suppressedSources = sources.sorted {
+            ($0.libraryId.uuidString, $0.localIdentifier) < ($1.libraryId.uuidString, $1.localIdentifier)
+        }
+    }
+}
+
+struct SuppressedBackupSource: Codable, Hashable, Sendable {
+    let libraryId: UUID
+    let localIdentifier: String
 }
 
 struct LedgerStore: Sendable {

@@ -632,7 +632,7 @@ passkey/background/deletion gate is marked passed.
 | More ML/video | Video face recognition, automatically suggested duplicate-person review, representative large-library accuracy/scaling, optimized video transcodes and adaptive streaming. Original-range playback already works. |
 | Background updates | APNs device registration, durable push delivery and remote update hints. Existing background URLSession/BGProcessing backup is OS-scheduled, not guaranteed overnight execution. |
 | Offline/mobile completeness | Pinned offline originals, Bonjour discovery, million-item local indexing, complete localization, and broad Dynamic Type/VoiceOver/device qualification. |
-| Media lifecycle | Server trash/delete/restore, user metadata/date editing and collaborative editing. Current shared grants are read-only. |
+| Media lifecycle | User metadata/date editing and collaborative editing. Server trash and marker-only restore are available from the gallery menu; deleted originals are eligible for scheduled purge after 30 days. Current shared grants are read-only. |
 | Release acceptance | Physical-iPhone passkey enrollment/login, signing/production HTTPS, interruptions/force-quits, actual overnight backup and safe Photos/iCloud removal. RAW pairs need representative device qualification. |
 | Platform roadmap | Android, Helm/Swarm deployment, alternate storage/database adapters, HA, independent full recovery including the optional Faces database, and future books/Jellyfin-style applications. |
 

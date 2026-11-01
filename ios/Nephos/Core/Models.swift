@@ -117,6 +117,7 @@ struct GalleryWindow: Codable, Sendable {
     static let maximumCount = 300
 
     mutating func reset() { self = GalleryWindow() }
+    mutating func remove(_ ids: Set<UUID>) { items.removeAll { ids.contains($0.id) } }
     mutating func append(_ page: AssetPage, libraryID: UUID) throws {
         guard page.items.allSatisfy({ $0.libraryId == libraryID }) else {
             throw ClientError.invalid("Gallery response crossed the selected library boundary.")

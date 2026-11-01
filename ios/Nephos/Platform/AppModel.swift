@@ -33,6 +33,18 @@ final class AppModel {
     var isRunning = false
     var isSigningIn = false
     var isLoadingGallery = false
+    var isDeletingMedia = false
+    var trashItems: [TrashItem] = []
+    var trashCursor: TrashCursor?
+    var trashLoaded = false
+    var isLoadingTrash = false
+    var trashLoadError: String?
+    var isRestoringTrash = false
+    var trashRestoreCompleted = 0
+    var trashRestoreTotal = 0
+    var trashRestoreFailures: [UUID: String] = [:]
+    var trashRestoreNotice: String?
+    private var trashEpoch: UUID?
     var showCleanupConfirmation = false
     var photosStatus = "Photos access has not been requested."
     var cleanupReport = ""
@@ -51,6 +63,204 @@ final class AppModel {
     private let preparation = BackupPreparation()
     private var backupAccessBlocked = false
     private var galleryLoadID = UUID()
+    private var mediaMutationGeneration = UUID()
+
+    private func beginMediaMutation() {
+        mediaMutationGeneration = UUID()
+        galleryLoadID = UUID()
+        isLoadingGallery = false
+    }
+
+    private func resetTrash() {
+        trashItems = []
+        trashCursor = nil
+        trashLoaded = false
+        isLoadingTrash = false
+        trashLoadError = nil
+        isRestoringTrash = false
+        trashRestoreFailures = [:]
+        trashRestoreNotice = nil
+        trashEpoch = nil
+        isDeletingMedia = false
+    }
+
+    func loadTrash(reset: Bool = false) async {
+        if trashEpoch != epoch {
+            resetTrash()
+            trashEpoch = epoch
+        }
+        guard !isLoadingTrash, !isRestoringTrash, let api else { return }
+        let version = epoch
+        let boundary = account
+        isLoadingTrash = true
+        trashLoadError = nil
+        defer { if version == epoch { isLoadingTrash = false } }
+        do {
+            let page = try await api.trash(before: reset ? nil : trashCursor)
+            try check(version)
+            guard boundary == account else { throw CancellationError() }
+            let previous = reset ? [] : trashItems
+            let known = Set(previous.map(\.id))
+            trashItems = previous + page.items.filter { !known.contains($0.id) }
+            trashCursor = page.nextCursor
+            trashLoaded = true
+        } catch is CancellationError {
+        } catch {
+            guard version == epoch, boundary == account else { return }
+            trashLoadError = "Trash could not be loaded. \(error.localizedDescription)"
+            handle(error, notify: false)
+        }
+    }
+
+    func restoreTrash(_ ids: Set<UUID>) async {
+        guard !isRestoringTrash, !isLoadingTrash, !isDeletingMedia, let api,
+            trashEpoch == epoch, !ids.isEmpty
+        else { return }
+        let version = epoch
+        let boundary = account
+        let items = trashItems.filter { ids.contains($0.id) }
+        guard !items.isEmpty else { return }
+        isRestoringTrash = true
+        beginMediaMutation()
+        trashRestoreCompleted = 0
+        trashRestoreTotal = items.count
+        trashRestoreFailures = [:]
+        trashRestoreNotice = nil
+        var operationFinished = false
+        defer { if !operationFinished && version == epoch { isRestoringTrash = false } }
+        for item in items {
+            do {
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                try await api.restoreAsset(item.id)
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                trashItems.removeAll {
+                    $0.id == item.id || (item.asset.resourceSetId != nil && $0.asset.resourceSetId == item.asset.resourceSetId)
+                }
+                for index in ledger.records.indices where ledger.records[index].committedAssetID == item.id
+                    || (item.asset.resourceSetId != nil && ledger.records[index].resourceSetId == item.asset.resourceSetId)
+                {
+                    ledger.records[index].remoteRemoved = nil
+                }
+                trashRestoreCompleted += 1
+            } catch is CancellationError {
+                return
+            } catch {
+                guard version == epoch, boundary == account else { return }
+                if case ClientError.http(409, _) = error {
+                    trashRestoreFailures[item.id] = "The retention deadline passed or permanent deletion has started."
+                } else {
+                    trashRestoreFailures[item.id] = error.localizedDescription
+                }
+                if case ClientError.signedOut = error { handle(error, notify: false) }
+                guard version == epoch else { return }
+            }
+        }
+        do {
+            try persist()
+        } catch {
+            trashRestoreNotice = "Restored \(trashRestoreCompleted) of \(trashRestoreTotal) on the server; "
+                + "\(trashRestoreFailures.count) failed. Local backup status could not be saved: \(error.localizedDescription)"
+        }
+        if trashRestoreNotice == nil {
+            trashRestoreNotice = trashRestoreFailures.isEmpty
+                ? "\(trashRestoreCompleted) item(s) restored."
+                : "Restored \(trashRestoreCompleted) of \(trashRestoreTotal). \(trashRestoreFailures.count) failed."
+        }
+        operationFinished = true
+        isRestoringTrash = false
+        if trashItems.isEmpty && trashCursor != nil { await loadTrash() }
+        guard version == epoch, boundary == account else { return }
+        await loadGallery(reset: true, notifyErrors: false)
+    }
+
+    func deleteMediaEverywhere(assetIDs: Set<UUID>, localIdentifiers: Set<String>) async throws
+        -> MediaDeletionResult
+    {
+        guard !isRunning, activeBackupItems.isEmpty, !isDeletingMedia, !isRestoringTrash, let api else {
+            throw ClientError.invalid("Wait for backup or restoration to finish before deleting. Nothing was deleted.")
+        }
+        let version = epoch
+        let boundary = account
+        isDeletingMedia = true
+        beginMediaMutation()
+        var operationFinished = false
+        defer { if !operationFinished && version == epoch { isDeletingMedia = false } }
+        let transfers = await BackgroundTransfers.shared.activeTasks()
+        try check(version)
+        guard boundary == account else { throw CancellationError() }
+        guard !transfers.contains(where: { $0.taskDescription?.hasPrefix((boundary ?? "") + "/") == true }) else {
+            throw ClientError.invalid("A system upload is still finishing. Retry deletion after backup finishes.")
+        }
+        let remoteIDs = ledger.deletionAssets(assetIDs: assetIDs, localIdentifiers: localIdentifiers)
+        let records = ledger.records
+        let previous = ledger
+        ledger.suppressDeletion(assetIDs: remoteIDs, localIdentifiers: localIdentifiers)
+        do {
+            try persist()
+        } catch {
+            ledger = previous
+            throw ClientError.invalid("Could not save backup suppression. Nothing was deleted. \(error.localizedDescription)")
+        }
+        var result = MediaDeletionResult()
+        for id in remoteIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            try check(version)
+            guard boundary == account else { throw CancellationError() }
+            do {
+                try await api.deleteAsset(id)
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                result.deleted.insert(id)
+                gallery.remove([id])
+                retainedGallery?.window.remove([id])
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                if case ClientError.signedOut = error {
+                    handle(error, notify: false)
+                    throw CancellationError()
+                }
+                result.failed[id] = error.localizedDescription
+            }
+        }
+        let safeLocal = localIdentifiers.filter { identifier in
+            !records.contains {
+                $0.source.localIdentifier == identifier && result.failed[$0.committedAssetID] != nil
+            }
+        }
+        try check(version)
+        guard boundary == account else { throw CancellationError() }
+        if !safeLocal.isEmpty {
+            do {
+                try await photos.deleteFromPhotos(Array(safeLocal))
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                result.removedLocal = safeLocal
+                photosGeneration = UUID()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try check(version)
+                guard boundary == account else { throw CancellationError() }
+                result.photosError = error.localizedDescription
+            }
+        }
+        if let retainedGallery, let store, let boundary {
+            do {
+                try store.saveGallery(retainedGallery, account: boundary)
+            } catch {
+                result.localStatusError = error.localizedDescription
+            }
+        }
+        operationFinished = true
+        isDeletingMedia = false
+        await loadGallery(reset: true, notifyErrors: false)
+        try check(version)
+        return result
+    }
 
     var selectedLibrary: Library? { libraries.first { $0.id == ledger.selectedLibraryID } }
     var needsOnboarding: Bool { signedIn && ledger.settings.onboardingCompleted == false }
@@ -203,6 +413,7 @@ final class AppModel {
             try store.save(loaded, account: key)
         }
         epoch = UUID()
+        resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
         galleryRefreshError = nil
@@ -324,6 +535,7 @@ final class AppModel {
         backupDiagnostic = nil
         backupAccessBlocked = false
         epoch = UUID()
+        resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
         galleryRefreshError = nil
@@ -374,7 +586,9 @@ final class AppModel {
     }
     @discardableResult
     func selectLibrary(_ id: UUID) async -> Bool {
-        guard libraries.contains(where: { $0.id == id }), !isRunning else { return false }
+        guard libraries.contains(where: { $0.id == id }), !isRunning, !isDeletingMedia, !isRestoringTrash else {
+            return false
+        }
         automaticTask?.cancel()
         automaticTask = nil
         retryWakeup.cancel()
@@ -383,6 +597,7 @@ final class AppModel {
         backupAccessBlocked = false
         let previous = ledger
         epoch = UUID()
+        resetTrash()
         activeBackupItems.removeAll()
         galleryAtTop = true
         galleryRefreshError = nil
@@ -422,16 +637,18 @@ final class AppModel {
     )
         async
     {
-        guard !isLoadingGallery, let api, let library = ledger.selectedLibraryID else { return }
+        guard !isLoadingGallery, !isDeletingMedia, !isRestoringTrash, let api,
+            let library = ledger.selectedLibraryID else { return }
         if !reset && gallery.hasLoaded && gallery.nextCursor == nil { return }
         isLoadingGallery = true
         let loadID = UUID()
         galleryLoadID = loadID
         let version = epoch
+        let mutationVersion = mediaMutationGeneration
         defer { if galleryLoadID == loadID { isLoadingGallery = false } }
         do {
             var candidate = retainedGallery
-            var removedRecordIDs: Set<UUID> = []
+            var recordRemovals: [UUID: Bool] = [:]
             if reset || candidate == nil {
                 let target: GallerySnapshot
                 if before != nil, let retainedGallery {
@@ -440,6 +657,7 @@ final class AppModel {
                     target = try await api.snapshot(library: library)
                 }
                 try check(version)
+                guard mutationVersion == mediaMutationGeneration else { return }
                 let old = retainedGallery
                 if automatic, let old, !galleryIsStale,
                     GalleryRefreshPolicy.unchanged(old.snapshot, target)
@@ -469,20 +687,11 @@ final class AppModel {
                                 library: library, after: revision, through: target.revision)
                             try check(version)
                             for change in page.changes.flatMap(\.items) {
+                                for id in ledger.trackedRecords(for: change.assetId) {
+                                    recordRemovals[id] = change.operation == "remove"
+                                }
                                 // Keep correctness tombstones for tracked local originals even outside the gallery window.
                                 if change.operation == "remove" {
-                                    for record in ledger.records where record.committedAssetID == change.assetId {
-                                        // Resource-set publication hides secondary parts, not retained originals.
-                                        if let set = ledger.resourceSets?.first(where: { $0.id == record.resourceSetId }
-                                        ) {
-                                            if set.manifest?.primaryAssetId == change.assetId {
-                                                removedRecordIDs.formUnion(
-                                                    ledger.records.filter { $0.resourceSetId == set.id }.map(\.id))
-                                            }
-                                        } else {
-                                            removedRecordIDs.insert(record.id)
-                                        }
-                                    }
                                     if anchor?.id == change.assetId {
                                         anchor = old.window.items.first(where: { $0.id != change.assetId }).map {
                                             GalleryCursor(createdAt: $0.createdAt, id: $0.id)
@@ -557,7 +766,8 @@ final class AppModel {
                 candidate = current
             }
             try check(version)
-            guard ledger.selectedLibraryID == library, var candidate, let store, let account else { return }
+            guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library,
+                var candidate, let store, let account else { return }
             if !reset, let visibleAnchor, let item = candidate.window.items.first(where: { $0.id == visibleAnchor }) {
                 candidate.anchor = GalleryCursor(createdAt: item.createdAt, id: item.id)
             }
@@ -569,8 +779,10 @@ final class AppModel {
             // Write tombstones first: a failed cache write may replay deltas but never loses suppression.
             // Transfers can advance while gallery requests await the network. Merge only the
             // tombstones; never replace the live upload ledger with a stale pre-request copy.
-            for index in ledger.records.indices where removedRecordIDs.contains(ledger.records[index].id) {
-                ledger.records[index].remoteRemoved = true
+            for index in ledger.records.indices {
+                if let removed = recordRemovals[ledger.records[index].id] {
+                    ledger.records[index].remoteRemoved = removed ? true : nil
+                }
             }
             try persist()
             try store.saveGallery(candidate, account: account)
@@ -580,7 +792,8 @@ final class AppModel {
             galleryRefreshError = nil
             scrollTarget = reset ? candidate.anchor?.id ?? candidate.window.items.first?.id : visibleAnchor
         } catch ClientError.http(410, _) where allowRebase {
-            guard version == epoch, ledger.selectedLibraryID == library else { return }
+            guard version == epoch, mutationVersion == mediaMutationGeneration,
+                ledger.selectedLibraryID == library else { return }
             retainedGallery = nil
             gallery.reset()
             isLoadingGallery = false
@@ -588,7 +801,8 @@ final class AppModel {
                 reset: true, newest: newest, before: before, allowRebase: false, notifyErrors: notifyErrors,
                 automatic: automatic)
         } catch {
-            guard version == epoch, ledger.selectedLibraryID == library, !Task.isCancelled,
+            guard version == epoch, mutationVersion == mediaMutationGeneration,
+                ledger.selectedLibraryID == library, !Task.isCancelled,
                 !(error is CancellationError)
             else { return }
             if Self.accessDenied(error) { clearGalleryAccess() } else { galleryIsStale = true }
@@ -734,7 +948,7 @@ final class AppModel {
     private func checkBackup(_ version: UUID) throws {
         try check(version)
         guard ledger.settings.backupPaused != true, selectedLibrary?.isReadOnly != true,
-            !needsReauthentication, !backupAccessBlocked
+            !needsReauthentication, !backupAccessBlocked, !isDeletingMedia
         else {
             throw CancellationError()
         }
@@ -782,6 +996,7 @@ final class AppModel {
         if case ClientError.signedOut = error {
             retryWakeup.cancel()
             epoch = UUID()
+            resetTrash()
             activeBackupItems.removeAll()
             api?.invalidate()
             automaticTask?.cancel()
@@ -891,6 +1106,7 @@ final class AppModel {
             let complete = Array(
                 (ledger.resourceSets ?? []).lazy.filter { group in
                     group.libraryId == self.ledger.selectedLibraryID && group.manifest == nil
+                        && !self.ledger.suppresses(group.source.localIdentifier, library: group.libraryId)
                         && (retryItem == nil || group.id == retryItem || group.id == requestedGroup)
                         && (ignoreBackoff || group.requiresUserAction != true)
                         && (ignoreBackoff || (group.nextRetryAt ?? .distantPast) <= Date())
@@ -930,6 +1146,7 @@ final class AppModel {
                 (ledger.resourceSets ?? []).filter { $0.manifest == nil }.map(\.id))
             let pending = ledger.records.filter { record in
                 record.libraryId == ledger.selectedLibraryID && record.needsTransfer
+                    && !ledger.suppresses(record.source.localIdentifier, library: record.libraryId)
                     && (retryItem == nil || record.id == retryItem || record.resourceSetId == retryItem)
                     && (record.resourceSetId.map { !unpublishedGroupIDs.contains($0) } ?? true)
                     && (ignoreBackoff || record.requiresUserAction != true)
@@ -949,6 +1166,7 @@ final class AppModel {
             }
             let groups = (ledger.resourceSets ?? []).filter({ group in
                 group.libraryId == ledger.selectedLibraryID && group.manifest == nil
+                    && !ledger.suppresses(group.source.localIdentifier, library: group.libraryId)
                     && !attemptedPublications.contains(group.id)
                     && (retryItem == nil || group.id == retryItem || group.id == retryGroupID)
                     && (ignoreBackoff || group.requiresUserAction != true)
@@ -1013,6 +1231,7 @@ final class AppModel {
         guard let store, let account, let library = ledger.selectedLibraryID, let connection else {
             throw ClientError.signedOut
         }
+        guard !ledger.suppresses(asset.localIdentifier, library: library) else { return }
         let revision = photos.revision(asset)
         let resources = photos.resources(asset)
         guard (1...16).contains(resources.count) else {
@@ -1153,9 +1372,11 @@ final class AppModel {
         try persist()
     }
     private func publishGroup(_ id: UUID, version: UUID) async throws {
+        try checkBackup(version)
         guard let api, let index = ledger.resourceSets?.firstIndex(where: { $0.id == id }),
             let group = ledger.resourceSets?[index], group.manifest == nil
         else { return }
+        guard !ledger.suppresses(group.source.localIdentifier, library: group.libraryId) else { return }
         activity = "Publishing complete \(group.kind) resource set…"
         activeBackupItems.insert(id)
         defer { if version == epoch { activeBackupItems.remove(id) } }
@@ -1185,6 +1406,7 @@ final class AppModel {
     }
     private func transfer(_ original: UploadRecord, version: UUID) async throws {
         try checkBackup(version)
+        guard !ledger.suppresses(original.source.localIdentifier, library: original.libraryId) else { return }
         guard let store, let account, let api, let connection else { throw ClientError.signedOut }
         let client = UploadClient(api: api)
         var record = original
@@ -1417,7 +1639,7 @@ final class AppModel {
     }
     func scheduleAutomaticRun() {
         guard signedIn, !needsReauthentication, !needsOnboarding, !backupAccessBlocked, automaticTask == nil,
-            !isRunning, selectedLibrary != nil, ledger.settings.backupPaused != true,
+            !isRunning, !isDeletingMedia, !isRestoringTrash, selectedLibrary != nil, ledger.settings.backupPaused != true,
             ledger.settings.automaticBackup
                 || BackupRetryPolicy.nextAttempt(ledger: ledger, library: ledger.selectedLibraryID) != nil,
             selectedLibrary?.isReadOnly != true
@@ -1440,7 +1662,8 @@ final class AppModel {
     }
     private func scheduleRetry() {
         retryWakeup.cancel()
-        guard signedIn, !needsReauthentication, !needsOnboarding, !backupAccessBlocked, selectedLibrary != nil,
+        guard signedIn, !needsReauthentication, !needsOnboarding, !backupAccessBlocked,
+            !isDeletingMedia, !isRestoringTrash, selectedLibrary != nil,
             selectedLibrary?.isReadOnly != true, ledger.settings.backupPaused != true,
             let next = BackupRetryPolicy.nextAttempt(ledger: ledger, library: ledger.selectedLibraryID)
         else { return }

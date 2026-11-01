@@ -57,7 +57,8 @@ not a claim that the entire platform is production-qualified.
   merges/splits and manual negative matches. A transactional Library outbox
   automatically queues eligible committed primary photos independently of backup.
 - Renewable, persisted 30-day retention holds with fresh original rehashing for
-  eligible phone cleanup. No application endpoint deletes committed originals.
+  eligible phone cleanup. User deletion retains originals for 30 days; only the
+  scheduled reference-aware cleanup service can reclaim expired server bytes.
 - Shared OpenTelemetry logs/metrics/traces and Grafana/Prometheus/Loki/Tempo,
   including propagation through verification, the outbox, and projection.
   The private Python administration service exports all three signals through
@@ -153,6 +154,10 @@ does not confer library access.
 | `PUT /v1/libraries/{id}/resource-sets/{setId}` | Immutable `{kind,sourceRevision,primaryAssetId,resources}` manifest |
 | `GET /v1/resource-sets/{id}` | Complete authorized resource manifest |
 | `GET /v1/assets/{id}/resources` | Manifest containing this resource |
+| `DELETE /v1/assets/{id}` | Owner-only logical deletion of the complete resource; starts a 30-day recovery period |
+| `GET /v1/trash?limit=50&before=<deletedAt>&beforeId=<uuid>` | Owner-only trash page `{items:[{asset,deletedAt,purgeAfter}],nextCursor}` |
+| `GET /v1/trash/{id}/preview?size=512` | Owner-only retained preview; normal content routes still reject deleted assets |
+| `POST /v1/assets/{id}/restore` | Clear deletion markers atomically for the complete resource; 204, 404 unowned, 409 expired |
 | `POST /v1/resource-sets/{id}/retention` | Owner-only fresh evidence/holds for every resource, or failure |
 | `GET /v1/uploads/{id}` | State, received zero-based part indexes, chunk size, error, committed asset ID |
 | `PUT /v1/uploads/{id}/parts/{index}` | Exact raw bytes with expected Content-Length; identical retry is idempotent |
@@ -190,8 +195,17 @@ Catch-up requests must reference retained starting/target views. Apply all pages
 through the fixed target atomically before committing the new local token.
 HTTP 410 requires a fresh snapshot; unavailable membership returns 404.
 Publication and resource grouping share one transactional revision frontier.
-History currently retains asset versions; this MVP has no committed-asset
-deletion or history-compaction API.
+History retains asset versions and synchronization tombstones after physical
+purge; there is no history-compaction API.
+
+Deletion immediately hides the asset from ordinary and shared views, without
+releasing original references. Repeat deletion does not extend the 30-day deadline.
+Restore changes only server state: the same asset IDs, originals, resource-set
+membership and retained analysis are reused; it never recreates a Photos copy.
+The separately deployed daily cleanup service claims expired assets irreversibly,
+releases Storage references, removes Faces derivatives, then records completion.
+Restore rejects expired or claimed assets. Storage honors other references and
+retention holds, so physical bytes may remain longer than 30 days.
 
 The API preserves JPEG/PNG/HEIC/HEIF/WebP/GIF, MP4/QuickTime, or explicitly typed
 octet-stream bytes. Unsupported/undecodable previews do not rewrite or discard

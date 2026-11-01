@@ -129,6 +129,32 @@ public sealed class ApiTests
     }
 
     [DatabaseFact]
+    public async Task Internal_asset_deletion_requires_service_key_and_removes_face_data()
+    {
+        await using var app = new FacesApplication();
+        var owner = "delete-" + Guid.NewGuid();
+        var source = PersistenceTests.Source(owner);
+        var repository = app.Services.GetRequiredService<IFaceRepository>();
+        await repository.EnqueueAsync(owner, source, default);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, PersistenceTests.Result(source.Sha256), default);
+        Assert.Single(await repository.FacesAsync(owner, source.Id, null, null, 100, default));
+        using var client = app.CreateClient();
+        var path = $"/internal/v1/faces/assets/{source.Id}";
+        var payload = new DeleteAssetRequest(owner);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Delete, path) { Content = JsonContent.Create(payload) })).StatusCode);
+        client.DefaultRequestHeaders.Add("X-Nephos-Service-Key", new string('x', 64));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Delete, path) { Content = JsonContent.Create(payload) })).StatusCode);
+        client.DefaultRequestHeaders.Remove("X-Nephos-Service-Key");
+        client.DefaultRequestHeaders.Add("X-Nephos-Service-Key", new string('s', 64));
+        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Delete, path) { Content = JsonContent.Create(payload) })).StatusCode);
+        Assert.Empty(await repository.FacesAsync(owner, source.Id, null, null, 100, default));
+        Assert.Empty(await repository.JobsAsync(owner, null, 100, default));
+    }
+
+    [DatabaseFact]
     public async Task DisablingOwnerDuringInferencePreventsResultsFromBeingPublished()
     {
         await using var app = new FacesApplication();

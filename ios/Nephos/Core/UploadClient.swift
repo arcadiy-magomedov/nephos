@@ -82,11 +82,16 @@ enum BackupRetryPolicy {
     static func nextAttempt(ledger: AccountLedger, library: UUID?, now: Date = Date()) -> Date? {
         guard let library, ledger.settings.backupPaused != true else { return nil }
         let records = ledger.records.filter { $0.libraryId == library }
-        var dates = records.filter { $0.needsTransfer && $0.requiresUserAction != true }
+        var dates = records.filter {
+            $0.needsTransfer && $0.requiresUserAction != true
+                && !ledger.suppresses($0.source.localIdentifier, library: $0.libraryId)
+        }
             .map { $0.nextRetryAt ?? now }
         let children = Dictionary(grouping: records, by: \.resourceSetId)
         for group in ledger.resourceSets ?? []
-        where group.libraryId == library && group.manifest == nil && group.requiresUserAction != true {
+        where group.libraryId == library && group.manifest == nil && group.requiresUserAction != true
+            && !ledger.suppresses(group.source.localIdentifier, library: group.libraryId)
+        {
             let members = children[group.id] ?? []
             guard
                 !members.contains(where: {

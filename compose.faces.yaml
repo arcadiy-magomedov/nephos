@@ -1,5 +1,11 @@
 # Optional overlay; start only the services listed in face-inference/README.md.
 services:
+  cleanup:
+    environment:
+      Services__Faces: http://faces-api:8080
+    depends_on:
+      faces-api: {condition: service_started}
+
   library-worker:
     environment:
       Analysis__Enabled: "true"

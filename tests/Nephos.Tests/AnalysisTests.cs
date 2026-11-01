@@ -66,12 +66,34 @@ public sealed class AnalysisTests
         Assert.Equal(repository.AssetId, handler.Body?.AssetId);
     }
 
+    [Fact]
+    public async Task Face_deletion_worker_sends_owner_and_completes_the_durable_lease()
+    {
+        var repository = new FakeAnalysisRepository { PendingDeletion = true };
+        using var handler = new DeletionHandler(repository.AssetId);
+        using var http = new HttpClient(handler);
+        using var worker = new FacePublicationWorker(repository, new ClientFactory(http),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Services:Faces"] = "http://faces-api:8080",
+                ["Services:Key"] = ApiFactory.InternalKey
+            }).Build(), NullLogger<FacePublicationWorker>.Instance);
+        await worker.StartAsync(CancellationToken.None);
+        var completion = await repository.DeletionCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+        Assert.Equal(204, completion.Status);
+        Assert.Equal(repository.LeaseId, completion.Deletion.LeaseId);
+        Assert.Equal(repository.AssetId, completion.Deletion.AssetId);
+        Assert.Equal("known", handler.Body?.Subject);
+    }
+
     private sealed class ClientFactory(HttpClient client) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client;
     }
 
     private sealed record Payload(Guid AssetId, string Subject);
+    private sealed record DeletionPayload(string Subject);
     private sealed class PublicationHandler(int? status) : HttpMessageHandler
     {
         public Payload? Body { get; private set; }
@@ -83,6 +105,20 @@ public sealed class AnalysisTests
             if (status is null) throw new HttpRequestException("Synthetic unavailable peer");
             return new HttpResponseMessage((HttpStatusCode)status);
         }
+
+    }
+
+    private sealed class DeletionHandler(Guid assetId) : HttpMessageHandler
+    {
+        public DeletionPayload? Body { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Assert.Equal(HttpMethod.Delete, request.Method);
+            Assert.Equal($"http://faces-api:8080/internal/v1/faces/assets/{assetId}", request.RequestUri?.ToString());
+            Assert.Equal(ApiFactory.InternalKey, Assert.Single(request.Headers.GetValues("X-Nephos-Service-Key")));
+            Body = await request.Content!.ReadFromJsonAsync<DeletionPayload>(token);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
     }
 }
 
@@ -92,7 +128,9 @@ internal sealed class FakeAnalysisRepository : IAnalysisRepository
     public Guid LeaseId { get; } = Guid.NewGuid();
     public int Reads { get; private set; }
     public bool Pending { get; set; }
+    public bool PendingDeletion { get; set; }
     public TaskCompletionSource<(FacePublication Publication, int? Status)> Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<(FaceDeletion Deletion, int? Status)> DeletionCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public Task<AnalysisSource?> FindSourceAsync(string subject, Guid assetId, CancellationToken token)
     {
@@ -112,6 +150,19 @@ internal sealed class FakeAnalysisRepository : IAnalysisRepository
     public Task CompleteAsync(FacePublication publication, int? status, CancellationToken token)
     {
         Completed.TrySetResult((publication, status));
+        return Task.CompletedTask;
+    }
+
+    public Task<FaceDeletion?> ClaimDeletionAsync(CancellationToken token)
+    {
+        var deletion = PendingDeletion ? new FaceDeletion(AssetId, "known", LeaseId, 1) : null;
+        PendingDeletion = false;
+        return Task.FromResult(deletion);
+    }
+
+    public Task CompleteDeletionAsync(FaceDeletion deletion, int? status, CancellationToken token)
+    {
+        DeletionCompleted.TrySetResult((deletion, status));
         return Task.CompletedTask;
     }
 }

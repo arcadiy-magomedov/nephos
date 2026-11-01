@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Nephos.ServiceDefaults;
 
 namespace Nephos.Faces.Api;
@@ -25,8 +26,12 @@ public static class FaceEndpoints
         {
             var source = await access.SourceAsync(Owner(c), assetId, ct);
             if (source is null) return Results.NotFound();
-            var job = await r.EnqueueAsync(Owner(c), source, ct);
-            return Results.Accepted($"/v1/faces/jobs/{job.Id}", new { job.Id, job.AssetId, job.Status, job.PipelineVersion });
+            try
+            {
+                var job = await r.EnqueueAsync(Owner(c), source, ct);
+                return Results.Accepted($"/v1/faces/jobs/{job.Id}", new { job.Id, job.AssetId, job.Status, job.PipelineVersion });
+            }
+            catch (FaceAssetDeletedException) { return Results.NotFound(); }
         });
         app.MapInternalV1("/faces/jobs", ["POST"], async (EnqueueRequest request, HttpContext c, IConfiguration config,
             IAnalysisSourceClient access, IFaceRepository r, CancellationToken ct) =>
@@ -35,8 +40,22 @@ public static class FaceEndpoints
             if (string.IsNullOrWhiteSpace(request.Subject) || request.Subject.Length > 256) return Results.BadRequest();
             var source = await access.SourceAsync(request.Subject, request.AssetId, ct);
             if (source is null) return Results.NotFound();
-            var job = await r.EnqueueAsync(request.Subject, source, ct);
-            return Results.Accepted(value: new { job.Id, job.Status });
+            try
+            {
+                var job = await r.EnqueueAsync(request.Subject, source, ct);
+                return Results.Accepted(value: new { job.Id, job.Status });
+            }
+            catch (FaceAssetDeletedException) { return Results.NotFound(); }
+        });
+        app.MapInternalV1("/faces/assets/{assetId:guid}", ["DELETE"], async (
+            Guid assetId, [FromBody] DeleteAssetRequest request, HttpContext c, IConfiguration config,
+            IFaceRepository repository, CancellationToken token) =>
+        {
+            if (!ServiceAuthentication.Valid(c, config)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(request.Subject) || request.Subject.Length > 256)
+                return Results.BadRequest();
+            await repository.DeleteAssetAsync(request.Subject, assetId, token);
+            return Results.NoContent();
         });
         group.MapGet("/jobs", async (HttpContext c, IFaceRepository r, int? limit, Guid? after, CancellationToken ct) =>
         {

@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Nephos.Cleanup\Nephos.Cleanup.csproj" />
     <ProjectReference Include="..\..\src\Nephos.Library.Api\Nephos.Library.Api.csproj" />
     <ProjectReference Include="..\..\src\Nephos.Storage.Api\Nephos.Storage.Api.csproj" Aliases="storage" />
   </ItemGroup>

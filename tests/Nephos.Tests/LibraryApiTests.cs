@@ -13,8 +13,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Tokens;
+using Nephos.Library.Api.Assets;
 using Nephos.Library.Api.Libraries;
 using Nephos.Library.Api.Analysis;
+using Nephos.ServiceDefaults;
 using Npgsql;
 
 namespace Nephos.Tests;
@@ -97,6 +99,23 @@ public sealed class LibraryApiTests
         client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/v1/libraries")).StatusCode);
     }
+    [Fact]
+    public async Task Asset_delete_requires_authentication_and_repository_ownership()
+    {
+        await using var factory = new ApiFactory();
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await anonymous.DeleteAsync($"/v1/assets/{factory.Assets.AssetId}")).StatusCode);
+        Assert.Equal(0, factory.Assets.DeleteCalls);
+
+        using var owner = factory.CreateClient();
+        owner.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.DeleteAsync($"/v1/assets/{factory.Assets.AssetId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.DeleteAsync($"/v1/assets/{Guid.NewGuid()}")).StatusCode);
+        Assert.Equal(2, factory.Assets.DeleteCalls);
+    }
 }
 
 internal sealed class ApiFactory : WebApplicationFactory<Program>
@@ -106,6 +125,7 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
     private readonly RSA rsa = RSA.Create(2048);
     public FakeRepository Repository { get; } = new();
     public FakeAnalysisRepository Analysis { get; } = new();
+    public FakeAssetRepository Assets { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -123,6 +143,8 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<ILibraryRepository>(Repository);
             services.RemoveAll<IAnalysisRepository>();
             services.AddSingleton<IAnalysisRepository>(Analysis);
+            services.RemoveAll<IAssetRepository>();
+            services.AddSingleton<IAssetRepository>(Assets);
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.Configuration = new OpenIdConnectConfiguration { Issuer = Issuer };
@@ -146,6 +168,26 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
         await base.DisposeAsync();
         rsa.Dispose();
     }
+}
+
+internal sealed class FakeAssetRepository : IAssetRepository
+{
+    public Guid AssetId { get; } = Guid.NewGuid();
+    public int DeleteCalls { get; private set; }
+    public Task<bool> CanAccessAsync(string subject, Guid library, CancellationToken token) => Task.FromResult(true);
+    public Task<bool> CanUploadAsync(string subject, Guid library, CancellationToken token) => Task.FromResult(true);
+    public Task<IReadOnlyList<Asset>> ListAsync(string subject, Guid library, AssetCursor? before, int limit, CancellationToken token) =>
+        Task.FromResult<IReadOnlyList<Asset>>([]);
+    public Task<Asset?> FindAsync(string subject, Guid id, CancellationToken token, bool owned = false) =>
+        Task.FromResult<Asset?>(null);
+    public Task<bool> DeleteAsync(string subject, Guid id, CancellationToken token)
+    {
+        DeleteCalls++;
+        return Task.FromResult(subject == "known" && id == AssetId);
+    }
+    public Task<bool> ProjectAsync(AssetMessage message, CancellationToken token) => Task.FromResult(true);
+    public Task<IReadOnlyList<TimelineBucket>> TimelineAsync(string subject, Guid library, int? year, int? month, CancellationToken token) =>
+        Task.FromResult<IReadOnlyList<TimelineBucket>>([]);
 }
 
 internal sealed class FakeRepository : ILibraryRepository

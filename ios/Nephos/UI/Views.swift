@@ -69,6 +69,7 @@ struct GalleryView: View {
     @State private var selected: Set<String> = []
     @State private var shareSelection: ShareSelection?
     @State private var deleteConfirmation = false
+    @State private var isDeleting = false
     @State private var carousel: GalleryCarousel?
     @State private var localAssets: [PHAsset] = []
     @State private var sharedAssets: [Asset] = []
@@ -78,7 +79,7 @@ struct GalleryView: View {
         let remoteAssets = model.gallery.items + sharedAssets
         var knownLocalIdentifiers: Set<String> = []
         var items = remoteAssets.map { asset -> GalleryMedia in
-            let record = records.first { $0.committedAssetID == asset.id }
+            let record = model.ledger.records.first { $0.committedAssetID == asset.id }
             let localIdentifier = record?.source.localIdentifier
             let localAsset = localIdentifier.flatMap { localByIdentifier[$0] }
             if let localIdentifier, localAsset != nil { knownLocalIdentifiers.insert(localIdentifier) }
@@ -234,7 +235,7 @@ struct GalleryView: View {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Delete", systemImage: "trash", role: .destructive) {
                                 deleteConfirmation = true
-                            }.disabled(selected.isEmpty)
+                            }.disabled(selected.isEmpty || isDeleting)
                         }
                     } else {
                         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -242,6 +243,11 @@ struct GalleryView: View {
                                 Button("Select photos") {
                                     selected = []
                                     selecting = true
+                                }
+                                NavigationLink {
+                                    TrashView(model: model)
+                                } label: {
+                                    Label("Trash", systemImage: "trash")
                                 }
                                 Button("Newest") { Task { await model.loadGallery(reset: true, newest: true) } }
                                 Button("Jump to date") { datePicker = true }.disabled(model.retainedGallery == nil)
@@ -271,7 +277,7 @@ struct GalleryView: View {
                             Spacer()
                             Button("Delete selected", systemImage: "trash", role: .destructive) {
                                 deleteConfirmation = true
-                            }.buttonStyle(.borderedProminent).disabled(selected.isEmpty)
+                            }.buttonStyle(.borderedProminent).disabled(selected.isEmpty || isDeleting)
                         }
                         .padding().frame(maxWidth: .infinity).background(.regularMaterial)
                     }
@@ -352,20 +358,309 @@ struct GalleryView: View {
     }
     private func deleteFromPhotos() {
         let identifiers = selectedItems.compactMap(\.localIdentifier)
+        guard !isDeleting else { return }
+        let version = model.epoch
+        isDeleting = true
         Task {
+            defer { isDeleting = false }
             do {
                 try await model.photos.deleteFromPhotos(identifiers)
+                guard version == model.epoch else { return }
                 selected.removeAll()
                 selecting = false
-            } catch { model.handle(error) }
+            } catch {
+                guard version == model.epoch else { return }
+                model.handle(error)
+            }
         }
     }
     private func deleteEverywhere() {
-        guard selectedItems.allSatisfy({ $0.asset == nil }) else {
-            model.message = "Deleting media from Nephos is not supported by the server yet."
-            return
+        let items = selectedItems
+        let remoteIDs = Set(items.filter { !$0.shared }.compactMap { $0.asset?.id })
+        let localIdentifiers = Set(items.filter { !$0.shared }.compactMap(\.localIdentifier))
+        guard !isDeleting else { return }
+        let version = model.epoch
+        isDeleting = true
+        Task {
+            defer { isDeleting = false }
+            do {
+                let result = try await model.deleteMediaEverywhere(
+                    assetIDs: remoteIDs, localIdentifiers: localIdentifiers)
+                guard version == model.epoch else { return }
+                localAssets = model.photos.recentAssets()
+                selected = Set(items.compactMap { item -> String? in
+                    if let asset = item.asset, result.failed[asset.id] != nil { return item.id }
+                    if let identifier = item.localIdentifier, !result.removedLocal.contains(identifier) {
+                        return "local:\(identifier)"
+                    }
+                    return nil
+                })
+                selecting = !selected.isEmpty
+                if !result.failed.isEmpty || result.photosError != nil || result.localStatusError != nil {
+                    model.message =
+                        "\(result.deleted.count) server item(s) moved to Trash; \(result.failed.count) failed. "
+                        + (result.photosError.map { "Photos removal failed: \($0). " } ?? "")
+                        + (result.localStatusError.map { "Local gallery status could not be saved: \($0). " } ?? "")
+                        + "Failed server items remain on this iPhone. Backup stays suppressed; retry deletion or restore from Trash."
+                }
+            } catch {
+                guard version == model.epoch else { return }
+                model.handle(error)
+            }
         }
-        deleteFromPhotos()
+    }
+}
+
+private struct TrashView: View {
+    @Bindable var model: AppModel
+    @State private var selecting = false
+    @State private var selected: Set<UUID> = []
+    @State private var viewer: TrashViewerSelection?
+    private var busy: Bool { model.isRestoringTrash || model.isLoadingTrash }
+    private var groups: [(date: Date, items: [TrashItem])] {
+        Dictionary(grouping: model.trashItems) {
+            Calendar.current.startOfDay(for: GalleryDates.parse($0.purgeAfter) ?? .distantPast)
+        }.map { (date: $0.key, items: $0.value) }.sorted { $0.date < $1.date }
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Deleted items are kept for 30 days. Restore returns them to Nephos, not iPhone Photos.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TrashRestoreStatus(model: model)
+                if let error = model.trashLoadError {
+                    Text(error).font(.callout).foregroundStyle(.red)
+                    Button("Retry loading") { Task { await model.loadTrash(reset: true) } }.disabled(busy)
+                }
+                if model.trashLoaded && model.trashItems.isEmpty && model.trashCursor == nil && !busy {
+                    ContentUnavailableView(
+                        "Trash is empty", systemImage: "trash",
+                        description: Text("Deleted items will appear here."))
+                }
+                ForEach(groups, id: \.date) { group in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Purge \(group.date.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(group.items.count)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        LazyVGrid(columns: NephosStyle.columns, spacing: 3) {
+                            ForEach(group.items) { item in
+                                TrashPreview(item: item, model: model)
+                                    .overlay(alignment: .topTrailing) {
+                                        if selecting {
+                                            Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(.white).shadow(radius: 2).padding(5)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if selecting { toggle(item.id) }
+                                        else { viewer = TrashViewerSelection(startID: item.id) }
+                                    }
+                                    .onLongPressGesture(minimumDuration: 0.45) {
+                                        selecting = true
+                                        selected.insert(item.id)
+                                    }
+                                    .accessibilityAddTraits(.isButton)
+                                    .accessibilityAction(named: "Select") {
+                                        selecting = true
+                                        selected.insert(item.id)
+                                    }
+                                    .disabled(busy)
+                            }
+                        }
+                    }
+                }
+                if model.isLoadingTrash { ProgressView("Loading Trash…").frame(maxWidth: .infinity) }
+                if model.trashCursor != nil {
+                    Button("Load older deleted items") { Task { await model.loadTrash() } }.disabled(busy)
+                }
+            }.padding()
+        }
+        .navigationTitle(selecting ? "\(selected.count) selected" : "Trash")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if selecting {
+                    Button(selected.count == model.trashItems.count ? "Deselect all" : "Select all") {
+                        selected = selected.count == model.trashItems.count ? [] : Set(model.trashItems.map(\.id))
+                    }.disabled(busy)
+                } else if !model.trashItems.isEmpty {
+                    Button("Select") { selecting = true; selected = [] }.disabled(busy)
+                }
+            }
+            if selecting {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { selecting = false; selected = [] }.disabled(busy)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if selecting && !model.trashItems.isEmpty {
+                Button {
+                    let ids = selected
+                    Task { await model.restoreTrash(ids) }
+                } label: {
+                    Label("Restore · \(selected.count)", systemImage: "arrow.counterclockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(NephosStyle.accent)
+                .disabled(selected.isEmpty || busy).padding().background(.regularMaterial)
+            }
+        }
+        .onChange(of: model.trashItems.map(\.id)) { _, ids in
+            selected.formIntersection(Set(ids))
+            if selected.isEmpty { selecting = false }
+        }
+        .refreshable { await model.loadTrash(reset: true) }
+        .task { await model.loadTrash(reset: true) }
+        .fullScreenCover(item: $viewer) { selection in
+            NavigationStack { TrashCarouselView(model: model, startID: selection.startID) }
+        }
+    }
+    private func toggle(_ id: UUID) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+}
+
+private struct TrashViewerSelection: Identifiable {
+    let id = UUID()
+    let startID: UUID
+}
+
+private struct TrashRestoreStatus: View {
+    let model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if model.isRestoringTrash {
+                ProgressView(
+                    "Restoring \(model.trashRestoreCompleted) of \(model.trashRestoreTotal)…",
+                    value: Double(model.trashRestoreCompleted), total: Double(max(1, model.trashRestoreTotal)))
+            } else if let notice = model.trashRestoreNotice {
+                Text(notice).font(.callout)
+                if !model.trashRestoreFailures.isEmpty {
+                    ForEach(model.trashItems.filter { model.trashRestoreFailures[$0.id] != nil }) { item in
+                        Text("\(item.asset.fileName): \(model.trashRestoreFailures[item.id] ?? "")")
+                            .font(.caption).foregroundStyle(.red)
+                    }
+                    Button("Retry failed restorations") {
+                        let ids = Set(model.trashRestoreFailures.keys)
+                        Task { await model.restoreTrash(ids) }
+                    }.disabled(model.isLoadingTrash)
+                }
+            }
+        }.accessibilityElement(children: .contain)
+    }
+}
+
+private struct TrashPreview: View {
+    let item: TrashItem
+    let model: AppModel
+    var viewer = false
+    @State private var image: UIImage?
+    @State private var error: String?
+    @State private var attempt = 0
+    var body: some View {
+        ZStack {
+            Rectangle().fill(viewer ? Color.black : Color.secondary.opacity(0.15))
+            if let image {
+                if viewer { Image(uiImage: image).resizable().scaledToFit() }
+                else { Image(uiImage: image).resizable().scaledToFill() }
+            } else if let error {
+                VStack {
+                    Image(systemName: "photo.badge.exclamationmark")
+                    if viewer {
+                        Text(error).font(.caption)
+                        Button("Retry preview") { attempt += 1 }
+                    }
+                }.foregroundStyle(viewer ? .white : .secondary)
+            } else {
+                ProgressView().tint(viewer ? .white : NephosStyle.accent)
+            }
+            if !viewer && item.asset.isVideo {
+                Image(systemName: "play.circle.fill").foregroundStyle(.white).shadow(radius: 2)
+            }
+        }
+        .aspectRatio(viewer ? nil : 1, contentMode: .fit).clipped()
+        .accessibilityLabel("\(item.asset.isVideo ? "Video" : "Photo"), \(item.asset.fileName), in Trash")
+        .task(id: "\(model.epoch)/\(item.id)/\(attempt)") {
+            image = nil
+            error = nil
+            guard let api = model.api, let account = model.account else { return }
+            let version = model.epoch
+            do {
+                let preview = try await MediaCache.shared.preview(
+                    item.asset, api: api, account: account, size: viewer ? .screen : .thumbnail, trash: true)
+                guard version == model.epoch, account == model.account, !Task.isCancelled else { return }
+                image = preview
+            } catch is CancellationError {
+            } catch {
+                guard version == model.epoch, account == model.account else { return }
+                self.error = "Preview unavailable. \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+private struct TrashCarouselView: View {
+    @Bindable var model: AppModel
+    let startID: UUID
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentID: UUID?
+    private var current: TrashItem? { model.trashItems.first { $0.id == currentID } }
+    var body: some View {
+        VStack(spacing: 0) {
+            if model.trashItems.isEmpty {
+                if model.isRestoringTrash || model.isLoadingTrash {
+                    ProgressView("Loading Trash…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = model.trashLoadError {
+                    Text(error).padding()
+                    Button("Retry loading") { Task { await model.loadTrash() } }
+                } else {
+                    ContentUnavailableView("Trash is empty", systemImage: "trash")
+                }
+            } else {
+                TabView(selection: $currentID) {
+                    ForEach(model.trashItems) { item in
+                        TrashPreview(item: item, model: model, viewer: true).tag(Optional(item.id))
+                    }
+                }.tabViewStyle(.page(indexDisplayMode: .never))
+                .disabled(model.isRestoringTrash)
+            }
+            VStack(spacing: 12) {
+                TrashRestoreStatus(model: model)
+                if let current {
+                    Text("Permanent deletion \(GalleryDates.parse(current.purgeAfter)?.formatted(date: .abbreviated, time: .omitted) ?? current.purgeAfter)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button {
+                        Task { await model.restoreTrash([current.id]) }
+                    } label: {
+                        Label("Restore", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity)
+                    }.buttonStyle(.borderedProminent).tint(NephosStyle.accent)
+                        .disabled(model.isRestoringTrash || model.isLoadingTrash)
+                }
+            }.padding()
+        }
+        .background(.black).preferredColorScheme(.dark)
+        .navigationTitle("Trash").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("Back to Trash") { dismiss() } }
+            ToolbarItem(placement: .topBarTrailing) {
+                if let index = model.trashItems.firstIndex(where: { $0.id == currentID }) {
+                    Text("\(index + 1) of \(model.trashItems.count)").font(.caption)
+                }
+            }
+        }
+        .onAppear { currentID = startID }
+        .onChange(of: model.trashItems.map(\.id)) { old, ids in
+            guard let currentID else { self.currentID = ids.first; return }
+            guard !ids.contains(currentID) else { return }
+            let index = old.firstIndex(of: currentID) ?? 0
+            self.currentID = ids.isEmpty ? nil : ids[min(index, ids.count - 1)]
+        }
     }
 }
 

@@ -556,6 +556,9 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "nephos.cleanup": {
+        "type": "Project"
+      },
       "nephos.library.api": {
         "type": "Project",
         "dependencies": {

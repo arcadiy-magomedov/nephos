@@ -100,6 +100,55 @@ public sealed class PersistenceTests
     }
 
     [DatabaseFact]
+    public async Task Asset_deletion_removes_face_data_and_preserves_other_assets()
+    {
+        await using var db = Open();
+        var repository = new PostgresFaceRepository(db);
+        var owner = "delete-asset-" + Guid.NewGuid();
+        var removed = Source(owner);
+        var retained = Source(owner);
+        await repository.EnqueueAsync(owner, removed, default);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, Result(removed.Sha256), default);
+        await repository.EnqueueAsync(owner, retained, default);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, Result(retained.Sha256), default);
+        var removedFace = Assert.Single(await repository.FacesAsync(owner, removed.Id, null, null, 100, default));
+        Assert.True(await repository.AssignAsync(owner, removedFace.Id, new(null, true), default));
+
+        await repository.DeleteAssetAsync(owner, removed.Id, default);
+
+        Assert.Empty(await repository.FacesAsync(owner, removed.Id, null, null, 100, default));
+        Assert.Single(await repository.FacesAsync(owner, retained.Id, null, null, 100, default));
+        Assert.DoesNotContain(await repository.JobsAsync(owner, null, 100, default), job => job.AssetId == removed.Id);
+        Assert.DoesNotContain(
+            await repository.CorrectionsAsync(owner, null, 100, default), correction => correction.SubjectId == removedFace.Id);
+        await repository.DeleteAssetAsync(owner, removed.Id, default);
+        await Assert.ThrowsAsync<FaceAssetDeletedException>(
+            () => repository.EnqueueAsync(owner, removed, default));
+    }
+
+    [DatabaseFact]
+    public async Task Authorized_republication_resumes_denied_jobs_without_replacing_completed_analysis()
+    {
+        await using var db = Open();
+        var repository = new PostgresFaceRepository(db);
+        var owner = "restore-analysis-" + Guid.NewGuid();
+        var source = Source(owner);
+        var original = await repository.EnqueueAsync(owner, source, default);
+        var claim = (await repository.ClaimAsync(default))!;
+        Assert.Equal(original.Id, claim.Id);
+        await repository.FailAsync(claim, "access_denied", true, default);
+        var resumed = await repository.EnqueueAsync(owner, source, default);
+        Assert.Equal(original.Id, resumed.Id);
+        Assert.Equal("queued", resumed.Status);
+        Assert.Equal(0, resumed.Attempts);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, Result(source.Sha256), default);
+        var face = Assert.Single(await repository.FacesAsync(owner, source.Id, null, null, 100, default));
+        var complete = await repository.EnqueueAsync(owner, source, default);
+        Assert.Equal(original.Id, complete.Id);
+        Assert.Equal(face.Id, Assert.Single(await repository.FacesAsync(owner, source.Id, null, null, 100, default)).Id);
+    }
+
+    [DatabaseFact]
     public async Task ReprocessingKeepsStableTracksManualUnknownNamesSplitsAndMergeProvenance()
     {
         await using var db = Open();

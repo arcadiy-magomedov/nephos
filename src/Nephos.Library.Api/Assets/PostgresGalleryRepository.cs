@@ -98,7 +98,8 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
             SELECT v.body::text,CASE WHEN a.uploaded_by<>$6 THEN coalesce(owner.display_name,'Known user') END
             FROM gallery_versions v JOIN assets a ON a.id=v.asset_id JOIN principals owner ON owner.subject=a.uploaded_by
             WHERE v.library_id=$1 AND v.visible AND v.from_revision<=$2 AND (v.to_revision IS NULL OR v.to_revision>$2)
-            AND can_read_asset($6,a.id) AND ($3::timestamptz IS NULL OR (v.created_at,v.asset_id)<($3,$4))
+            AND a.deleted_at IS NULL AND can_read_asset($6,a.id)
+            AND ($3::timestamptz IS NULL OR (v.created_at,v.asset_id)<($3,$4))
             ORDER BY v.created_at DESC,v.asset_id DESC LIMIT $5
             """, library, view.Revision);
         query.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.TimestampTz, Value = (object?)before?.CreatedAt ?? DBNull.Value });
@@ -122,7 +123,9 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
         await using var query = Command(connection, null, """
             SELECT to_char(date_trunc($3,created_at AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS bucket,count(*)
             FROM gallery_versions WHERE library_id=$1 AND visible AND from_revision<=$2 AND (to_revision IS NULL OR to_revision>$2)
-            AND can_read_asset($6,asset_id) AND created_at >= $4 AND created_at < $5 GROUP BY bucket ORDER BY bucket DESC
+            AND EXISTS(SELECT 1 FROM assets a WHERE a.id=gallery_versions.asset_id AND a.deleted_at IS NULL)
+            AND can_read_asset($6,asset_id) AND created_at >= $4 AND created_at < $5
+            GROUP BY bucket ORDER BY bucket DESC
             """, library, view.Revision, month is not null ? "day" : year is not null ? "month" : "year", start, end, subject);
         await using var reader = await query.ExecuteReaderAsync(token);
         var rows = new List<TimelineBucket>();

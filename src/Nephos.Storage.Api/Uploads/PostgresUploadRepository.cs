@@ -55,23 +55,32 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
 
     public async Task<(Guid HoldId, DateTimeOffset RetainedUntil)> RetainAsync(Guid id, CancellationToken token)
     {
-        var upload = await FindAsync(id, token);
+        await using var connection = await dataSource.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await BlobCleanupRepository.LockAsync(connection, transaction, token);
+        var upload = await SingleAsync(Command(connection, transaction,
+            $"SELECT {Columns} FROM uploads WHERE id=$1 AND released_at IS NULL", id), token);
         if (upload is not { State: "stored", Sha256: not null }) throw new UploadConflictException("Original is not committed.");
         await using (var stream = File.OpenRead(volume.OriginalPath(upload.Sha256)))
         {
             var hash = Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(stream, token));
             if (stream.Length != upload.Size || hash != upload.Sha256) throw new IOException("Original integrity check failed.");
         }
-        await using var command = dataSource.CreateCommand("""
+        await using var command = Command(connection, transaction, """
             INSERT INTO retention_holds(asset_id,hold_id,retained_until) VALUES($1,$2,now()+interval '30 days')
             ON CONFLICT(asset_id) DO UPDATE SET retained_until=greatest(retention_holds.retained_until,EXCLUDED.retained_until)
             RETURNING hold_id,retained_until
             """);
         command.Parameters.AddWithValue(id);
         command.Parameters.AddWithValue(Guid.NewGuid());
-        await using var reader = await command.ExecuteReaderAsync(token);
-        await reader.ReadAsync(token);
-        return (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1));
+        (Guid HoldId, DateTimeOffset RetainedUntil) hold;
+        await using (var reader = await command.ExecuteReaderAsync(token))
+        {
+            await reader.ReadAsync(token);
+            hold = (reader.GetGuid(0), reader.GetFieldValue<DateTimeOffset>(1));
+        }
+        await transaction.CommitAsync(token);
+        return hold;
     }
 
     private static async Task<Upload?> SingleAsync(NpgsqlCommand command, CancellationToken token)
@@ -84,7 +93,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     public async Task<Upload?> FindAsync(Guid id, CancellationToken token)
     {
         await using var connection = await dataSource.OpenConnectionAsync(token);
-        return await SingleAsync(Command(connection, null, $"SELECT {Columns} FROM uploads WHERE id=$1", id), token);
+        return await SingleAsync(Command(connection, null, $"SELECT {Columns} FROM uploads WHERE id=$1 AND released_at IS NULL", id), token);
     }
 
     public async Task<Upload> CreateAsync(UploadIntent intent, string subject, CancellationToken token)
@@ -93,6 +102,14 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
         await using var transaction = await connection.BeginTransactionAsync(token);
         await using (var gate = Command(connection, transaction, "SELECT pg_advisory_xact_lock(48465002)"))
             await gate.ExecuteNonQueryAsync(token);
+        await using (var released = Command(connection, transaction,
+            "SELECT EXISTS(SELECT 1 FROM cleanup_releases WHERE asset_id=$1)", intent.Id))
+            if ((bool)(await released.ExecuteScalarAsync(token))!)
+                throw new UploadConflictException("A purged upload ID cannot be reused.");
+        await using (var deleting = Command(connection, transaction,
+            "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=$1 AND deleting)", intent.Sha256))
+            if ((bool)(await deleting.ExecuteScalarAsync(token))!)
+                throw new UploadConflictException("Blob cleanup is pending. Retry with the same intent later.");
         var previous = await SingleAsync(Command(connection, transaction, $"SELECT {Columns} FROM uploads WHERE id=$1", intent.Id), token);
         if (previous is not null)
         {
@@ -103,7 +120,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
             return previous;
         }
         var duplicate = await SingleAsync(Command(connection, transaction, $"""
-            SELECT {Columns} FROM uploads WHERE subject=$1 AND library_id=$2 AND expected_hash=$3 AND size=$4 AND state='stored'
+            SELECT {Columns} FROM uploads WHERE subject=$1 AND library_id=$2 AND expected_hash=$3 AND size=$4 AND state='stored' AND released_at IS NULL
             ORDER BY (resource_set_id IS NULL) DESC,created_at,id LIMIT 1
             """, subject, intent.LibraryId, intent.Sha256, intent.Size), token);
         if (duplicate is not null && intent.ResourceSetId is null && duplicate.ResourceSetId is null) return duplicate;
@@ -228,6 +245,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     {
         await using var connection = await dataSource.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
+        await BlobCleanupRepository.LockAsync(connection, transaction, token);
         var upload = await SingleAsync(Command(connection, transaction, $"""
             SELECT {Columns} FROM uploads WHERE state='verifying' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
             """), token);

@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Nephos.Cleanup/Nephos.Cleanup.csproj" />
     <Project Path="src/Nephos.Faces.Api/Nephos.Faces.Api.csproj" />
     <Project Path="src/Nephos.Library.Api/Nephos.Library.Api.csproj" />
     <Project Path="src/Nephos.Migrations/Nephos.Migrations.csproj" />

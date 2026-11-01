@@ -1,5 +1,44 @@
 import Foundation
 
+struct TrashCursor: Codable, Hashable, Sendable {
+    let deletedAt: String
+    let id: UUID
+}
+
+struct TrashItem: Codable, Identifiable, Equatable, Sendable {
+    let asset: Asset
+    let deletedAt: String
+    let purgeAfter: String
+    var id: UUID { asset.id }
+}
+
+struct TrashPage: Codable, Sendable {
+    let items: [TrashItem]
+    let nextCursor: TrashCursor?
+
+    func validate(before: TrashCursor?) throws {
+        guard items.count <= 50, Set(items.map(\.id)).count == items.count,
+            items.allSatisfy({ item in
+                guard item.asset.sharedBy == nil, let deleted = GalleryDates.parse(item.deletedAt),
+                    let purge = GalleryDates.parse(item.purgeAfter) else { return false }
+                return purge > deleted
+            }),
+            nextCursor == nil || nextCursor != before,
+            nextCursor == nil || items.last.map({
+                $0.id == nextCursor?.id && $0.deletedAt == nextCursor?.deletedAt
+            }) == true
+        else { throw ClientError.invalid("Invalid trash page. Previously loaded items were preserved.") }
+    }
+}
+
+struct MediaDeletionResult: Sendable {
+    var deleted: Set<UUID> = []
+    var failed: [UUID: String] = [:]
+    var removedLocal: Set<String> = []
+    var photosError: String?
+    var localStatusError: String?
+}
+
 struct FacePerson: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String?
@@ -96,6 +135,35 @@ struct PersonNameInput: Encodable, Sendable {
 }
 
 extension API {
+    func trash(before: TrashCursor? = nil) async throws -> TrashPage {
+        var query = [URLQueryItem(name: "limit", value: "50")]
+        if let before {
+            query += [
+                URLQueryItem(name: "before", value: before.deletedAt),
+                URLQueryItem(name: "beforeId", value: before.id.uuidString),
+            ]
+        }
+        let page = try await json(TrashPage.self, "v1/trash", query: query)
+        try page.validate(before: before)
+        return page
+    }
+
+    func restoreAsset(_ id: UUID) async throws {
+        try await change("v1/assets/\(id)/restore", method: "POST")
+    }
+
+    func trashPreviewRequest(_ id: UUID, size: PreviewSize = .thumbnail) async throws -> URLRequest {
+        var result = try await request("v1/trash/\(id)/preview", query: [
+            URLQueryItem(name: "size", value: String(size.rawValue))
+        ])
+        result.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        return result
+    }
+
+    func deleteAsset(_ id: UUID) async throws {
+        try await change("v1/assets/\(id)", method: "DELETE")
+    }
+
     func assets(ids: [UUID]) async throws -> [Asset] {
         guard ids.count <= 50 else { throw ClientError.invalid("Load at most 50 assets at a time.") }
         var result: [Asset] = []

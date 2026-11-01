@@ -72,7 +72,9 @@ public sealed class PostgresResourceSetRepository(NpgsqlDataSource source) : IRe
         await using var query = Command(connection, null, """
             SELECT s.id,s.library_id,s.manifest::text,s.created_at
             FROM resource_sets s
-            WHERE s.id=$1 AND can_read_asset($2,s.primary_asset_id) AND (NOT $3 OR s.subject=$2)
+            JOIN assets a ON a.id=s.primary_asset_id
+            WHERE s.id=$1 AND a.deleted_at IS NULL
+              AND can_read_asset($2,s.primary_asset_id) AND (NOT $3 OR s.subject=$2)
             """, id, subject, owned);
         await using var reader = await query.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? Read(reader) : null;
@@ -84,7 +86,10 @@ public sealed class PostgresResourceSetRepository(NpgsqlDataSource source) : IRe
         await using var query = Command(connection, null, """
             SELECT s.id,s.library_id,s.manifest::text,s.created_at
             FROM assets a JOIN resource_sets s ON s.id=a.resource_set_id
-            WHERE a.id=$1 AND can_read_asset($2,a.id) AND can_read_asset($2,s.primary_asset_id)
+            JOIN assets primary_asset ON primary_asset.id=s.primary_asset_id
+            WHERE a.id=$1 AND a.deleted_at IS NULL AND primary_asset.deleted_at IS NULL
+              AND can_read_asset($2,a.id)
+              AND can_read_asset($2,s.primary_asset_id)
             """, asset, subject);
         await using var reader = await query.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? Read(reader) : null;
@@ -101,6 +106,12 @@ public sealed class PostgresResourceSetRepository(NpgsqlDataSource source) : IRe
             if (!(bool)(await access.ExecuteScalarAsync(token))!) throw new GalleryAccessException();
         var frontier = await LockAsync(connection, transaction, library, token);
         var serialized = JsonSerializer.Serialize(input, Json);
+        await using (var deleted = Command(connection, transaction, """
+            SELECT EXISTS(SELECT 1 FROM assets WHERE (resource_set_id=$1 OR pending_resource_set_id=$1)
+                AND deleted_at IS NOT NULL)
+            """, id))
+            if ((bool)(await deleted.ExecuteScalarAsync(token))!)
+                throw new ResourceConflictException("A deleted resource set cannot be committed again. Restore it explicitly.");
         await using (var existing = Command(connection, transaction,
             "SELECT library_id,subject,manifest::text,created_at FROM resource_sets WHERE id=$1", id))
         await using (var reader = await existing.ExecuteReaderAsync(token))
@@ -119,7 +130,7 @@ public sealed class PostgresResourceSetRepository(NpgsqlDataSource source) : IRe
         {
             await using var query = Command(connection, transaction, """
                 SELECT id,file_name,media_type,size,sha256,has_preview,created_at FROM assets
-                WHERE id=$1 AND library_id=$2 AND uploaded_by=$3 AND resource_set_id IS NULL
+                WHERE id=$1 AND library_id=$2 AND uploaded_by=$3 AND resource_set_id IS NULL AND deleted_at IS NULL
                     AND (pending_resource_set_id IS NULL OR pending_resource_set_id=$4)
                 """, resource.AssetId, library, subject, id);
             await using var reader = await query.ExecuteReaderAsync(token);

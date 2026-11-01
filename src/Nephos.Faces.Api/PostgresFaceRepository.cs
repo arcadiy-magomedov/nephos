@@ -38,17 +38,63 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         r.GetString(4), r.GetString(5), r.GetInt32(6), r.IsDBNull(7) ? null : r.GetString(7), r.IsDBNull(8) ? null : r.GetGuid(8));
     private const string JobColumns = "id,owner,asset_id,source_sha256,pipeline_version,status,attempts,error,lease_token";
 
+    public async Task DeleteAssetAsync(string owner, Guid assetId, CancellationToken ct)
+    {
+        await using var c = await data.OpenConnectionAsync(ct);
+        await using var tx = await c.BeginTransactionAsync(ct);
+        await Lock(c, owner, ct);
+        await using (var tombstone = new NpgsqlCommand("""
+            INSERT INTO deleted_assets(owner,asset_id) VALUES($1,$2) ON CONFLICT(owner,asset_id) DO NOTHING
+            """, c, tx))
+        {
+            tombstone.Parameters.AddWithValue(owner);
+            tombstone.Parameters.AddWithValue(assetId);
+            await tombstone.ExecuteNonQueryAsync(ct);
+        }
+        var tracks = new List<Guid>();
+        await using (var query = Command(c, "SELECT id FROM face_tracks WHERE owner=$1 AND asset_id=$2", owner, assetId))
+        await using (var reader = await query.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct)) tracks.Add(reader.GetGuid(0));
+        if (tracks.Count > 0)
+        {
+            await Execute(c, "DELETE FROM corrections WHERE owner=$1 AND subject_id=ANY($2)", ct, owner, tracks.ToArray());
+            await Execute(c, "DELETE FROM track_exclusions WHERE owner=$1 AND track_id=ANY($2)", ct, owner, tracks.ToArray());
+            await Execute(c, "DELETE FROM observations WHERE owner=$1 AND track_id=ANY($2)", ct, owner, tracks.ToArray());
+            await Execute(c, "DELETE FROM face_tracks WHERE owner=$1 AND id=ANY($2)", ct, owner, tracks.ToArray());
+        }
+        await Execute(c, "DELETE FROM jobs WHERE owner=$1 AND asset_id=$2", ct, owner, assetId);
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<FaceJob> EnqueueAsync(string owner, AnalysisSource source, CancellationToken ct)
     {
         await using var c = await data.OpenConnectionAsync(ct);
-        await using var command = Command(c, $"""
+        await using var tx = await c.BeginTransactionAsync(ct);
+        await Lock(c, owner, ct);
+        if (await ScalarId(c, "SELECT asset_id FROM deleted_assets WHERE owner=$1 AND asset_id=$2", ct, owner, source.Id) is not null)
+            throw new FaceAssetDeletedException();
+        await using var command = new NpgsqlCommand($"""
             INSERT INTO jobs(id,owner,asset_id,source_sha256,pipeline_version) VALUES($1,$2,$3,$4,$5)
-            ON CONFLICT(owner,asset_id,source_sha256,pipeline_version) DO UPDATE SET owner=EXCLUDED.owner
+            ON CONFLICT(owner,asset_id,source_sha256,pipeline_version) DO UPDATE SET owner=EXCLUDED.owner,
+                status=CASE WHEN jobs.status='denied' THEN 'queued' ELSE jobs.status END,
+                attempts=CASE WHEN jobs.status='denied' THEN 0 ELSE jobs.attempts END,
+                error=CASE WHEN jobs.status='denied' THEN NULL ELSE jobs.error END,
+                available_at=CASE WHEN jobs.status='denied' THEN now() ELSE jobs.available_at END
             RETURNING {JobColumns}
-            """, Guid.NewGuid(), owner, source.Id, source.Sha256.ToLowerInvariant(), Pipeline.Version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        await reader.ReadAsync(ct);
-        return ReadJob(reader);
+            """, c, tx);
+        command.Parameters.AddWithValue(Guid.NewGuid());
+        command.Parameters.AddWithValue(owner);
+        command.Parameters.AddWithValue(source.Id);
+        command.Parameters.AddWithValue(source.Sha256.ToLowerInvariant());
+        command.Parameters.AddWithValue(Pipeline.Version);
+        FaceJob result;
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            await reader.ReadAsync(ct);
+            result = ReadJob(reader);
+        }
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<FaceJob?> ClaimAsync(CancellationToken ct)
@@ -61,6 +107,7 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         await using var command = Command(c, $"""
             UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$1,lease_until=now()+interval '3 minutes',error=NULL
             WHERE id=(SELECT id FROM jobs WHERE pipeline_version=$2 AND attempts<5 AND
+              NOT EXISTS(SELECT 1 FROM deleted_assets d WHERE d.owner=jobs.owner AND d.asset_id=jobs.asset_id) AND
               ((status='queued' AND available_at<=now()) OR (status='running' AND lease_until<now()))
               ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
             RETURNING {JobColumns}
@@ -176,7 +223,11 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
     public async Task<IReadOnlyList<FaceJob>> JobsAsync(string owner, Guid? after, int limit, CancellationToken ct)
     {
         await using var c = await data.OpenConnectionAsync(ct);
-        await using var command = Command(c, $"SELECT {JobColumns} FROM jobs WHERE owner=$1 AND ($2::uuid IS NULL OR id>$2) ORDER BY id LIMIT $3", owner, after, limit);
+        await using var command = Command(c, $"""
+            SELECT {JobColumns} FROM jobs j WHERE owner=$1 AND ($2::uuid IS NULL OR id>$2)
+              AND NOT EXISTS(SELECT 1 FROM deleted_assets d WHERE d.owner=j.owner AND d.asset_id=j.asset_id)
+            ORDER BY id LIMIT $3
+            """, owner, after, limit);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var rows = new List<FaceJob>();
         while (await reader.ReadAsync(ct)) rows.Add(ReadJob(reader));
@@ -189,13 +240,17 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         return await Execute(c, """
             UPDATE jobs SET status='queued',attempts=0,error=NULL,available_at=now()
             WHERE owner=$1 AND id=$2 AND pipeline_version=$3 AND status IN ('error','denied')
+              AND NOT EXISTS(SELECT 1 FROM deleted_assets d WHERE d.owner=jobs.owner AND d.asset_id=jobs.asset_id)
             """, ct, owner, id, Pipeline.Version) == 1;
     }
 
     public async Task<FaceJob?> JobAsync(string owner, Guid id, CancellationToken ct)
     {
         await using var c = await data.OpenConnectionAsync(ct);
-        await using var command = Command(c, $"SELECT {JobColumns} FROM jobs WHERE owner=$1 AND id=$2", owner, id);
+        await using var command = Command(c, $"""
+            SELECT {JobColumns} FROM jobs j WHERE owner=$1 AND id=$2
+              AND NOT EXISTS(SELECT 1 FROM deleted_assets d WHERE d.owner=j.owner AND d.asset_id=j.asset_id)
+            """, owner, id);
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadJob(reader) : null;
     }

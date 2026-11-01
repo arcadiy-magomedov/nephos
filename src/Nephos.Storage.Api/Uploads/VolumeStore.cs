@@ -16,6 +16,7 @@ public interface IVolumeStore
     string OriginalPath(string hash);
     string PreviewPath(string hash, int size = 512);
     void RemoveStaging(Guid id);
+    void RemoveBlob(string hash);
     bool HasSpace(long bytes);
 }
 
@@ -248,6 +249,18 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
     {
         var path = Staging(id);
         if (Directory.Exists(path)) Directory.Delete(path, true);
+    }
+
+    public void RemoveBlob(string hash)
+    {
+        if (hash.Length != 64 || hash.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+            throw new ArgumentException("Invalid blob hash.", nameof(hash));
+        foreach (var size in PreviewSizes.All) File.Delete(PreviewPath(hash, size));
+        File.Delete(OriginalPath(hash));
+        var originalDirectory = Path.GetDirectoryName(OriginalPath(hash))!;
+        if (Directory.Exists(originalDirectory)) SyncDirectory(originalDirectory);
+        var previewDirectory = Path.GetDirectoryName(PreviewPath(hash))!;
+        if (Directory.Exists(previewDirectory)) SyncDirectory(previewDirectory);
     }
 
     private static void SyncDirectory(string path)

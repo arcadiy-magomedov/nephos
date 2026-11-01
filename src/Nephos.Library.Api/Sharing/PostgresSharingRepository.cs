@@ -27,7 +27,7 @@ public sealed class PostgresSharingRepository(NpgsqlDataSource source) : ISharin
         SELECT s.id,s.library_id,l.name,s.owner_subject,coalesce(o.display_name,'Known user'),
             s.recipient_subject,coalesce(r.display_name,'Known user'),s.all_assets,
             ARRAY(SELECT i.asset_id FROM share_items i JOIN assets a ON a.id=i.asset_id
-                WHERE i.share_id=s.id AND NOT a.hidden ORDER BY i.asset_id),s.created_at
+                WHERE i.share_id=s.id AND NOT a.hidden AND a.deleted_at IS NULL ORDER BY i.asset_id),s.created_at
         FROM shares s JOIN libraries l ON l.id=s.library_id
         JOIN principals o ON o.subject=s.owner_subject JOIN principals r ON r.subject=s.recipient_subject
         """;
@@ -81,7 +81,8 @@ public sealed class PostgresSharingRepository(NpgsqlDataSource source) : ISharin
                 reader.GetString(1) != input.RecipientId || reader.GetGuid(2) != input.LibraryId))
                 throw new ResourceConflictException("Share identity is bound to another owner, recipient or library.");
         await using (var roots = Command(connection, transaction, """
-            SELECT count(*) FROM assets WHERE id=ANY($1) AND library_id=$2 AND uploaded_by=$3 AND NOT hidden
+            SELECT count(*) FROM assets WHERE id=ANY($1) AND library_id=$2 AND uploaded_by=$3
+                AND NOT hidden AND deleted_at IS NULL
             """, input.AssetIds, input.LibraryId, subject))
             if ((long)(await roots.ExecuteScalarAsync(token))! != input.AssetIds.Length)
                 throw new ResourceConflictException("Only your committed gallery items can be shared.");
@@ -102,7 +103,8 @@ public sealed class PostgresSharingRepository(NpgsqlDataSource source) : ISharin
             await using var items = Command(connection, transaction, """
                 INSERT INTO share_items(share_id,asset_id)
                 SELECT $1,id FROM assets WHERE library_id=$2 AND uploaded_by=$3 AND
-                  (id=ANY($4) OR resource_set_id IN (SELECT resource_set_id FROM assets WHERE id=ANY($4)))
+                  deleted_at IS NULL
+                  AND (id=ANY($4) OR resource_set_id IN (SELECT resource_set_id FROM assets WHERE id=ANY($4)))
                 """, id, input.LibraryId, subject, input.AssetIds);
             await items.ExecuteNonQueryAsync(token);
         }

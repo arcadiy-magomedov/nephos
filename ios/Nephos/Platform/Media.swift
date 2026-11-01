@@ -55,11 +55,15 @@ final class MediaCache {
         generation = UUID()
         images.removeAllObjects()
     }
-    func preview(_ asset: Asset, api: API, account: String, size: PreviewSize = .thumbnail) async throws -> UIImage {
-        let key = "\(account)/\(asset.libraryId)/\(asset.id)/\(size.rawValue)" as NSString
+    func preview(
+        _ asset: Asset, api: API, account: String, size: PreviewSize = .thumbnail, trash: Bool = false
+    ) async throws -> UIImage {
+        let key = "\(account)/\(asset.libraryId)/\(asset.id)/\(size.rawValue)/\(trash)" as NSString
         if let cached = images.object(forKey: key) { return cached }
         let boundary = generation
-        let request = try await api.previewRequest(asset.id, size: size)
+        let request = try await (trash
+            ? api.trashPreviewRequest(asset.id, size: size)
+            : api.previewRequest(asset.id, size: size))
         let bytes = try await HTTP.data(request, maximum: 8 * 1024 * 1024, session: api.session)
         try Task.checkCancellation()
         guard boundary == generation else { throw CancellationError() }

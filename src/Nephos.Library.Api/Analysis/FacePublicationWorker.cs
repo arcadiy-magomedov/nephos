@@ -12,10 +12,43 @@ public sealed class FacePublicationWorker(
     {
         var destination = new Uri(new Uri(configuration["Services:Faces"]
             ?? throw new InvalidOperationException("Services:Faces is required.")), "/internal/v1/faces/jobs");
+        var deletionDestination = new Uri(new Uri(configuration["Services:Faces"]
+            ?? throw new InvalidOperationException("Services:Faces is required.")), "/internal/v1/faces/assets/");
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                var deletion = await repository.ClaimDeletionAsync(stoppingToken);
+                if (deletion is not null)
+                {
+                    using var deletionActivity = MediaProtocol.Activities.StartActivity("faces.delete");
+                    int? deletionStatus = null;
+                    try
+                    {
+                        using var request = new HttpRequestMessage(
+                            HttpMethod.Delete, new Uri(deletionDestination, deletion.AssetId.ToString()))
+                        {
+                            Content = JsonContent.Create(new { deletion.Subject })
+                        };
+                        request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
+                        using var response = await clients.CreateClient("faces").SendAsync(
+                            request, HttpCompletionOption.ResponseHeadersRead, stoppingToken);
+                        deletionStatus = (int)response.StatusCode;
+                        if (response.StatusCode is not (HttpStatusCode.NoContent or HttpStatusCode.NotFound))
+                            logger.LogWarning("Face deletion will retry after HTTP {StatusCode}", deletionStatus);
+                    }
+                    catch (HttpRequestException)
+                    {
+                        logger.LogWarning("Face service unavailable; durable deletion will retry");
+                    }
+                    catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                    {
+                        logger.LogWarning("Face deletion timed out; durable deletion will retry");
+                    }
+                    await repository.CompleteDeletionAsync(deletion, deletionStatus, stoppingToken);
+                    continue;
+                }
+
                 var publication = await repository.ClaimAsync(stoppingToken);
                 if (publication is null)
                 {

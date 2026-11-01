@@ -6,6 +6,14 @@ public static class AssetEndpoints
 {
     public static void MapAssets(this WebApplication app)
     {
+        app.MapDelete("/v1/assets/{id:guid}", async (
+            Guid id, HttpContext context, IAssetRepository repository, CancellationToken token) =>
+        {
+            var subject = context.User.FindFirst("sub")?.Value;
+            return subject is not null && await repository.DeleteAsync(subject, id, token)
+                ? Results.NoContent()
+                : Results.NotFound();
+        }).RequireAuthorization();
         app.MapGet("/v1/assets/{id:guid}", async (Guid id, HttpContext context, IAssetRepository repository, CancellationToken token) =>
         {
             var subject = context.User.FindFirst("sub")?.Value;

@@ -17,6 +17,23 @@ x-app-environment: &app-environment
   Broker__Host: rabbitmq
 
 services:
+  cleanup:
+    build: {context: ., args: {PROJECT: Nephos.Cleanup}}
+    command: ["Nephos.Cleanup.dll"]
+    environment:
+      Services__Library: http://library-api:8080
+      Services__Storage: http://storage-api:8080
+      Services__Key: ${SERVICE_KEY:?Required}
+      Cleanup__IntervalHours: "24"
+    depends_on:
+      library-api: {condition: service_started}
+      storage-api: {condition: service_started}
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 128m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
   postgres:
     image: postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
     environment:
