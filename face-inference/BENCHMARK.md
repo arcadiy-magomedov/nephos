@@ -47,6 +47,9 @@ are never accepted if their hashes do not match (remove that individual partial 
   Sub/Mul normalization. AdaFace IR101 uses CVLFace's RGB `ToTensor` and mean/std 0.5,
   not legacy AdaFace's BGR advice; pinned `model.yaml` declares `color_space: RGB`.
   All embeddings are L2-normalized before cosine comparison, without test-time flipping.
+  Contracts were checked against [OpenCV 4.12 SFace](https://github.com/opencv/opencv/blob/4.12.0/modules/objdetect/src/face_recognize.cpp),
+  [InsightFace v0.7 ArcFaceONNX](https://github.com/deepinsight/insightface/blob/v0.7/python-package/insightface/model_zoo/arcface_onnx.py)
+  and the [pinned CVLFace RGB configuration](https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m/blob/54f602a0737bd1ee4a4e7e9fd089a485f397fefd/pretrained_model/model.yaml).
 - AdaFace uses the official inspected, SHA-pinned IR101 architecture, loaded from
   safetensors with **strict** `model.net.` prefix removal. No unreviewed
   `trust_remote_code`, pickle weights, training dependencies or mutable model revisions.
@@ -80,7 +83,7 @@ Do not redistribute candidate weights in this repository.
 - [InsightFace v0.7 README](https://github.com/deepinsight/insightface/blob/v0.7/python-package/README.md):
   code MIT, **pretrained weights non-commercial research only**. This experiment uses the
   official `buffalo_l.zip` release's ArcFace ResNet50/WebFace600K `w600k_r50.onnx`, not
-  the pack's RetinaFace detector, gender/age or other models. Ordinary product deployment
+  the pack's SCRFD detector, gender/age or other models. Ordinary product deployment
   is not cleared by the code license.
 - [CVLFace MIT code license](https://github.com/mk-minchul/CVLface/blob/308142aa50adf2e187711354f7524635d3414f1e/LICENSE)
   and [official IR101 model card](https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m/blob/54f602a0737bd1ee4a4e7e9fd089a485f397fefd/README.md):
