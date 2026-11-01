@@ -258,12 +258,14 @@ def logout():
     return redirect("/", code=303)
 
 
-def call(url, data=None, token=None, method=None, service=False):
+def call(url, data=None, token=None, method=None, service=False, identity_service=False):
     headers = {}
     if token:
         headers["Authorization"] = "Bearer " + token
     if service:
         headers["X-Nephos-Service-Key"] = os.environ["SERVICE_KEY"]
+    if identity_service:
+        headers["X-Nephos-Identity-Service-Key"] = os.environ["IDENTITY_SERVICE_KEY"]
     if data is not None:
         headers["Content-Type"] = "application/json"
         data = json.dumps(data).encode()
@@ -285,11 +287,21 @@ def index():
     token = operator_token()
     users = call(IDENTITY + "/admin/realms/nephos/users?max=1000", token=token)
     state = call(LIBRARY + "/internal/v1/admin/state", service=True)
+    pin_requests = call(IDENTITY + "/realms/nephos/nephos-admin/pin-requests", identity_service=True)["requests"]
+    issued_pin = session.pop("issued_pin", None)
+    if issued_pin and issued_pin["expires"] <= time.time():
+        issued_pin = None
+    device_list = session.pop("device_list", None)
+    device_subject = session.pop("device_subject", None)
     return render_template(
         "administration.html",
         users=users,
         state=state,
         principals={p["subject"]: p["enabled"] for p in state["principals"]},
+        issued_pin=issued_pin,
+        pin_requests=pin_requests,
+        device_list=device_list,
+        device_subject=device_subject,
     )
 
 
@@ -309,15 +321,20 @@ def action():
             token=token,
             data={
                 "username": username,
-                "email": form["email"],
+                "email": form["email"].strip(),
                 "enabled": True,
-                "requiredActions": ["webauthn-register-passwordless"],
             },
         )
         users = call(
             IDENTITY + "/admin/realms/nephos/users?exact=true&username=" + urllib.parse.quote(username), token=token
         )
         subject = users[0]["id"]
+        call(
+            IDENTITY + f"/admin/realms/nephos/users/{subject}",
+            {"requiredActions": []},
+            token=token,
+            method="PUT",
+        )
         call(
             LIBRARY + "/internal/v1/admin/principals",
             {"subject": subject, "enabled": True, "displayName": username, "discoverable": True},
@@ -328,23 +345,67 @@ def action():
             {"id": str(uuid.uuid4()), "name": username + "'s library", "subject": subject},
             service=True,
         )
-        message = "User and library created. Send an enrollment invitation next."
-    elif action == "invite":
+        message = "User and personal library created. The user can request a sign-in PIN with their email."
+    elif action == "issue_pin":
         subject = str(uuid.UUID(form["subject"]))
-        call(
-            IDENTITY + f"/admin/realms/nephos/users/{subject}/execute-actions-email?lifespan=900",
-            data=["webauthn-register-passwordless"],
-            token=token,
-            method="PUT",
+        issued = call(
+            IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/pin",
+            token=None,
+            method="POST",
+            identity_service=True,
         )
-        message = "Single-use passkey enrollment link sent; expires in 15 minutes. Treat mailbox access as enrollment authority."
+        session["issued_pin"] = {"pin": issued["pin"], "expires": time.time() + issued["expiresIn"]}
+        message = "One-time PIN issued. Copy it now and give it to the user in person; it is not emailed."
     elif action == "access":
+        subject = str(uuid.UUID(form["subject"]))
+        enabled = form.get("enabled") == "yes"
+        identity_user = call(IDENTITY + "/admin/realms/nephos/users/" + subject, token=token)
+        if not enabled:
+            identity_user["enabled"] = False
+            call(IDENTITY + "/admin/realms/nephos/users/" + subject, identity_user, token, "PUT")
+            call(
+                IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/pin",
+                method="DELETE",
+                identity_service=True,
+            )
+            devices = call(IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/devices", identity_service=True)[
+                "devices"
+            ]
+            for device in devices:
+                call(
+                    IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/devices/{device['id']}",
+                    method="DELETE",
+                    identity_service=True,
+                )
+        else:
+            identity_user["enabled"] = True
+            call(IDENTITY + "/admin/realms/nephos/users/" + subject, identity_user, token, "PUT")
         call(
             LIBRARY + "/internal/v1/admin/principals",
-            {"subject": str(uuid.UUID(form["subject"])), "enabled": form.get("enabled") == "yes"},
+            {"subject": subject, "enabled": enabled},
             service=True,
         )
-        message = "Platform membership updated."
+        message = "Platform membership updated. Disabled accounts have all device sessions revoked."
+    elif action == "devices":
+        subject = str(uuid.UUID(form["subject"]))
+        session["device_list"] = call(
+            IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/devices", identity_service=True
+        )["devices"]
+        session["device_subject"] = subject
+        message = "Device sessions loaded."
+    elif action == "revoke_device":
+        subject = str(uuid.UUID(form["subject"]))
+        device_id = str(uuid.UUID(form["device_id"]))
+        call(
+            IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/devices/{device_id}",
+            method="DELETE",
+            identity_service=True,
+        )
+        session["device_list"] = call(
+            IDENTITY + f"/realms/nephos/nephos-admin/users/{subject}/devices", identity_service=True
+        )["devices"]
+        session["device_subject"] = subject
+        message = "Device session revoked. Its refresh token is no longer valid."
     elif action == "library":
         if not form["name"].strip() or len(form["name"]) > 200:
             abort(400, description="Provide a library name of at most 200 characters.")
@@ -392,8 +453,7 @@ def http_error(error):
 def provider_error(error):
     logger.warning("Administration provider rejected a request", extra={"http_status": error.code})
     return error_page(
-        f"Provider request failed ({error.code}). Inspect existing state before retrying provisioning. "
-        "For invitations, check the provider's SMTP configuration.",
+        f"Provider request failed ({error.code}). Inspect existing state before retrying provisioning.",
         502,
     )
 

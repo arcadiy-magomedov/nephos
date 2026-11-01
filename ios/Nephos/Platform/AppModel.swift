@@ -551,7 +551,7 @@ final class AppModel {
         proposedConnection = nil
     }
     @discardableResult
-    func login() async -> Bool {
+    func login(email: String, pin: String) async -> Bool {
         do { try await bootstrap() } catch {
             handle(error)
             return false
@@ -560,10 +560,10 @@ final class AppModel {
         isSigningIn = true
         defer { isSigningIn = false }
         do {
-            activity = "Opening the system sign-in browser…"
+            activity = "Checking your first-login PIN…"
             let session = AuthSession()
             auth = session
-            try await session.login(connection: connection)
+            try await session.login(connection: connection, email: email, pin: pin)
             try await establish(session)
             scheduleAutomaticRun()
             activity = ""

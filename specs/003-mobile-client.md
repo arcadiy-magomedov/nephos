@@ -54,7 +54,7 @@ Supporting specifications:
 |---|---|
 | C01 | Support native OS integrations, with Swift/SwiftUI/UIKit selected for the iOS MVP and Android implementation/code sharing left open. |
 | C02 | Allow manual backend URL setup and permission-aware local server discovery, with explicit server trust and safe endpoint changes. |
-| C03 | Authenticate only administrator-provisioned users using the backend's passkey/passwordless identity contract. |
+| C03 | Authenticate only administrator-provisioned users with a one-time bootstrap PIN, then maintain a revocable OIDC device session. |
 | C04 | Access device photos/videos through supported OS APIs, honoring denied, limited, changed, and revoked permissions. |
 | C05 | Preserve complete supported original media resources and establish verifiable backup completion before allowing local removal. |
 | C06 | Persist resumable upload state and recover from interruption, duplicate callbacks, process death, and network changes. |
@@ -124,30 +124,34 @@ need an explicit supported trust-installation/rotation path.
 
 ### 3.3 C03 - Authentication
 
-Use native email and administrator-issued enrollment-PIN screens, followed by the
-OS passkey registration sheet as specified in backend R08. No invitation email,
-external browser page or transfer of links between devices is part of this journey.
-Subsequent sign-in uses the native passkey assertion sheet. The PIN grants only
-initial enrollment; it is not an account password or a reusable login mechanism.
+Initially ask only for email and validate its format. Submit normalized email
+and `clientId` to public `POST {issuer}/nephos-admin/request-pin`. Only known
+enabled users can request a PIN; the response contains only `expiresIn`, never
+the PIN. Handle 400 (invalid input), 404 (account unavailable), 429 (wait) and
+service failures explicitly. Then present the 8-digit PIN form. The generated
+PIN appears only in the private administrator console, expires after 30 minutes,
+works once, and is delivered manually by the administrator; it is not emailed.
+Repeat requests cannot replace an active pending PIN. Submit the PIN to the Keycloak OIDC token endpoint
+using the backend's extension grant. No browser, public registration or password
+form is part of the client flow.
 
-The identity provider still owns credentials and token issuance. Preserve issuer,
-audience, signature, lifetime, client binding, and nonce validation; any OAuth
-authorization-code handoff uses PKCE. There is no public registration or password fallback.
-Face ID/Touch ID and Android biometrics unlock credentials locally; biometric
-templates are not sent to the backend.
+The identity provider owns users, sessions, and token issuance. Validate the
+issuer, audience, signature, lifetime and ID-token nonce before saving
+credentials. The response includes a short-lived access token and an offline
+refresh token. Refresh occurs silently; loss of network or an unavailable
+identity service must not clear a still-valid local session. Device revocation
+and disabled-account status are enforced through server-side introspection on
+every protected API request. HTTP 503 means retry; it is not a sign-out.
 
-Passkeys retain the backend's stable relying-party domain even when network
-routes change. iOS requires the RP's signed `webcredentials` entitlement and HTTPS
-app-site association; the deployment must qualify those prerequisites before
-claiming native enrollment works. Do not silently fall back to a browser or relabel
-a local Face ID lock as a passkey.
-Adding credentials or recovering an account uses backend R08/R09,
-not a client-specific bypass. An optional local app lock is separate from
-server authentication and cannot turn an expired session into valid authority.
+The offline session remains valid until an administrator disables the account
+or revokes that device. Face ID/Touch ID may later protect local credential use,
+but biometrics are not sent to the server and do not replace OIDC. WebAuthn,
+Associated Domains, and cross-platform biometric unlock are deferred.
 
-Refresh through a serialized secure session coordinator. On expiry, disablement,
-or revoked access, stop unauthorized work and request authentication where
-appropriate; never reinterpret an authorization error as an empty library.
+Refresh through a serialized secure session coordinator. On confirmed revocation,
+stop unauthorized work and require a new administrator-issued PIN; never
+reinterpret an authorization error as an empty library. Preserve the session
+and retry after service-unavailable responses.
 
 ### 3.4 C04 - Device-library access
 
@@ -350,9 +354,9 @@ The operator's retention guarantee and storage-failure assumptions must be clear
 
 On iOS, PhotoKit deletion affects the Photos library: with iCloud Photos it can
 propagate to iCloud and other devices. There is no generic third-party
-"evict only this phone's iCloud original" operation assumed here. Warn explicitly
-before using library deletion; do not present it as device-only eviction.
-Explain shared-library consequences where relevant. Android removal also follows
+"evict only this phone's iCloud original" operation assumed here. The approved
+gallery action is labeled "Delete from Photos" and performs no additional
+in-app warning; never label it as device-only eviction. Android removal also follows
 the selected media provider's supported semantics and OS consent, not a claim
 that every provider's remote copies are untouched.
 
@@ -366,6 +370,7 @@ Never silently empty an OS recovery bin to inflate reported savings.
 | Action | Effect |
 |---|---|
 | Free up phone space | Remove approved OS media copies; retain server originals |
+| Delete everywhere | Logically remove selected assets from Nephos, then request Photos-library deletion for local copies |
 | Server cleanup/trash | Remove selected server assets from normal/shared views; retain R33 recovery state |
 | Evict app cache | Remove regenerable application previews/downloads; do not alter either media library |
 | Export/restore to device | Explicitly create an OS-library copy; do not mark it as a new unbacked original merely by filename |

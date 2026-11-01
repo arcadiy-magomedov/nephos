@@ -113,7 +113,26 @@ def main():
         client_id = call(path + "?clientId=" + CLIENT_ID, token=token)[0]["id"]
     role = call("/admin/realms/master/roles/admin", token=token)
     call(path + "/" + client_id + "/scope-mappings/realm", [role], token)
-    print("Private operator OIDC client configured; public media realm and user credentials unchanged.")
+    api_client_id = "nephos-api-introspection"
+    api_definition = {
+        "clientId": api_client_id,
+        "name": "Nephos API token introspection",
+        "enabled": True,
+        "protocol": "openid-connect",
+        "publicClient": False,
+        "secret": os.environ["API_INTROSPECTION_CLIENT_SECRET"],
+        "standardFlowEnabled": False,
+        "implicitFlowEnabled": False,
+        "directAccessGrantsEnabled": False,
+        "serviceAccountsEnabled": False,
+    }
+    api_path = "/admin/realms/nephos/clients"
+    api_clients = call(api_path + "?clientId=" + api_client_id, token=token)
+    if api_clients:
+        call(api_path + "/" + api_clients[0]["id"], api_definition, token, "PUT")
+    else:
+        call(api_path, api_definition, token)
+    print("Private operator and API introspection clients configured; end-user credentials unchanged.")
 
 
 if __name__ == "__main__":

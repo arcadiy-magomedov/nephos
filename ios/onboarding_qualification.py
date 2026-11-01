@@ -177,12 +177,15 @@ def main():
     parser.add_argument("--base-url", default="")
     parser.add_argument("--certificate-error-url", default="")
     parser.add_argument(
+        "--signin-email", default="", help="Enabled known fixture account for the email-first PIN check."
+    )
+    parser.add_argument(
         "--backup", action="store_true", help="Exercise foreground retries and backup UI with controlled responses."
     )
     parser.add_argument("--discovery", action="store_true", help="Also require the base URL's real LAN announcement.")
     args = parser.parse_args()
-    if not args.backup and (not args.base_url or not args.certificate_error_url):
-        parser.error("Onboarding checks require --base-url and --certificate-error-url.")
+    if not args.backup and (not args.base_url or not args.certificate_error_url or not args.signin_email):
+        parser.error("Onboarding checks require --base-url, --certificate-error-url and --signin-email.")
     scratch = IOS / ".test-work"
     scratch.mkdir(exist_ok=True)
     (IOS / ".logs").mkdir(exist_ok=True)
@@ -231,6 +234,7 @@ def main():
                     {
                         "NEPHOS_UI_BASE_URL": args.base_url.rstrip("/"),
                         "NEPHOS_UI_BAD_CERT_URL": args.certificate_error_url.rstrip("/"),
+                        "NEPHOS_UI_SIGNIN_EMAIL": args.signin_email,
                         "NEPHOS_UI_DISCOVERY": "1" if args.discovery else "0",
                     }
                 )

@@ -6,6 +6,8 @@
   "rememberMe": false,
   "bruteForceProtected": true,
   "accessTokenLifespan": 300,
+  "offlineSessionIdleTimeout": 0,
+  "offlineSessionMaxLifespanEnabled": false,
   "smtpServer": {"host": "mailpit", "port": "1025", "from": "nephos@localhost", "fromDisplayName": "Nephos development"},
   "browserFlow": "nephos-passkeys",
   "webAuthnPolicyPasswordlessRpEntityName": "Nephos",
@@ -40,7 +42,10 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
       "redirectUris": ["nephos://oauth/callback"],
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": ["offline_access"],
       "attributes": {"pkce.code.challenge.method": "S256"},
       "protocol": "openid-connect",
       "protocolMappers": [
@@ -49,6 +54,12 @@
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "config": {"included.custom.audience": "nephos-api", "access.token.claim": "true", "id.token.claim": "false"}
+        },
+        {
+          "name": "nephos-introspection",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {"included.custom.audience": "nephos-api-introspection", "access.token.claim": "true", "id.token.claim": "false"}
         }
       ]
     }

@@ -110,7 +110,7 @@ Supporting documents:
 | R05 | Abstract media storage behind provider-independent contracts supporting mounted volumes, S3-compatible object storage, and Azure Blob Storage; physical storage topology must not affect application logic. |
 | R06 | Keep application logic database-engine agnostic through repository interfaces that hide persistence and retrieval details. |
 | R07 | Implement vector search as a dedicated microservice; other components must not depend on its vector database or indexing implementation. |
-| R08 | Deploy an authentication server supporting passwordless authentication, WebAuthn/passkeys, and device biometric login experiences such as iOS Face ID and Touch ID. |
+| R08 | Use an OIDC identity provider for admin-provisioned, PIN-bootstrapped device sessions with renewable credentials and explicit server-side revocation. |
 | R09 | Admit only known, administrator-provisioned users; do not allow public registration. |
 | R10 | Provide a dedicated admin web console for managing users, libraries, and system operations. |
 | R11 | Make administration accessible only through an authorized private network, never through the public internet, independently of hosting environment or networking product. |
@@ -371,82 +371,42 @@ silently truncating the result set.
 The vector engine remains **open**. Replacing it changes search-service adapters
 and deployment configuration, not application contracts.
 
-### 3.8 R08 - Passwordless identity and biometrics
+### 3.8 R08 - PIN-bootstrap OIDC device sessions
 
-Use a deployed identity provider supporting OIDC and genuine passwordless
-WebAuthn/passkey login, not only WebAuthn as a second factor.
+Keycloak owns users, session state, and all OIDC token issuance. Only an
+administrator can create users. The first login on a device initially asks only
+for email, validates its format, and publicly requests a PIN for a known enabled
+user. Only the expiry is returned to the client. The generated eight-digit PIN
+is shown in the private console and conveyed manually to the verified recipient;
+no self-registration, emailed credential, or password fallback is provided.
 
-Face ID and Touch ID unlock a device-held credential. The backend verifies a
-signed challenge; it does not receive or store the user's biometric data.
-Require authenticator user verification for passwordless login.
+The PIN expires after 30 minutes and is single-use. Public repeat requests are
+rate-limited by IP/email and preserve an active pending PIN; explicit manual
+issuance replaces it. Store a keyed HMAC verifier and expiry in the single-use
+record; requested PINs also carry account-bound AES-GCM ciphertext for the
+service-key-protected private console list. Consumption, revocation, expiry,
+disablement and replacement remove pending visibility. Request errors distinguish
+invalid input (400), unavailable user (404), cooldown (429) and outage (503).
+Grant failures remain generic for unknown accounts and invalid/expired PINs;
+limit grant attempts per account and never log the PIN. A successful exchange through
+the `urn:nephos:params:oauth:grant-type:login-pin` extension grant creates a
+normal Keycloak device session and returns OIDC access, ID and offline refresh
+tokens. The PIN is a direct bootstrap login credential; it is not only an
+enrollment authorization and is not retained by the client.
 
-Support multiple credentials, revocation, and a controlled recovery process.
-Reserve a stable HTTPS authentication domain and relying-party configuration.
-Native clients perform registration and assertion through platform passkey APIs,
-not an invitation-link/browser workflow. Token issuance remains owned by the
-identity provider; any authorization-code handoff retains PKCE, nonce, exact
-client/redirect binding and the existing OIDC validation.
+Access tokens are short-lived. Offline refresh sessions have no idle or absolute
+lifetime and remain valid until explicitly revoked or the account is disabled.
+Every protected API request checks Keycloak session status, so revoking one
+device invalidates its access and refresh tokens immediately without affecting
+other devices. A Keycloak outage fails closed with a retryable service error,
+not a false sign-out. Account disablement also revokes all device sessions.
 
-The provider must demonstrate closed provisioning, passwordless enrollment,
-credential management, and recovery. Password login is disabled; there is no
-password fallback that weakens the passkey-only policy.
-
-An administrator-provisioned account starts disabled and can enroll only with an
-account-bound, short-lived, single-use activation ceremony:
-
-1. The user enters their email in the native app.
-2. The app asks for an enrollment PIN issued by an administrator in the private
-   console and conveyed after verifying the intended recipient. No invitation
-   email or link transfer between devices is required.
-3. Correct PIN verification authorizes only a bounded enrollment session, not
-   media access. The app requests a passkey through the OS Face ID/Touch ID sheet.
-4. Server verification of the passkey completes activation and normal sign-in.
-   Subsequent sign-ins use the passkey, not a reusable PIN.
-
-Use a cryptographically generated eight-digit PIN with a ten-minute lifetime,
-at most five verification attempts, atomic single-use consumption, and additional
-account/source rate limits. Only the issuing private-console response displays
-it; public APIs and ordinary logs never expose it. Store a protected verifier,
-not plaintext or an unkeyed digest of the low-entropy code. Replacement invalidates
-the previous code. Responses must not disclose whether an email is registered.
-Bind the enrollment session and each single-use challenge to the account, client,
-origin/relying party and expiry. Interrupted or cancelled OS prompts must not
-activate the account; explicit enrollment cancellation invalidates the session.
-Adding a credential to an active account follows recent-authentication/recovery
-rules below; an ordinary initial-enrollment PIN must not bypass them.
-
-For iOS native passkeys, deployment includes a stable RP domain declared in the
-signed app's `webcredentials` Associated Domains entitlement and a matching HTTPS
-`apple-app-site-association` file. An arbitrary server URL entered at runtime
-cannot grant this entitlement. Apple normally retrieves the file through its
-public CDN; private development domains require its explicit development-mode
-association setup. A local biometric app lock is not a replacement passkey.
-See [Apple's requirements](https://developer.apple.com/documentation/authenticationservices/supporting-passkeys)
-and [domain association](https://developer.apple.com/documentation/xcode/supporting-associated-domains).
-
-Recovery uses two explicit paths:
-
-1. A user may use one of a finite set of high-entropy, single-use recovery codes
-   created at passkey enrollment. Only verifier hashes are stored server-side;
-   codes are displayed once and the user is instructed to keep them offline.
-   Successful recovery consumes the presented code, invalidates all remaining
-   recovery codes and existing sessions, revokes the previous passkey set, and
-   requires fresh passkey enrollment. Notify the account through its verified
-   channel.
-2. If all codes are unavailable, recovery requires an administrator in the
-   private console, fresh passkey authentication, verified out-of-band identity
-   confirmation against the pre-registered account channel, and a reasoned,
-   audited operation. The reset requires new passkey enrollment and immediately
-   revokes every prior passkey, recovery code, refresh token, session, and
-   outstanding activation. Notify the account through its verified channel. If
-   out-of-band identity cannot be verified, recovery is denied; there is no
-   helpdesk-only or knowledge-question bypass.
-
-Recovery never enables a disabled account or changes application membership.
-Credential addition and recovery are visible to the account owner through the
-verified channel. Keycloak is selected for the MVP in spec 004; acceptance must
-demonstrate these behaviors rather than assuming provider selection proves them.
-Provider limitations do not weaken the contract.
+Face ID/Touch ID may later protect local access to credentials, but biometrics
+remain on-device and are not an authentication factor verified by this backend.
+WebAuthn/passkeys and associated-domain setup are deferred alternatives, not
+prerequisites for this PIN/OIDC contract. Keycloak 26.8.1 internal grant and
+admin-resource SPIs are version-pinned; upgrades require rebuilding and running
+the isolated production-mode identity qualification.
 
 ### 3.9 R09 - Administrator-provisioned users
 
@@ -458,10 +418,10 @@ backend provisions the identity through a narrowly scoped identity-provider
 management API and coordinates application membership with a retryable,
 auditable workflow.
 
-Account activation and passkey enrollment must be bound to that provisioned user.
-Authentication succeeds only for permitted identities; application access also
-requires enabled membership. Recovery must not create an alternate public
-registration path.
+PIN issuance and authentication must bind to that provisioned user. Authentication
+succeeds only for enabled identities; application access also requires enabled
+membership. Reissuing a PIN or revoking a device must not create an alternate
+public registration path.
 
 Provisioning is an idempotent state machine. Until identity, membership, and
 activation binding agree, the account cannot access media or administer the

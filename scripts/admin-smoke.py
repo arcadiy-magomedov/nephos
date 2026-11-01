@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Verify closed local provisioning and delivery of passkey enrollment invitations."""
+"""Verify closed local provisioning and first-login PIN delivery to the operator."""
 
 import urllib.parse
 import uuid
 import os
+import re
 import smoke
 
 base = os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082")
@@ -40,28 +41,18 @@ def submit(values, expected=200):
 try:
     submit({"action": "create", "username": username, "email": username + "@example.test"}, expected=403)
     result = submit({"csrf": csrf, "action": "create", "username": username, "email": username + "@example.test"})
-    assert "User and library created" in result
+    assert "User and personal library created" in result
     users = smoke.request(admin_url + "/users?exact=true&username=" + username, token=smoke.admin_token())
     subject = users[0]["id"]
-    assert users[0]["requiredActions"] == ["webauthn-register-passwordless"]
-    result = submit({"csrf": csrf, "action": "invite", "subject": subject})
-    assert "Single-use passkey enrollment link sent" in result
-
-    def delivered():
-        response = smoke.request("http://localhost:18083/api/v1/messages")
-        return next(
-            (
-                message
-                for message in response["messages"]
-                if any(recipient["Address"] == username + "@example.test" for recipient in message["To"])
-            ),
-            None,
-        )
-
-    mail = smoke.wait("passkey enrollment invitation delivered to the local-only inbox", delivered)
+    assert not users[0].get("requiredActions")
+    result = submit({"csrf": csrf, "action": "issue_pin", "subject": subject})
+    assert "One-time PIN issued" in result
+    pin = re.search(r"First-login PIN \(shown once\)</h2><p><strong>([0-9]{8})</strong>", result)
+    assert pin, "The one-time PIN was not shown to the operator."
+    assert "First-login PIN (shown once)" not in admin.request("/"), "The PIN was shown more than once."
     result = submit({"csrf": csrf, "action": "access", "subject": subject})
     assert "Platform membership updated" in result
-    print("PASS: authenticated/CSRF-protected local provisioning, known user, personal library, invite and disablement")
+    print("PASS: authenticated/CSRF-protected local provisioning, one-time PIN issuance and account disablement")
 finally:
     admin.close()
     if subject:

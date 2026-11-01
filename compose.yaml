@@ -5,6 +5,9 @@ x-app-environment: &app-environment
   Authentication__Authority: http://localhost:18081/realms/nephos
   Authentication__MetadataAddress: http://keycloak:8080/realms/nephos/.well-known/openid-configuration
   Authentication__Audience: nephos-api
+  Authentication__IntrospectionEndpoint: http://keycloak:8080/realms/nephos/protocol/openid-connect/token/introspect
+  Authentication__IntrospectionClientId: nephos-api-introspection
+  Authentication__IntrospectionClientSecret: ${API_INTROSPECTION_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
   OTEL_EXPORTER_OTLP_PROTOCOL: grpc
   OTEL_METRIC_EXPORT_INTERVAL: "5000"
@@ -76,15 +79,19 @@ services:
     volumes: ["media:/data"]
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1
-    command: ["start-dev", "--import-realm"]
+    image: nephos-keycloak:26.8.1
+    build: {context: ., dockerfile: deploy/keycloak/Dockerfile}
+    command: ["start", "--optimized", "--import-realm"]
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Required}
+      KC_HTTP_ENABLED: "true"
       KC_HOSTNAME: http://localhost:18081
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      IDENTITY_ADMIN_SERVICE_KEY: ${IDENTITY_ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
+      NEPHOS_PIN_PEPPER: ${NEPHOS_PIN_PEPPER:?Run scripts/upgrade-dev-env.py}
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Required}
       KC_HEALTH_ENABLED: "true"
@@ -190,6 +197,7 @@ services:
     environment:
       ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Required}
       ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
+      API_INTROSPECTION_CLIENT_SECRET: ${API_INTROSPECTION_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
       ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-http://localhost:18082}
       ADMIN_IDENTITY_PUBLIC_URL: ${ADMIN_IDENTITY_PUBLIC_URL:-http://localhost:18081}
       IDENTITY_URL: http://keycloak:8080
@@ -231,6 +239,7 @@ services:
       IDENTITY_URL: http://keycloak:8080
       LIBRARY_ADMIN_URL: http://library-admin:8080
       SERVICE_KEY: ${ADMIN_SERVICE_KEY}
+      IDENTITY_SERVICE_KEY: ${IDENTITY_ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     ports: ["127.0.0.1:18082:8080"]
     networks: [default, admin-private]

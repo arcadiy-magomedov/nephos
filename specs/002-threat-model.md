@@ -127,42 +127,43 @@ remain release gates under R31.
 
 - **Preconditions/impact:** Incorrect OIDC/WebAuthn validation or disabled-user
   enforcement admits the wrong identity or preserves access.
-- **Established:** OIDC, passkeys with user verification, stable relying-party
-  configuration, native PKCE, and enabled application membership.
-- **Proposed:** Validate issuer, audience, signature, expiry, state/nonce, exact
-  redirect registration, and PKCE S256. Bind single-use WebAuthn challenges to the
-  account, ceremony, origin, and relying party. Define revocation propagation.
-- **Open/residual:** Provider/session design remains open; a stolen valid session
-  can act until effective revocation.
-- **E2E:** Reject wrong issuer/audience/origin, reused challenges, missing user
-  verification, mismatched PKCE/state, and disabled memberships, including with
-  already-issued sessions.
+- **Established:** Keycloak OIDC tokens, a PIN extension grant, short-lived
+  access tokens, offline device sessions, API-side token introspection, and
+  enabled application membership.
+- **Implemented controls:** Validate issuer, audience, signature and expiry;
+  validate the ID-token nonce on initial login; keep refresh tokens in Keychain;
+  introspect each API request; fail closed with 503 on identity-service outage.
+- **Open/residual:** The 8-digit PIN is a short-lived bearer credential. A
+  shoulder-surfer or compromised device can use it before consumption; a stolen
+  valid device credential remains usable until that device session is revoked.
+- **E2E:** Reject wrong issuer/audience, invalid/expired/replayed PINs, disabled
+  accounts and revoked sessions, including already-issued access and refresh
+  tokens. Verify identity-service outages return retryable failures.
 
-### T03 - Enrollment/recovery as account takeover (F01)
+### T03 - PIN login as account takeover (F01)
 
 **STRIDE:** spoofing, elevation of privilege, repudiation.
 
-- **Preconditions/impact:** Account substitution, activation replay, or weaker
-  recovery proof allows enrollment into another known user's account.
-- **Specified:** Closed provisioning, account-bound short-lived single-use
-  activation, single-use recovery codes or administrator recovery with fresh
-  passkey authentication and verified out-of-band identity, recent
-  authentication for credential changes, global revocation of superseded
-  credentials and sessions, and no disabled-account reactivation. Incomplete
-  provisioning must remain disabled.
-- **Native enrollment:** Administrator-issued eight-digit PINs expire after ten
-  minutes and five failed attempts, with atomic consumption and account/source
-  rate limits. A correct PIN grants only enrollment, never media tokens before
-  passkey verification. Reject unknown-user enumeration, concurrent PIN replay,
-  account/client/RP substitution, and use of initial-enrollment PINs to replace
-  an active account's credentials. Protect low-entropy verifiers with a server
-  secret; never log or return PINs through public APIs.
-- **Implementation choices:** Provider, activation delivery integration, and
-  first-administrator bootstrap must meet these contracts. Compromised recovery
-  authority remains powerful.
-- **E2E:** Swap account identifiers, replay/expire activation, race recovery,
-  interrupt provisioning, attempt external-login auto-registration, and recover
-  a disabled account without silently enabling its membership.
+- **Preconditions/impact:** Account substitution, PIN guessing or replay could
+  issue OIDC tokens for another known user.
+- **Specified/implemented:** Closed provisioning; account-bound 8-digit PINs,
+  30-minute expiry, atomic one-use consumption, peppered HMAC verifier, ten
+  attempts per account per 15 minutes, generic login errors, and no PIN in logs.
+  Public email-only PIN requests validate known enabled users, bound input,
+  enforce IP/email cooldowns and preserve active requests. Responses disclose
+  expiry only. The private service-key list decrypts account-bound AES-GCM
+  ciphertext from the same single-use record; consumption removes visibility.
+  Correct PIN exchange directly returns normal OIDC tokens; it is not a
+  passkey-enrollment-only grant.
+- **Open/residual:** PIN delivery is in person and depends on the operator
+  verifying the intended recipient. A screenshot or intercepted PIN can be
+  used until expiry/consumption. The grant/provider SPIs are Keycloak-version
+  coupled.
+  The explicit unavailable-account request response permits enumeration; IP
+  limits mitigate but do not eliminate distributed enumeration or request spam.
+- **E2E:** Swap account identifiers, guess, race and replay PINs, disable users,
+  revoke one device while preserving others, verify refresh and access token
+  rejection, and ensure identity-service outages do not authorize requests.
 
 ### T04 - Inconsistent media and representation authorization
 

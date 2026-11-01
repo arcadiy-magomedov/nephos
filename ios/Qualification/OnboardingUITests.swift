@@ -190,7 +190,7 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertFalse(server.exists)
     }
 
-    func testLegacyServerCertificateFailureReplacementRelaunchAndBrowserCancellation() throws {
+    func testLegacyServerCertificateReplacementAndEmailFirstPINRequest() throws {
         continueAfterFailure = false
         let environment = ProcessInfo.processInfo.environment
         let base = try XCTUnwrap(environment["NEPHOS_UI_BASE_URL"])
@@ -225,12 +225,14 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Trust and continue"].isEnabled)
         XCTAssertTrue(app.staticTexts[base + "/realms/nephos"].exists)
         app.buttons["Trust and continue"].tap()
-        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.textFields["onboarding.email"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["onboarding.pin"].exists)
+        XCTAssertFalse(app.buttons["onboarding.requestPin"].isEnabled)
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts[base + "/realms/nephos"].exists)
+        XCTAssertTrue(app.textFields["onboarding.email"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["onboarding.pin"].exists)
         app.buttons["Change server"].tap()
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         app.terminate()
@@ -241,25 +243,44 @@ final class OnboardingUITests: XCTestCase {
         app.buttons["Check server"].tap()
         XCTAssertTrue(app.buttons["Trust and continue"].waitForExistence(timeout: 30))
         app.buttons["Trust and continue"].tap()
-        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 15))
-        app.buttons["Sign in"].tap()
-        let permission = app.alerts.buttons["Continue"]
-        if permission.waitForExistence(timeout: 5) { permission.tap() }
-        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
-        XCTAssertTrue(app.webViews.textFields.firstMatch.waitForExistence(timeout: 15))
+        let email = app.textFields["onboarding.email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        replace(email, with: "not-an-email")
+        XCTAssertFalse(app.buttons["onboarding.requestPin"].isEnabled)
+        replace(email, with: "unknown-onboarding@example.invalid")
+        app.buttons["onboarding.requestPin"].tap()
+        XCTAssertTrue(
+            app.staticTexts["This email is not an enabled known account. Contact your administrator."]
+                .waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.textFields["onboarding.pin"].exists)
+        app.buttons["Edit email"].tap()
+        let knownEmail = try XCTUnwrap(environment["NEPHOS_UI_SIGNIN_EMAIL"])
+        replace(email, with: knownEmail)
+        XCTAssertEqual(email.value as? String, knownEmail, app.debugDescription)
+        app.buttons["onboarding.requestPin"].tap()
+        let pin = app.textFields["onboarding.pin"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(email.exists)
+        XCTAssertFalse(app.buttons["onboarding.submitPin"].isEnabled)
+        XCTAssertEqual(app.webViews.count, 0)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "real-system-sign-in"
+        screenshot.name = "email-validated-pin-entry"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        app.buttons["Cancel"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Sign-in was cancelled. You can try again."].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["Sign in"].isEnabled)
+        app.buttons["Different email"].tap()
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        XCTAssertFalse(pin.exists)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        XCTAssertFalse(pin.exists)
         XCTAssertFalse(app.staticTexts["Certificate not trusted"].exists)
     }
 
     private func replace(_ field: XCUIElement, with value: String) {
         field.tap()
         let previous = field.value as? String ?? ""
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + value)
     }
 }

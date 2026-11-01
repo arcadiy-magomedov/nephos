@@ -6,6 +6,8 @@ import os
 import secrets
 import socket
 import subprocess
+import time
+import urllib.parse
 import uuid
 
 import smoke
@@ -13,11 +15,17 @@ import smoke
 prefix = "nephos-identity-smoke-" + uuid.uuid4().hex
 database, identity, network = prefix + "-db", prefix + "-identity", prefix + "-network"
 password = secrets.token_hex(24)
+identity_admin_service_key = secrets.token_hex(32)
+pin_pepper = secrets.token_hex(32)
+introspection_secret = secrets.token_hex(32)
 environment = {
     **os.environ,
     "POSTGRES_PASSWORD": password,
     "KC_DB_PASSWORD": password,
     "KC_BOOTSTRAP_ADMIN_PASSWORD": password,
+    "IDENTITY_ADMIN_SERVICE_KEY": identity_admin_service_key,
+    "NEPHOS_PIN_PEPPER": pin_pepper,
+    "API_INTROSPECTION_CLIENT_SECRET": introspection_secret,
 }
 containers = []
 
@@ -88,6 +96,10 @@ try:
         "-e",
         "KC_BOOTSTRAP_ADMIN_PASSWORD",
         "-e",
+        "IDENTITY_ADMIN_SERVICE_KEY",
+        "-e",
+        "NEPHOS_PIN_PEPPER",
+        "-e",
         "KC_HTTP_ENABLED=true",
         "-e",
         "KC_PROXY_HEADERS=xforwarded",
@@ -117,7 +129,246 @@ try:
     assert forwarded["jwks_uri"].startswith("https://photos.example.test/")
     logs = docker("logs", identity)
     assert "Running the server in development mode" not in logs
-    print("PASS: actual production startup, PostgreSQL realm import, canonical HTTPS issuer and proxy-aware discovery")
+
+    def admin_token():
+        return smoke.request(
+            f"http://localhost:{port}/realms/master/protocol/openid-connect/token",
+            data=urllib.parse.urlencode(
+                {"client_id": "admin-cli", "grant_type": "password", "username": "admin", "password": password}
+            ).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )["access_token"]
+
+    admin = admin_token()
+    admin_base = f"http://localhost:{port}/admin/realms/nephos"
+    realm = smoke.request(admin_base, token=admin)
+    assert realm["offlineSessionIdleTimeout"] == 0
+    assert realm["offlineSessionMaxLifespanEnabled"] is False
+    username = "pin-smoke-" + uuid.uuid4().hex
+    smoke.request(
+        admin_base + "/users",
+        token=admin,
+        method="POST",
+        expected=201,
+        data={"username": username, "email": username + "@example.test", "enabled": True},
+    )
+    user = smoke.request(admin_base + "/users?exact=true&username=" + username, token=admin)[0]
+    subject = user["id"]
+    pin_base = f"http://localhost:{port}/realms/nephos/nephos-admin"
+    service_headers = {"X-Nephos-Identity-Service-Key": identity_admin_service_key}
+    smoke.request(pin_base + "/pin-requests", expected=401)
+    smoke.request(pin_base + "/pin-requests", token=admin, expected=401)
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+
+    def request_pin(email, expected=200, **extra):
+        return smoke.request(
+            pin_base + "/request-pin",
+            method="POST",
+            data={"email": email, "clientId": "nephos-ios", **extra},
+            expected=expected,
+        )
+
+    smoke.request(
+        pin_base + "/request-pin",
+        method="POST",
+        data=b'{"email":',
+        headers={"Content-Type": "application/json"},
+        expected=400,
+    )
+    smoke.request(
+        pin_base + "/request-pin",
+        method="POST",
+        data=b" " * 1025,
+        headers={"Content-Type": "application/json"},
+        expected=400,
+    )
+    assert request_pin(username + "@example.test", 400, clientId="admin-cli")["error"] == "invalid_request"
+    for email in ("not-an-email", "a..b@example.test", "a@-example.test"):
+        assert request_pin(email, 400)["error"] == "invalid_email"
+    assert request_pin("unknown@example.test", 404)["error"] == "account_unavailable"
+    disabled_username = "disabled-" + username
+    smoke.request(
+        admin_base + "/users",
+        token=admin,
+        method="POST",
+        expected=201,
+        data={"username": disabled_username, "email": disabled_username + "@example.test", "enabled": False},
+    )
+    assert request_pin(disabled_username + "@example.test", 404)["error"] == "account_unavailable"
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    receipt = request_pin("  " + username.upper() + "@EXAMPLE.TEST  ")
+    assert receipt == {"expiresIn": 1800}, receipt
+    pending = smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"]
+    assert len(pending) == 1 and pending[0]["email"] == username + "@example.test"
+    assert pending[0]["username"] == username and len(pending[0]["pin"]) == 8 and pending[0]["pin"].isdigit()
+    issued = {"pin": pending[0]["pin"], "expiresIn": receipt["expiresIn"]}
+    assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
+    # The real cooldown elapses; a repeated request must preserve the original PIN and expiry.
+    time.sleep(61)
+    repeated = request_pin(username + "@example.test")
+    assert set(repeated) == {"expiresIn"} and 1 <= repeated["expiresIn"] < 1800
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
+    for _ in range(9):
+        request_pin(username + "@example.test", 429)
+    assert request_pin("different-unknown@example.test", 429)["error"] == "rate_limited"
+    smoke.request(
+        pin_base + "/request-pin",
+        method="POST",
+        data=b'{"email":',
+        headers={"Content-Type": "application/json"},
+        expected=429,
+    )
+    smoke.request(
+        f"http://localhost:{port}/realms/nephos/nephos-admin/users/{subject}/pin",
+        method="POST",
+        expected=401,
+    )
+    token_url = f"http://localhost:{port}/realms/nephos/protocol/openid-connect/token"
+    grant = {
+        "grant_type": "urn:nephos:params:oauth:grant-type:login-pin",
+        "client_id": "nephos-ios",
+        "username": username + "@example.test",
+        "pin": issued["pin"],
+        "nonce": secrets.token_urlsafe(32),
+        "scope": "openid profile offline_access",
+        "device_id": str(uuid.uuid4()),
+        "device_name": "Identity smoke device",
+    }
+    incorrect_grant = {**grant, "pin": ("0" if issued["pin"][0] != "0" else "1") + issued["pin"][1:]}
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(incorrect_grant).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
+    token_response = smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(grant).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert token_response["access_token"] and token_response["id_token"] and token_response["refresh_token"]
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(grant).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
+    time.sleep(61)
+    request_pin(username + "@example.test")
+    replaced_pin = smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"][0]["pin"]
+    second_pin = smoke.request(
+        f"http://localhost:{port}/realms/nephos/nephos-admin/users/{subject}/pin",
+        method="POST",
+        headers={"X-Nephos-Identity-Service-Key": identity_admin_service_key},
+    )["pin"]
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode({**grant, "pin": replaced_pin}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
+    second_grant = {
+        **grant,
+        "pin": second_pin,
+        "device_id": str(uuid.uuid4()),
+        "device_name": "Identity smoke second device",
+    }
+    second_token_response = smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(second_grant).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    admin = admin_token()
+    disabled_user = smoke.request(admin_base + "/users?exact=true&username=" + disabled_username, token=admin)[0]
+    smoke.request(
+        admin_base + "/users/" + disabled_user["id"],
+        token=admin,
+        method="PUT",
+        data={"enabled": True},
+        expected=204,
+    )
+    request_pin(disabled_username + "@example.test")
+    disabled_pin = smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"][0]["pin"]
+    smoke.request(
+        admin_base + "/users/" + disabled_user["id"],
+        token=admin,
+        method="PUT",
+        data={"enabled": False},
+        expected=204,
+    )
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(
+            {**grant, "username": disabled_username + "@example.test", "pin": disabled_pin}
+        ).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
+    introspection_client = {
+        "clientId": "nephos-api-introspection",
+        "enabled": True,
+        "protocol": "openid-connect",
+        "publicClient": False,
+        "secret": introspection_secret,
+        "standardFlowEnabled": False,
+        "directAccessGrantsEnabled": False,
+    }
+    smoke.request(
+        admin_base + "/clients",
+        token=admin,
+        method="POST",
+        expected=201,
+        data=introspection_client,
+    )
+    introspect_url = f"http://localhost:{port}/realms/nephos/protocol/openid-connect/token/introspect"
+    introspection = smoke.request(
+        introspect_url,
+        basic="nephos-api-introspection:" + introspection_secret,
+        data=urllib.parse.urlencode({"token": token_response["access_token"]}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert introspection["active"] is True
+    devices = smoke.request(
+        f"http://localhost:{port}/realms/nephos/nephos-admin/users/{subject}/devices",
+        headers={"X-Nephos-Identity-Service-Key": identity_admin_service_key},
+    )["devices"]
+    assert len(devices) == 2, devices
+    first_device = next(item for item in devices if item["name"] == "Identity smoke device")
+    smoke.request(
+        f"http://localhost:{port}/realms/nephos/nephos-admin/users/{subject}/devices/{first_device['id']}",
+        method="DELETE",
+        expected=204,
+        headers={"X-Nephos-Identity-Service-Key": identity_admin_service_key},
+    )
+    revoked = smoke.request(
+        introspect_url,
+        basic="nephos-api-introspection:" + introspection_secret,
+        data=urllib.parse.urlencode({"token": token_response["access_token"]}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert revoked["active"] is False
+    remaining = smoke.request(
+        introspect_url,
+        basic="nephos-api-introspection:" + introspection_secret,
+        data=urllib.parse.urlencode({"token": second_token_response["access_token"]}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert remaining["active"] is True
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(
+            {"grant_type": "refresh_token", "client_id": "nephos-ios", "refresh_token": token_response["refresh_token"]}
+        ).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
+    print(
+        "PASS: production startup, email-only PIN requests/validation/rate limits/private list/consumption/replacement/disablement, offline refresh and device revocation/introspection"
+    )
 except Exception:
     if identity in containers:
         print(docker("logs", "--tail", "30", identity))

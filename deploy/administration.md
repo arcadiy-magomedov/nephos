@@ -13,19 +13,75 @@ service-account grant, implicit flow or wildcard redirect is enabled for the
 console client. Keycloak handles credential errors, brute-force protection
 and the operator's configured authentication/MFA policy.
 
+## Media-user sign-in
+
+The admin console is the only account-creation path. Creating a known account
+does not email a credential. The native client's initial sign-in asks only for
+email. Public `POST /realms/nephos/nephos-admin/request-pin` accepts bounded JSON
+`{"email":"known@example.test","clientId":"nephos-ios"}` and generates an eight-digit,
+one-use, 30-minute PIN only for a known enabled account. Its response contains
+only `{"expiresIn":1800}`, never the PIN or user ID. Invalid input returns 400,
+unknown/disabled accounts 404, rate limits 429 with `Retry-After: 60`, and
+dependency failures 503. Email is trimmed, lowercased and format-validated.
+Requests are limited to ten per IP per minute and one per normalized email per
+60 seconds. After cooldown, repeated pending requests return the original
+remaining lifetime without replacing the PIN.
+
+The operator reads **Requested sign-in PINs** in the private console and
+conveys the PIN manually after verifying the recipient; no email is sent.
+The console fetches `GET /realms/nephos/nephos-admin/pin-requests` server-side
+using `X-Nephos-Identity-Service-Key`; neither that key nor operator credentials
+are available to the native client. The response is
+`{"requests":[{"email":"known@example.test","username":"known","pin":"12345678","expiresAt":"...Z"}]}`.
+Requested PIN ciphertext (AES-256-GCM, random IV, account-bound authenticated
+data, a domain-separated key derived from `NEPHOS_PIN_PEPPER`), expiry and the
+peppered HMAC verifier share one single-use record. PINs are never logged.
+Consumption, revocation, expiry, disabled users and manual reissue remove the
+requested entry. Manual issuance remains available and displays its PIN once
+in the operator session, replacing the earlier PIN. Invalid grant attempts are
+limited to ten per account per 15 minutes. Keycloak and the public API must use
+HTTPS at the deployment edge.
+
+The native client submits the email and PIN to the Keycloak token endpoint using
+the `urn:nephos:params:oauth:grant-type:login-pin` OAuth extension grant. It
+receives normal Keycloak OIDC access, ID and offline refresh tokens; Nephos does
+not mint a parallel token format. The PIN is the bootstrap credential for that
+device, not a reusable password. API access tokens last five minutes. Offline
+refresh sessions have no idle or absolute timeout, so they persist until the
+user is disabled or an operator revokes the device session.
+
+The private console can list/revoke a single Nephos iOS device. Revocation
+removes its Keycloak offline session and is checked immediately by each
+protected API request through Keycloak token introspection. Disabling platform
+access also disables the Keycloak user and removes all recorded Nephos iOS
+sessions. APIs fail closed with HTTP 503 if Keycloak cannot report session
+status; clients should retry and must not interpret that outage as a sign-out.
+
+The PIN grant and its admin resource use Keycloak's internal provider SPIs.
+They are built into the custom `nephos-keycloak:26.8.1` image and intentionally
+pinned to Keycloak 26.8.1. Upgrades must rebuild the provider and pass
+`scripts/identity-production-smoke.py` against the proposed Keycloak version
+before deployment. The API introspection client and PIN HMAC pepper are
+separate generated secrets (`API_INTROSPECTION_CLIENT_SECRET` and
+`NEPHOS_PIN_PEPPER`). The identity extension also uses
+`IDENTITY_ADMIN_SERVICE_KEY`, distinct from the library administration key.
+Keep all three in the protected environment and rotate them only as an explicit
+credential migration.
+
 ## Deployment and upgrade
 
 New deployments use `scripts/dev-env.py`. Existing deployments must first run:
 
 ```sh
 python3 scripts/upgrade-dev-env.py
-docker compose up -d --build admin-console
+docker compose up -d --build
 ```
 
 Include your existing Compose/environment overrides in these commands. Do not
-drop a LAN/HTTPS override while upgrading. The new settings are
-`ADMIN_OIDC_CLIENT_SECRET`, `ADMIN_SESSION_SECRET` and
-`ADMIN_SESSION_STORE_PASSWORD`; existing credentials are not rotated.
+drop a LAN/HTTPS override while upgrading. The upgrade helper adds missing secrets, including `ADMIN_OIDC_CLIENT_SECRET`,
+`ADMIN_SESSION_SECRET`, `ADMIN_SESSION_STORE_PASSWORD`,
+`API_INTROSPECTION_CLIENT_SECRET`, `IDENTITY_ADMIN_SERVICE_KEY` and
+`NEPHOS_PIN_PEPPER`; existing credentials are not rotated.
 
 Compose starts the private session store, completes `admin-init`, then starts
 the console. Bootstrap is idempotent: it configures only its named client,

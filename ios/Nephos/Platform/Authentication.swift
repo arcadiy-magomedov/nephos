@@ -1,4 +1,3 @@
-import AuthenticationServices
 import CryptoKit
 import Foundation
 import Security
@@ -8,10 +7,8 @@ import UIKit
 // swift-format-ignore: AlwaysUseLowerCamelCase
 struct OIDCDiscovery: Decodable, Sendable {
     let issuer: String
-    let authorization_endpoint: URL
     let token_endpoint: URL
     let jwks_uri: URL
-    let code_challenge_methods_supported: [String]?
 }
 // swift-format-ignore: AlwaysUseLowerCamelCase
 struct TokenResponse: Decodable, Sendable {
@@ -74,10 +71,8 @@ enum Keychain {
 }
 
 @MainActor
-final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProviding, AccessTokenProviding {
-    static let redirect = "nephos://oauth/callback"
+final class AuthSession: AccessTokenProviding {
     private(set) var credentials: Credentials?
-    private var webSession: ASWebAuthenticationSession?
     private var refreshTask: Task<String, Error>?
     private var generation = UUID()
 
@@ -85,19 +80,17 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
     init(credentials: Credentials? = nil) { self.credentials = credentials }
 
     static func isCancelled(_ error: Error) -> Bool {
-        error is CancellationError || (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     static func discovery(_ connection: Connection) async throws -> OIDCDiscovery {
         let issuer = try URLPolicy.validate(connection.config.issuer, allowDevelopmentHTTP: developmentHTTP(connection))
         let doc = try await HTTP.json(
             OIDCDiscovery.self, HTTP.request(issuer.appendingPathComponent(".well-known/openid-configuration")))
-        guard doc.issuer == connection.config.issuer,
-            doc.code_challenge_methods_supported?.contains("S256") == true
-        else {
-            throw ClientError.invalid("OIDC issuer mismatch or missing PKCE S256 support.")
+        guard doc.issuer == connection.config.issuer else {
+            throw ClientError.invalid("OIDC issuer mismatch.")
         }
-        for endpoint in [doc.authorization_endpoint, doc.token_endpoint, doc.jwks_uri] {
+        for endpoint in [doc.token_endpoint, doc.jwks_uri] {
             _ = try URLPolicy.validate(endpoint.absoluteString, allowDevelopmentHTTP: developmentHTTP(connection))
             guard URLPolicy.sameOrigin(issuer, endpoint) else {
                 throw ClientError.invalid("OIDC endpoint is outside the approved issuer origin.")
@@ -112,66 +105,38 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
             return false
         #endif
     }
-    func login(connection: Connection) async throws {
+    static func requestPin(connection: Connection, email: String) async throws -> LoginPinReceipt {
+        _ = try await discovery(connection)
+        return try await LoginPinClient.request(connection: connection, email: email)
+    }
+    func login(connection: Connection, email: String, pin: String) async throws {
         let expectedGeneration = generation
         let discovery = try await Self.discovery(connection)
-        let verifier = try Self.random()
-        let state = try Self.random()
         let nonce = try Self.random()
-        var parts = URLComponents(url: discovery.authorization_endpoint, resolvingAgainstBaseURL: false)!
-        parts.queryItems = [
-            .init(name: "response_type", value: "code"), .init(name: "client_id", value: connection.config.clientId),
-            .init(name: "redirect_uri", value: Self.redirect),
-            .init(name: "scope", value: "openid profile offline_access"),
-            .init(name: "state", value: state), .init(name: "nonce", value: nonce),
-            .init(name: "code_challenge", value: Hashing.pkceChallenge(verifier)),
-            .init(name: "code_challenge_method", value: "S256"),
-        ]
-        let callback: URL = try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: parts.url!, callbackURLScheme: "nephos") { url, error in
-                if let url {
-                    continuation.resume(returning: url)
-                } else {
-                    continuation.resume(throwing: error ?? ClientError.invalid("Sign-in was cancelled."))
-                }
-            }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = true
-            webSession = session
-            if !session.start() {
-                continuation.resume(throwing: ClientError.invalid("System sign-in could not start."))
-            }
-        }
-        defer { webSession = nil }
-        guard callback.scheme == "nephos", callback.host == "oauth", callback.path == "/callback",
-            callback.user == nil, callback.password == nil, callback.port == nil, callback.fragment == nil,
-            let query = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems
-        else { throw ClientError.invalid("Invalid authentication callback.") }
-        func single(_ name: String) -> String? {
-            let matches = query.filter { $0.name == name }
-            return matches.count == 1 ? matches[0].value : nil
-        }
-        guard single("state") == state, let code = single("code"), single("error") == nil else {
-            throw ClientError.invalid("Sign-in failed or state validation failed.")
-        }
-        if let issuer = single("iss"), issuer != connection.config.issuer {
-            throw ClientError.invalid("Authorization issuer mismatch.")
-        }
         let tokens = try await Self.exchange(
             discovery.token_endpoint,
             [
-                "grant_type": "authorization_code", "code": code, "client_id": connection.config.clientId,
-                "redirect_uri": Self.redirect, "code_verifier": verifier,
+                "grant_type": "urn:nephos:params:oauth:grant-type:login-pin",
+                "client_id": connection.config.clientId,
+                "username": email.trimmingCharacters(in: .whitespacesAndNewlines),
+                "pin": pin,
+                "nonce": nonce,
+                "scope": "openid profile offline_access",
+                "device_id": UUID().uuidString,
+                "device_name": String(UIDevice.current.name.prefix(100)),
             ])
         guard let idToken = tokens.id_token else {
             throw ClientError.invalid("OIDC response omitted the identity token.")
+        }
+        guard let refreshToken = tokens.refresh_token, !refreshToken.isEmpty else {
+            throw ClientError.invalid("OIDC response omitted the persistent refresh token.")
         }
         let subject = try await JWTVerifier.verify(
             idToken, discovery: discovery, clientID: connection.config.clientId, purpose: .authorization(nonce: nonce))
         guard generation == expectedGeneration else { throw CancellationError() }
         let saved = Credentials(
             connection: connection, subject: subject, nonce: nonce, accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token, expiresAt: Date().addingTimeInterval(tokens.expires_in))
+            refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(tokens.expires_in))
         try Keychain.save(saved)
         credentials = saved
     }
@@ -214,13 +179,8 @@ final class AuthSession: NSObject, ASWebAuthenticationPresentationContextProvidi
         generation = UUID()
         refreshTask?.cancel()
         refreshTask = nil
-        webSession?.cancel()
         credentials = nil
         try Keychain.remove()
-    }
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
     }
     private static func random() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)

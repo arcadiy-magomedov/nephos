@@ -126,7 +126,7 @@ builds. The sequence below is proposed; dependency links reflect real prerequisi
 
 | Milestone | Depends on | Deliverable and exit evidence |
 |---|---|---|
-| M0: Decisions and feasibility probes | None | Resolve the next blocking choices below; demonstrate Keycloak/iOS passkey login and the supported iOS background/removal behavior before promising unattended automation |
+| M0: Decisions and feasibility probes | None | Resolve the next blocking choices below; demonstrate Keycloak PIN/OIDC login and the supported iOS background/removal behavior before promising unattended automation |
 | M1: Observable, authenticated skeleton | M0 | Compose provisions services, PostgreSQL, RabbitMQ, Keycloak, Collector, and selected telemetry destinations. Swift app configures HTTPS URL and signs in. Protected API rejects invalid tokens/membership. Logs, metrics, and a trace are queryable centrally |
 | M2: One original end to end | M1 | iOS selected-item upload traverses intent, numbered chunks, queued verification, durable original/reference/asset publication, and authorized download. Compare retrieved bytes with the source; follow HTTP and queue work in telemetry |
 | M3: Reliable uploads and resource sets | M2 | Resume interrupted uploads, deduplicate safely, handle changed sources and complete compound resource manifests. Persist client/OS task mappings; partial backups never become removal-eligible |
@@ -142,9 +142,10 @@ uncertainties are resolved.
 
 ### 5.1 M0 probes and concrete outcomes
 
-- Provision a known user, enroll/login with a passkey using iOS OIDC Code+PKCE,
-  recover credentials, and disable membership. Record required Keycloak flow
-  configuration and any gap against R08/R09.
+- Provision a known user, request a single-use PIN with email only from iOS,
+  read it in the private console for manual delivery, obtain OIDC/offline refresh
+  tokens, revoke one device, and disable membership. Record the pinned
+  Keycloak extension and any gap against R08/R09.
 - Exercise PhotoKit export, background transfer, limited access, and local
   removal on a supported real device. The requested auto-removal setting does
   not waive system confirmation. Report platform constraints before enabling it.
@@ -244,7 +245,8 @@ Implemented on `feature/mvp-foundation`:
 - Authorized bounded galleries, UTC timeline counts, previews, ranged originals,
   capture-date ordering, and persisted renewable 30-day offload holds.
 - Dedicated private administration, known-user provisioning, personal libraries,
-  enable/disable controls, and short-lived passkey invitations through SMTP.
+  enable/disable controls, and one-time PIN issue/revocation through the private
+  identity service.
 - Native iOS implementation under `ios/`; its README records supported resources,
   exact build commands, and actual native/device verification status.
 - Cold-backup/non-overwriting restore tooling and an isolated restore exercise

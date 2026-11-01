@@ -44,6 +44,9 @@ public sealed class FacesApplication : WebApplicationFactory<Program>
         {
             ["Authentication:Authority"] = "https://test.invalid",
             ["Authentication:Audience"] = "faces-test",
+            ["Authentication:IntrospectionEndpoint"] = "http://identity.test/realms/nephos/protocol/openid-connect/token/introspect",
+            ["Authentication:IntrospectionClientId"] = "nephos-api-introspection",
+            ["Authentication:IntrospectionClientSecret"] = new string('i', 48),
             ["ConnectionStrings:Faces"] = Environment.GetEnvironmentVariable("FACES_TEST_CONNECTION"),
             ["Services:Library"] = "http://127.0.0.1:1",
             ["Services:Storage"] = "http://127.0.0.1:1",
@@ -55,6 +58,8 @@ public sealed class FacesApplication : WebApplicationFactory<Program>
         }));
         builder.ConfigureServices(services =>
         {
+            services.AddHttpClient("keycloak-introspection")
+                .ConfigurePrimaryHttpMessageHandler(() => new ActiveIntrospectionHandler());
             services.RemoveAll<IAnalysisSourceClient>();
             services.AddSingleton<IAnalysisSourceClient>(Source);
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
@@ -64,6 +69,15 @@ public sealed class FacesApplication : WebApplicationFactory<Program>
                 options.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(config);
             });
         });
+    }
+
+    private sealed class ActiveIntrospectionHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"active\":true}", System.Text.Encoding.UTF8, "application/json")
+            });
     }
 
     public HttpClient Authenticated(string owner)

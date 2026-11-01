@@ -29,6 +29,7 @@ app.Use(async (context, next) =>
     catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested) { context.Response.StatusCode = 503; }
 });
 app.UseAuthentication();
+app.UseActiveTokenStatus();
 app.UseAuthorization();
 app.MapServiceHealth();
 app.MapFaceEndpoints();

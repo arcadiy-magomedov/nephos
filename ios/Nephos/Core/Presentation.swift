@@ -71,7 +71,10 @@ struct OnboardingFailure: LocalizedError {
         }
         detail = error.localizedDescription
         self.address = address
-        if let urlError = error as? URLError {
+        if let pinError = error as? LoginPinError {
+            title = "Sign-in could not continue"
+            guidance = pinError.localizedDescription
+        } else if let urlError = error as? URLError {
             switch urlError.code {
             case .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
                 .serverCertificateNotYetValid, .secureConnectionFailed:
@@ -84,7 +87,7 @@ struct OnboardingFailure: LocalizedError {
                     "Check the address, Wi-Fi or VPN, and the Local Network permission in iPhone Settings. A connection failure alone does not identify the cause."
             }
         } else {
-            title = identity ? "Check the sign-in address" : "Server check failed"
+            title = identity ? "Sign-in could not continue" : "Server check failed"
             guidance = "Review the details below or contact your server administrator."
         }
     }

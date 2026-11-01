@@ -1,5 +1,7 @@
 .build/
 .derivedData/
+.deviceBuild/
+.build-xcode/
 .test-work/
 *.xcuserstate
 xcuserdata/

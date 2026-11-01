@@ -25,7 +25,8 @@ not a claim that the entire platform is production-qualified.
 - Known-user Keycloak authentication; real JWT validation and immediate platform
   disablement checks. No public registration or application password grant.
 - A separate, localhost-only administration console for known users, personal
-  libraries, membership enablement, and passwordless enrollment invitations.
+  libraries, membership enablement, single-use 30-minute first-login PINs, and
+  per-device session revocation.
 - Idempotent upload intents, 4 MiB immutable out-of-order chunks, persisted part
   receipts, resumable status, cancellation before sealing, and asynchronous
   SHA-256/length verification. Uploads are limited to 8 GiB each, 16 pending per
@@ -104,14 +105,16 @@ docker compose up -d --build
 
 Credentials and a stable server ID are generated into ignored, mode-0600 `.env`.
 The generator refuses to overwrite it; the upgrade helper only adds missing
-settings. Environment edits do not rotate credentials already stored in volumes.
+settings, including the Keycloak PIN pepper, isolated identity-admin key and API
+introspection credential.
+Environment edits do not rotate credentials already stored in volumes.
 
 | Local address | Purpose |
 |---|---|
 | `http://localhost:18080` | Backend API and `/v1/config` |
 | `http://localhost:18082` | Dedicated administration console, username `admin` |
 | `http://localhost:18081/admin/` | Keycloak provider administration, username `admin` |
-| `http://localhost:18083` | Development-only enrollment email inbox (Mailpit) |
+| `http://localhost:18083` | Development-only email inbox for unrelated local services (Mailpit) |
 | `http://localhost:13000` | Grafana, username `admin` |
 
 The Nephos console has a normal **Sign in** page. It redirects to the private
@@ -127,13 +130,13 @@ rebuilding the administration services. See
 [administration deployment and recovery](deploy/administration.md) for the OIDC
 bootstrap, private origins, session lifecycle and verification commands.
 
-In the Nephos administration console, create a user and personal library, then
-send a passkey enrollment invitation. Open the invitation from the local Mailpit
-inbox in the browser/device that will hold the credential. Invitations expire
-after 15 minutes. Configure a real SMTP provider in the private Keycloak console
-for non-development enrollment; mailbox access is enrollment/recovery authority.
-Do not expose Mailpit publicly. Existing foundation realms without SMTP can
-configure `mailpit:1025`, sender `nephos@localhost`, in Keycloak.
+In the Nephos administration console, create a user and personal library.
+The user enters only their email initially in the native iOS app; a known,
+enabled account receives a sign-in request, not the PIN. Read **Requested
+sign-in PINs** in the private console and give the 8-digit PIN directly to the
+verified user; it is one-use, expires after 30 minutes, and is never emailed.
+The user then enters the PIN in the app. The PIN exchange creates a revocable
+Keycloak device session with a persistent offline refresh token.
 
 Then follow [ios/README.md](ios/README.md) to build/run the native client, approve
 the server, sign in, select a library, and import Photos resources. Automatic
@@ -283,19 +286,21 @@ python3 scripts/passkey-smoke.py
 
 Run smoke scripts only against the disposable local profile. They create/remove
 test users and records, briefly stop/restart the Collector/broker/API, and
-validate real JWT/JWKS, PostgreSQL, immutable chunk retry, restart/resume,
+validate real JWT/JWKS and immediate Keycloak session revocation, PostgreSQL, immutable chunk retry, restart/resume,
 verification failure, deduplication, authorization, original/ranged bytes,
-previews, retention, paging, invitation delivery, and stored correlated telemetry.
-The browser suite enrolls a real Keycloak passkey using Chromium's virtual
-authenticator, signs in with Code+PKCE, verifies API access/disablement, and
+previews, retention, paging, first-login PIN issue/one-use exchange and stored correlated telemetry.
+The browser suite uses Keycloak's virtual authenticator to exercise the existing
+passkey flow, signs in with Code+PKCE, verifies API access/disablement, and
 exercises operator recovery. This is not a physical iOS passkey or real Photos
 removal test. The edge suite exercises the actual Caddy route configuration
 on a temporary loopback HTTP listener; it does not certify DNS or certificates.
 The restore exercise pauses writers, restores isolated PostgreSQL/RabbitMQ/media
 volumes, checks original bytes, complete manifests and frozen views against their
 restored references, verifies a pending publication survives, and resumes the
-source deployment. A separate disposable identity stack verifies actual Keycloak
-production startup and proxy-aware HTTPS discovery without changing the live realm.
+source deployment. A separate disposable identity stack verifies production Keycloak startup,
+first-login PIN issue/expiry/one-use exchange, offline refresh, device revocation,
+immediate token introspection and proxy-aware HTTPS discovery without changing
+the live realm.
 The low-storage suite uses a tiny temporary RAM-backed volume, never fills the
 host disk, and verifies that rejected admission leaves no upload state.
 The CI workflow repeats backend checks; native commands live in `ios/README.md`.

@@ -1,7 +1,7 @@
 # Nephos native iOS
 
-Native SwiftUI/UIKit application, iOS 17+, using PhotoKit, AuthenticationServices,
-Security/Keychain, CryptoKit, URLSession, AVKit and BackgroundTasks. No external
+Native SwiftUI/UIKit application, iOS 17+, using PhotoKit, Security/Keychain,
+CryptoKit, URLSession, AVKit and BackgroundTasks. No external
 packages. The checked-in Xcode project is generated deterministically by
 `python3 generate_project.py`; generation is only needed after adding source files.
 Core invariants also form a dependency-free Swift package.
@@ -39,21 +39,25 @@ and VoiceOver with Accessibility Inspector before claiming performance budgets.
 ## Native design and social journeys
 
 The [approved first-launch wizard](../design/ios/onboarding.html) is now native
-SwiftUI. Server/issuer preflight, explicit trust, system-browser sign-in, library
+SwiftUI. Server/issuer preflight, explicit trust, email/PIN sign-in, library
 selection, optional Photos access and a final confirmation are separate steps.
 Unreachable API/identity endpoints and untrusted certificates have inline recovery
 guidance; a remote server advertising a loopback issuer is rejected before login.
 The issuer is displayed explicitly even when it differs from the API origin.
-TLS validation and the existing PKCE/nonce/issuer checks remain mandatory.
-The revised [native enrollment contract](../specs/003-mobile-client.md#33-c03---authentication)
-replaces invitation links with email, an administrator-issued one-time PIN and
-the platform passkey sheet. That replacement is **not implemented yet**: a stable
-RP domain, signed Associated Domains capability and HTTPS app-site association
-must be established first. The currently installed login still uses OIDC's system
-authentication session; the upload/session fixes below do not change that flow.
-Initial ID tokens require the authorization nonce. Refresh ID tokens may omit it
-(OIDC Core 12.2), but cannot change it or the account subject. Signature, issuer,
-audience and lifetime validation still apply before refreshed credentials are saved.
+TLS validation and OIDC issuer/nonce checks remain mandatory. The native client
+first validates an email against enabled known accounts, then requests a
+one-time 8-digit PIN. Only the private admin console displays the generated PIN
+for manual delivery; the unauthenticated requester never receives it. A separate
+PIN-entry screen exchanges it for standard Keycloak OIDC access, identity, and
+offline refresh tokens. PINs expire after 30 minutes;
+reissuing one replaces its predecessor. The public client does not use a client
+secret or receive a password. Initial ID tokens require the generated nonce.
+Refresh ID tokens may omit it (OIDC Core 12.2), but cannot change it or the
+account subject. Signature, issuer, audience and lifetime validation still
+apply before refreshed credentials are saved. Offline refresh sessions survive
+idle time and are revoked by disabling the account or revoking that device in
+the admin console. Associated Domains and passkeys are not part of this login
+flow.
 
 **Find nearby servers** starts an optional Bonjour search on the first step.
 The host advertises `_nephos._tcp` with a versioned TXT record containing its
@@ -201,12 +205,15 @@ use an isolated XCTest application (not the installed production bundle):
 ```sh
 python3 onboarding_qualification.py --simulator <booted-simulator-UUID> \
   --base-url https://server-hostname:port \
-  --certificate-error-url https://address-not-covered-by-certificate:port
+  --certificate-error-url https://address-not-covered-by-certificate:port \
+  --signin-email enabled-fixture@example.test
 ```
 
 The simulator must trust the development CA. The test seeds an old IP/localhost
 connection, drives failed TLS checks, draft persistence, server replacement,
-approval/relaunch, the real system sign-in page and cancellation. It does not
+approval/relaunch, email validation, unknown-account rejection, the separate
+PIN-entry screen and changing email. Use an enabled disposable fixture account;
+its generated PIN is visible only in the private admin console. The test does not
 simulate Face ID or silently trust certificates. The disposable app and its
 generated Xcode project are removed afterward; personal signing settings are
 untouched.
@@ -423,14 +430,15 @@ restoration fixture.
 2. Enter the canonical HTTPS base URL, including any deployment base path.
    Probe `/v1/config`, inspect its server ID and issuer, and explicitly approve.
    Confirm those values independently with the operator.
-3. The native public OIDC client must be **`nephos-ios`**, with Authorization
-   Code + S256 PKCE and exact registered redirect **`nephos://oauth/callback`**.
-   Enable `openid profile offline_access`; do not configure a client secret.
-   The issuer must publish discovery and RS256 JWKS, with authorization, token
-   and JWKS endpoints on its own origin. Configure known-user/passkey-only
-   enrollment/login on the identity provider; the app adds no registration,
-   password form, recovery bypass or native credential enrollment endpoint.
-4. Sign in through `ASWebAuthenticationSession`, then choose a library.
+3. Configure the native public OIDC client **`nephos-ios`** and the pinned
+   Keycloak PIN provider. Allow the `openid profile offline_access` scopes and
+   publish discovery plus RS256 JWKS on the issuer origin. Do not configure a
+   client secret. No redirect URI or Associated Domains capability is needed
+   for PIN login.
+4. Enter the account email and continue. Only after the server validates the
+   known enabled account does the PIN-entry screen appear. Ask the administrator
+   for the PIN displayed in the private console, then
+   choose a library.
    Gallery access does not require Photos permission.
 5. In Backup, explicitly grant Photos access, select originals with the native
    picker, or independently enable automatic backup in Settings.
@@ -634,9 +642,9 @@ shared-library relationships, or implicit lossless format conversion are promise
 No registered developer team or physical-device certification was available.
 Before using irreplaceable media, perform signed-device E2E probes for:
 
-- known-user passkey enrollment/login, PKCE callback interception resistance,
-  refresh rotation, revocation, account/server switches, and the deployment's
-  issuer/RP hostname and HTTPS trust chain;
+- known-user PIN issuance/expiry/one-use behavior, OIDC token verification,
+  offline refresh, device revocation, account/server switches, and the
+  deployment's issuer hostname and HTTPS trust chain;
 - selected/limited/denied/revoked Photos access, cloud-only originals, low disk
   space, source edits, supported formats and compound/edited rejection;
 - interruptions/reboots/force quits, surviving URLSession task callbacks,
@@ -663,7 +671,7 @@ passkey/background/deletion gate is marked passed.
 | Background updates | APNs device registration, durable push delivery and remote update hints. Existing background URLSession/BGProcessing backup is OS-scheduled, not guaranteed overnight execution. |
 | Offline/mobile completeness | Pinned offline originals, Bonjour discovery, million-item local indexing, complete localization, and broad Dynamic Type/VoiceOver/device qualification. |
 | Media lifecycle | User metadata/date editing and collaborative editing. Server trash and marker-only restore are available from the gallery menu; deleted originals are eligible for scheduled purge after 30 days. Current shared grants are read-only. |
-| Release acceptance | Physical-iPhone passkey enrollment/login, signing/production HTTPS, interruptions/force-quits, actual overnight backup and safe Photos/iCloud removal. RAW pairs need representative device qualification. |
+| Release acceptance | Physical-iPhone PIN/OIDC login and revocation, signing/production HTTPS, interruptions/force-quits, actual overnight backup and Photos/iCloud behavior qualification. RAW pairs need representative device qualification. |
 | Platform roadmap | Android, Helm/Swarm deployment, alternate storage/database adapters, HA, independent full recovery including the optional Faces database, and future books/Jellyfin-style applications. |
 
 This list distinguishes absent product features from unpassed release checks.

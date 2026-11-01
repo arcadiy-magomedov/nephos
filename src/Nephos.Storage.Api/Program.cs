@@ -26,6 +26,7 @@ if (builder.Configuration.GetValue<bool>("Worker:Enabled"))
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseAuthentication();
+app.UseActiveTokenStatus();
 app.UseAuthorization();
 app.MapServiceHealth();
 app.MapUploads();

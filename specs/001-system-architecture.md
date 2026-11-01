@@ -38,7 +38,7 @@ flowchart TB
     end
 
     subgraph identity["Identity provider ownership"]
-        idp["Auth server: OIDC and passkeys"]
+        idp["Auth server: OIDC PIN grant and device sessions"]
         iddb[("Identity persistence")]
     end
 
@@ -80,7 +80,10 @@ flowchart TB
     privateGw -->|"Operator authorization"| dashboards
 
     client -->|"HTTPS APIs and ranged media"| edge
-    client -->|"OIDC / passkey ceremonies"| login
+    client -->|"OIDC PIN token exchange and refresh"| login
+    library -->|"Per-request token introspection"| idp
+    upload -->|"Per-request token introspection"| idp
+    face -->|"Per-request token introspection"| idp
     admin -->|"Private network plus admin authentication"| privateGw
     privateGw --> console
     console -->|"Scoped provisioning"| idAdmin

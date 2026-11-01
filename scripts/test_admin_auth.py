@@ -8,6 +8,7 @@ import sys
 import time
 import types
 import unittest
+import urllib.error
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -121,6 +122,32 @@ class AdminAuthTests(unittest.TestCase):
             self.assertEqual(self.get().status_code, 401)
             dependency.assert_not_called()
 
+    def test_requested_pins_are_only_loaded_for_operator_and_are_not_cached_in_session(self):
+        self.seed()
+        pending = {
+            "email": "known@example.test",
+            "username": "<known>",
+            "pin": "12345678",
+            "expiresAt": "2026-11-01T15:30:00Z",
+        }
+        with patch.object(
+            self.web, "call", side_effect=[[], {"principals": [], "libraries": []}, {"requests": [pending]}]
+        ) as dependency:
+            response = self.get()
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Requested sign-in PINs", response.data)
+            self.assertIn(b"12345678", response.data)
+            self.assertIn(b"&lt;known&gt;", response.data)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertEqual(
+                dependency.call_args.args[0], self.web.IDENTITY + "/realms/nephos/nephos-admin/pin-requests"
+            )
+            self.assertEqual(dependency.call_args.kwargs, {"identity_service": True})
+        with self.client.session_transaction(base_url=self.origin) as session:
+            self.assertNotIn("pin_requests", session)
+        with patch.object(self.web, "call", side_effect=urllib.error.URLError("unavailable")):
+            self.assertEqual(self.get().status_code, 503)
+
     def test_session_failure_is_explicit_and_fail_closed(self):
         self.seed()
         from redis.exceptions import ConnectionError
@@ -188,7 +215,11 @@ class AdminAuthTests(unittest.TestCase):
                         return_value={"access_token": "refreshed-fixture", "expires_at": time.time() + 300},
                     ),
                     patch.object(self.web.provider, "parse_id_token", return_value=userinfo) as parse,
-                    patch.object(self.web, "call", side_effect=[[], {"principals": [], "libraries": []}]) as dependency,
+                    patch.object(
+                        self.web,
+                        "call",
+                        side_effect=[[], {"principals": [], "libraries": []}, {"requests": []}],
+                    ) as dependency,
                 ):
                     self.assertEqual(self.get().status_code, status)
                     self.assertIsNone(parse.call_args.kwargs["nonce"])

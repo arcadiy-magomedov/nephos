@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -66,6 +67,26 @@ public sealed class LibraryApiTests
     }
 
     [Fact]
+    public async Task Revoked_sessions_are_rejected_before_application_access()
+    {
+        await using var factory = new ApiFactory { IntrospectionActive = false };
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/libraries")).StatusCode);
+        Assert.Equal(0, factory.Repository.Calls);
+    }
+
+    [Fact]
+    public async Task Identity_outage_is_retryable_and_does_not_run_authorized_handlers()
+    {
+        await using var factory = new ApiFactory { IntrospectionUnavailable = true };
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/v1/libraries")).StatusCode);
+        Assert.Equal(0, factory.Repository.Calls);
+    }
+
+    [Fact]
     public async Task Pages_are_bounded_and_use_an_explicit_continuation()
     {
         await using var factory = new ApiFactory();
@@ -99,6 +120,7 @@ public sealed class LibraryApiTests
         client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/v1/libraries")).StatusCode);
     }
+
     [Fact]
     public async Task Asset_delete_requires_authentication_and_repository_ownership()
     {
@@ -126,6 +148,8 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
     public FakeRepository Repository { get; } = new();
     public FakeAnalysisRepository Analysis { get; } = new();
     public FakeAssetRepository Assets { get; } = new();
+    public bool IntrospectionActive { get; set; } = true;
+    public bool IntrospectionUnavailable { get; set; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -134,11 +158,16 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
         {
             ["Authentication:Authority"] = Issuer,
             ["Authentication:Audience"] = "nephos-api",
+            ["Authentication:IntrospectionEndpoint"] = "http://identity.test/realms/nephos/protocol/openid-connect/token/introspect",
+            ["Authentication:IntrospectionClientId"] = "nephos-api-introspection",
+            ["Authentication:IntrospectionClientSecret"] = new string('i', 48),
             ["ConnectionStrings:Library"] = "Host=localhost;Database=unused;Username=unused",
             ["Services:Key"] = InternalKey
         }));
         builder.ConfigureServices(services =>
         {
+            services.AddHttpClient("keycloak-introspection")
+                .ConfigurePrimaryHttpMessageHandler(() => new IntrospectionHandler(this));
             services.RemoveAll<ILibraryRepository>();
             services.AddSingleton<ILibraryRepository>(Repository);
             services.RemoveAll<IAnalysisRepository>();
@@ -167,6 +196,21 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
     {
         await base.DisposeAsync();
         rsa.Dispose();
+    }
+
+    private sealed class IntrospectionHandler(ApiFactory factory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("http://identity.test/realms/nephos/protocol/openid-connect/token/introspect", request.RequestUri?.ToString());
+            Assert.Equal("Basic", request.Headers.Authorization?.Scheme);
+            if (factory.IntrospectionUnavailable) throw new HttpRequestException("Synthetic identity outage.");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $"{{\"active\":{factory.IntrospectionActive.ToString().ToLowerInvariant()}}}", Encoding.UTF8, "application/json")
+            });
+        }
     }
 }
 

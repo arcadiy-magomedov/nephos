@@ -11,17 +11,22 @@ struct OnboardingView: View {
     @State private var url = ""
     @State private var allowHTTP = false
     @State private var busy = false
+    @State private var operationTask: Task<Void, Never>?
     @State private var failure: OnboardingFailure?
     @State private var notice: String?
     @State private var selectedLibrary: UUID?
     @State private var backup = false
     @State private var wifiOnly = true
+    @State private var email = ""
+    @State private var pin = ""
+    @State private var requestedEmail: String?
+    @State private var pinExpiry: Date?
     @State private var permission = PHAuthorizationStatus.notDetermined
     @State private var initialized = false
     @State private var discovery = ServerDiscovery()
 
     private enum Step: Int, CaseIterable {
-        case server, trust, signIn, library, photos, ready
+        case server, trust, signIn, enterPin, library, photos, ready
     }
 
     private var chosenLibrary: Library? { model.libraries.first { $0.id == selectedLibrary } }
@@ -43,7 +48,7 @@ struct OnboardingView: View {
                             .frame(height: 3)
                         }
                     }.accessibilityHidden(true)
-                    Text("\(step.rawValue + 1) of 6").font(.caption2).foregroundStyle(.secondary)
+                    Text("\(step.rawValue + 1) of \(Step.allCases.count)").font(.caption2).foregroundStyle(.secondary)
                 }.padding(.horizontal, 22).padding(.vertical, 12)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -102,7 +107,16 @@ struct OnboardingView: View {
             .onChange(of: step) { _, step in
                 if step != .server { discovery.stop() }
             }
-            .onDisappear { discovery.stop() }
+            .onChange(of: model.connection) { _, _ in
+                requestedEmail = nil
+                pinExpiry = nil
+                pin = ""
+                if step == .enterPin { step = .signIn }
+            }
+            .onDisappear {
+                discovery.stop()
+                operationTask?.cancel()
+            }
         }
     }
 
@@ -154,17 +168,30 @@ struct OnboardingView: View {
             }
         case .signIn:
             heading("Sign in to Nephos", symbol: "key")
-            description(
-                "Use an account created by your server administrator. Sign-in opens in the secure system browser.")
+            description("Enter your email. A PIN is generated only for an enabled account added by your administrator.")
+            TextField("Email address", text: $email)
+                .textContentType(.emailAddress).keyboardType(.emailAddress).textInputAutocapitalization(.never)
+                .autocorrectionDisabled().textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("onboarding.email")
+                .disabled(busy)
+                .onSubmit { requestPin() }
+            card("No account yet?", text: "Ask your administrator to add your email. Self-registration is disabled.")
+        case .enterPin:
+            heading("Enter your PIN", symbol: "key")
+            description("Your administrator can now see the PIN in the admin console. Ask them to give it to you.")
+            if let requestedEmail { Text(requestedEmail).font(.subheadline).textSelection(.enabled) }
+            TextField("8-digit PIN", text: $pin)
+                .textContentType(.oneTimeCode).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("onboarding.pin")
+                .disabled(busy)
+                .onChange(of: pin) { _, value in
+                    pin = String(value.filter { $0 >= "0" && $0 <= "9" }.prefix(8))
+                }
             if let connection = model.connection { card("Sign-in address", text: connection.config.issuer) }
-            card(
-                "No account yet?",
-                text:
-                    "Ask your administrator to add you and provide a first-login invitation. Self-registration is disabled."
-            )
-            description(
-                "The Apple Account used to install this development app is not a Nephos account. Nephos does not collect your password in its own form."
-            )
+            if let pinExpiry {
+                Text("PIN expires at \(pinExpiry.formatted(date: .omitted, time: .shortened)). It works once.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         case .library:
             heading("How will you use Nephos?", symbol: "folder")
             description("Browse your server library, or also back up originals from this iPhone.")
@@ -282,6 +309,8 @@ struct OnboardingView: View {
                 if step == .server || step == .trust {
                     checkServer()
                 } else if step == .signIn {
+                    requestPin()
+                } else if step == .enterPin {
                     signIn()
                 } else if step == .library {
                     loadLibraries(reset: true)
@@ -290,6 +319,14 @@ struct OnboardingView: View {
                 }
             }
             if step.rawValue < Step.library.rawValue {
+                if step == .signIn {
+                    secondary("Edit email") { failure = nil }
+                } else if step == .enterPin {
+                    secondary("Different email") {
+                        failure = nil
+                        resetPinRequest()
+                    }
+                }
                 secondary("Change server", action: editServer)
             } else {
                 secondary("Back to library choice") {
@@ -315,8 +352,14 @@ struct OnboardingView: View {
                 }.disabled(candidate == nil)
                 secondary("Different server", action: editServer)
             case .signIn:
-                primary("Sign in", action: signIn)
+                primary("Continue", action: requestPin).disabled((try? LoginPinPolicy.email(email)) == nil)
+                    .accessibilityIdentifier("onboarding.requestPin")
                 secondary("Change server", action: editServer)
+            case .enterPin:
+                primary("Sign in", action: signIn).disabled(pin.count != 8)
+                    .accessibilityIdentifier("onboarding.submitPin")
+                secondary("Request PIN again", action: requestPin)
+                secondary("Different email") { resetPinRequest() }
             case .library:
                 primary("Set up backup") { chooseMode(true) }.disabled(
                     chosenLibrary == nil || chosenLibrary?.isReadOnly == true)
@@ -390,11 +433,14 @@ struct OnboardingView: View {
         busy = true
         failure = nil
         notice = nil
-        Task { @MainActor in
-            defer { busy = false }
+        operationTask = Task { @MainActor in
+            defer {
+                busy = false
+                operationTask = nil
+            }
             do { try await operation() } catch {
                 guard !AuthSession.isCancelled(error) else { return }
-                failure = OnboardingFailure(error, identity: step == .signIn)
+                failure = OnboardingFailure(error, identity: step == .signIn || step == .enterPin)
                 model.message = nil
             }
         }
@@ -409,7 +455,7 @@ struct OnboardingView: View {
             step = .trust
         }
     }
-    private func signIn() {
+    private func requestPin() {
         perform {
             guard let approved = model.connection else {
                 step = .server
@@ -421,7 +467,27 @@ struct OnboardingView: View {
                 return
             }
             model.proposedConnection = nil
-            if await model.login() {
+            let normalized = try LoginPinPolicy.email(email)
+            let epoch = model.epoch
+            let receipt = try await AuthSession.requestPin(connection: approved, email: normalized)
+            try Task.checkCancellation()
+            guard model.connection == approved, model.epoch == epoch else { throw CancellationError() }
+            requestedEmail = normalized
+            email = normalized
+            pin = ""
+            pinExpiry = Date().addingTimeInterval(TimeInterval(receipt.expiresIn))
+            step = .enterPin
+        }
+    }
+    private func signIn() {
+        perform {
+            guard let requestedEmail, let pinExpiry, pinExpiry > Date() else {
+                resetPinRequest()
+                throw LoginPinError.expiredRequest
+            }
+            guard pin.count == 8 else { throw ClientError.invalid("Enter the 8-digit PIN.") }
+            if await model.login(email: requestedEmail, pin: pin) {
+                pin = ""
                 if model.needsOnboarding { resumeSetup() }
             } else if let message = model.message {
                 throw ClientError.invalid(message)
@@ -432,6 +498,7 @@ struct OnboardingView: View {
     }
     private func editServer() {
         perform {
+            resetPinRequest()
             try await model.beginServerChange()
             step = .server
         }
@@ -441,10 +508,17 @@ struct OnboardingView: View {
         notice = nil
         switch step {
         case .trust, .signIn: editServer()
+        case .enterPin: resetPinRequest()
         case .photos: step = .library
         case .ready: step = backup ? .photos : .library
         default: break
         }
+    }
+    private func resetPinRequest() {
+        requestedEmail = nil
+        pinExpiry = nil
+        pin = ""
+        step = .signIn
     }
     private func loadLibraries(reset: Bool = false) {
         perform { try await model.loadLibraries(reset: reset) }

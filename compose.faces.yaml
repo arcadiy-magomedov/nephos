@@ -63,6 +63,9 @@ services:
       Authentication__Authority: http://localhost:18081/realms/nephos
       Authentication__MetadataAddress: http://keycloak:8080/realms/nephos/.well-known/openid-configuration
       Authentication__Audience: nephos-api
+      Authentication__IntrospectionEndpoint: http://keycloak:8080/realms/nephos/protocol/openid-connect/token/introspect
+      Authentication__IntrospectionClientId: nephos-api-introspection
+      Authentication__IntrospectionClientSecret: ${API_INTROSPECTION_CLIENT_SECRET:?Run scripts/upgrade-dev-env.py}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_METRIC_EXPORT_INTERVAL: "5000"

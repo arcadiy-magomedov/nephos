@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -18,6 +22,8 @@ namespace Nephos.ServiceDefaults;
 
 public static class Extensions
 {
+    private const string IntrospectionUnavailable = "Nephos.KeycloakIntrospectionUnavailable";
+
     public static WebApplicationBuilder AddServiceDefaults(this WebApplicationBuilder builder, string serviceName)
     {
         if (builder.Configuration.GetValue<bool>("Worker:Enabled")) serviceName += "-worker";
@@ -58,7 +64,76 @@ public static class Extensions
                 ClockSkew = TimeSpan.FromSeconds(30),
                 ValidAlgorithms = [SecurityAlgorithms.RsaSha256]
             };
+            var introspectionEndpoint = builder.Configuration["Authentication:IntrospectionEndpoint"];
+            var introspectionClientId = builder.Configuration["Authentication:IntrospectionClientId"];
+            var introspectionClientSecret = builder.Configuration["Authentication:IntrospectionClientSecret"];
+            if (string.IsNullOrWhiteSpace(introspectionEndpoint) ||
+                string.IsNullOrWhiteSpace(introspectionClientId) ||
+                string.IsNullOrWhiteSpace(introspectionClientSecret))
+            {
+                throw new InvalidOperationException("Keycloak token introspection settings are required.");
+            }
+            if (!Uri.TryCreate(introspectionEndpoint, UriKind.Absolute, out var introspectionUri) ||
+                (introspectionUri.Scheme != Uri.UriSchemeHttps && introspectionUri.Scheme != Uri.UriSchemeHttp))
+            {
+                throw new InvalidOperationException("Authentication:IntrospectionEndpoint must be an absolute HTTP(S) URL.");
+            }
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    try
+                    {
+                        var authorization = context.Request.Headers.Authorization.ToString();
+                        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        {
+                            context.Fail("Bearer token is missing.");
+                            return;
+                        }
+                        var client = context.HttpContext.RequestServices
+                            .GetRequiredService<IHttpClientFactory>().CreateClient("keycloak-introspection");
+                        using var request = new HttpRequestMessage(HttpMethod.Post, introspectionUri);
+                        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                            $"{introspectionClientId}:{introspectionClientSecret}"));
+                        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+                        request.Content = new FormUrlEncodedContent(
+                            [new KeyValuePair<string, string>("token", authorization["Bearer ".Length..].Trim())]);
+                        using var response = await client.SendAsync(request, context.HttpContext.RequestAborted);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            context.HttpContext.Items[IntrospectionUnavailable] = true;
+                            context.Fail("Token session status is unavailable.");
+                            return;
+                        }
+                        using var body = await JsonDocument.ParseAsync(
+                            await response.Content.ReadAsStreamAsync(context.HttpContext.RequestAborted),
+                            cancellationToken: context.HttpContext.RequestAborted);
+                        if (!body.RootElement.TryGetProperty("active", out var active) ||
+                            active.ValueKind != JsonValueKind.True)
+                        {
+                            context.Fail("The identity provider has revoked this token session.");
+                        }
+                    }
+                    catch (OperationCanceledException) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                    {
+                        context.HttpContext.Items[IntrospectionUnavailable] = true;
+                        context.Fail("Token session status is unavailable.");
+                    }
+                    catch (HttpRequestException)
+                    {
+                        context.HttpContext.Items[IntrospectionUnavailable] = true;
+                        context.Fail("Token session status is unavailable.");
+                    }
+                    catch (JsonException)
+                    {
+                        context.HttpContext.Items[IntrospectionUnavailable] = true;
+                        context.Fail("Token session status is unavailable.");
+                    }
+                }
+            };
         });
+        builder.Services.AddHttpClient("keycloak-introspection", client =>
+            client.Timeout = TimeSpan.FromSeconds(5));
         builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme).ValidateOnStart();
         builder.Services.AddAuthorization();
         builder.Services.AddProblemDetails();
@@ -95,6 +170,26 @@ public static class Extensions
                 .AddMeter("Nephos.*")
                 .AddOtlpExporter());
         return builder;
+    }
+
+    public static void UseActiveTokenStatus(this WebApplication app)
+    {
+        app.Use(async (context, next) =>
+        {
+            if (context.Items.ContainsKey(IntrospectionUnavailable))
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.Headers.RetryAfter = "5";
+                context.Response.Headers.CacheControl = "no-store";
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    title = "Authentication service temporarily unavailable.",
+                    status = StatusCodes.Status503ServiceUnavailable
+                });
+                return;
+            }
+            await next();
+        });
     }
 
     public static void MapServiceHealth(this WebApplication app)

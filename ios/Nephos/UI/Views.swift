@@ -1506,9 +1506,6 @@ struct BackupView: View {
                 if let notice = model.backupNotice {
                     Text(notice).font(.callout).foregroundStyle(.secondary)
                 }
-                if model.needsReauthentication {
-                    Button("Sign in to resume backup") { Task { await model.login() } }
-                }
                 if model.backupItems.isEmpty {
                     ContentUnavailableView {
                         Label("No photos queued", systemImage: "photo.on.rectangle")
@@ -1864,8 +1861,6 @@ struct SettingsView: View {
                         Text("Server: \(connection.config.serverId)").font(.caption)
                     }
                     Button("Sign out / change server", role: .destructive) { signingOut = true }.disabled(
-                        model.isRunning)
-                    Button("Sign in again to refresh authorization") { Task { await model.login() } }.disabled(
                         model.isRunning)
                     Text(
                         "Sign-out cancels system tasks and clears credentials, gallery, and viewer caches. Pending upload staging remains isolated by server and account, available only after that account signs in again."

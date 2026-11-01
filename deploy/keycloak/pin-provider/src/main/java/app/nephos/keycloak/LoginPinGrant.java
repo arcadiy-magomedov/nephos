@@ -1,0 +1,140 @@
+package app.nephos.keycloak;
+
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+
+import jakarta.ws.rs.core.Response;
+import org.keycloak.OAuth2Constants;
+import org.keycloak.OAuthErrorException;
+import org.keycloak.events.Errors;
+import org.keycloak.events.EventType;
+import org.keycloak.models.AuthenticatedClientSessionModel;
+import org.keycloak.models.ClientSessionContext;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.protocol.oidc.grants.OAuth2GrantTypeBase;
+import org.keycloak.services.CorsErrorResponseException;
+import org.keycloak.services.managers.AuthenticationManager;
+import org.keycloak.authentication.AuthenticationProcessor;
+import org.keycloak.services.managers.AuthenticationSessionManager;
+import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.sessions.RootAuthenticationSessionModel;
+
+public final class LoginPinGrant extends OAuth2GrantTypeBase {
+    @Override
+    public Response process(Context context) {
+        setContext(context);
+        checkClient();
+        if (!"nephos-ios".equals(client.getClientId()) || !client.isPublicClient()) {
+            return invalidGrant();
+        }
+
+        String email = formParams.getFirst("username");
+        String pin = formParams.getFirst("pin");
+        String deviceId = formParams.getFirst("device_id");
+        String deviceName = formParams.getFirst("device_name");
+        String nonce = formParams.getFirst("nonce");
+        if (email == null || email.length() > 320 || pin == null || !pin.matches("[0-9]{8}")
+                || !isUuid(deviceId)
+                || deviceName == null || deviceName.isBlank() || deviceName.length() > 100) {
+            return invalidGrant();
+        }
+        if (nonce == null || nonce.isBlank() || nonce.length() > 256) return invalidGrant();
+
+        email = PinSupport.normalizeEmail(email);
+        if (email == null) return invalidGrant();
+        UserModel user = session.users().getUserByEmail(realm, email);
+        if (user == null || !user.isEnabled()) {
+            return invalidGrant();
+        }
+
+        String lockKey = PinSupport.lockKey(realm.getName(), user.getId());
+        var singleUse = session.singleUseObjects();
+        if (!singleUse.putIfAbsent(lockKey, 5)) {
+            return temporarilyUnavailable();
+        }
+
+        try {
+            user = session.users().getUserById(realm, user.getId());
+            if (user == null || !user.isEnabled()) return invalidGrant();
+            Map<String, String> attempts = singleUse.get(PinSupport.attemptsKey(realm.getName(), user.getId()));
+            int count = attempts == null ? 0 : Integer.parseInt(attempts.getOrDefault("count", "0"));
+            if (count >= 10) {
+                return invalidGrant();
+            }
+            String attemptsKey = PinSupport.attemptsKey(realm.getName(), user.getId());
+            if (attempts == null) {
+                singleUse.put(attemptsKey, 15 * 60, Map.of("count", "1"));
+            } else {
+                singleUse.replace(attemptsKey, Map.of("count", Integer.toString(count + 1)));
+            }
+
+            String scope = getRequestedScopes();
+            Map<String, String> record = singleUse.get(PinSupport.pinKey(realm.getName(), user.getId()));
+            if (record == null || Long.parseLong(record.getOrDefault("expiresAt", "0"))
+                    <= java.time.Instant.now().getEpochSecond() || !PinSupport.constantTimeEquals(
+                    record.getOrDefault("digest", ""), PinSupport.pinDigest(pin))) {
+                return invalidGrant();
+            }
+            if (singleUse.remove(PinSupport.pinKey(realm.getName(), user.getId())) == null) {
+                return invalidGrant();
+            }
+
+            RootAuthenticationSessionModel root = new AuthenticationSessionManager(session)
+                    .createAuthenticationSession(realm, false);
+            AuthenticationSessionModel authSession = root.createAuthenticationSession(client);
+            authSession.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
+            authSession.setAction(AuthenticatedClientSessionModel.Action.AUTHENTICATE.name());
+            authSession.setClientNote(OIDCLoginProtocol.ISSUER,
+                    org.keycloak.services.Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName()));
+            authSession.setClientNote(OIDCLoginProtocol.SCOPE_PARAM, scope);
+            authSession.setAuthenticatedUser(user);
+            AuthenticationManager.setClientScopesInSession(session, authSession);
+
+            AuthenticationProcessor processor = new AuthenticationProcessor();
+            processor.setAuthenticationSession(authSession)
+                    .setFlowPath("token")
+                    .setConnection(clientConnection)
+                    .setEventBuilder(event)
+                    .setRealm(realm)
+                    .setSession(session)
+                    .setUriInfo(session.getContext().getUri())
+                    .setRequest(request);
+            ClientSessionContext clientSessionCtx = processor.attachSession();
+            UserSessionModel userSession = processor.getUserSession();
+            userSession.setNote(PinSupport.DEVICE_ID_NOTE, deviceId.toLowerCase());
+            userSession.setNote(PinSupport.DEVICE_NAME_NOTE, deviceName.trim());
+            clientSessionCtx.setAttribute(OIDCLoginProtocol.NONCE_PARAM, nonce);
+            updateUserSessionFromClientAuth(userSession);
+            event.user(user).session(userSession).detail("auth_method", "nephos_login_pin");
+            return createTokenResponse(user, userSession, clientSessionCtx, scope, false, null);
+        } finally {
+            singleUse.remove(lockKey);
+        }
+    }
+
+    private boolean isUuid(String value) {
+        if (value == null) return false;
+        try {
+            return java.util.UUID.fromString(value).toString().equalsIgnoreCase(value);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private Response invalidGrant() {
+        event.error(Errors.INVALID_USER_CREDENTIALS);
+        throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT,
+                "The account or PIN is invalid or expired.", Response.Status.BAD_REQUEST);
+    }
+
+    private Response temporarilyUnavailable() {
+        throw new CorsErrorResponseException(cors, OAuthErrorException.TEMPORARILY_UNAVAILABLE,
+                "Sign-in is temporarily unavailable. Try again.", Response.Status.SERVICE_UNAVAILABLE);
+    }
+
+    @Override public EventType getEventType() { return EventType.LOGIN; }
+    @Override public Set<String> getTokenParameterNames() { return Collections.emptySet(); }
+}
