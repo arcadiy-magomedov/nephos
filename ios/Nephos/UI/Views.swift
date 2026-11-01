@@ -787,6 +787,13 @@ private struct GalleryMediaTile: View {
     let item: GalleryMedia
     let model: AppModel
     @State private var image: UIImage?
+    private var accessibilityDescription: String {
+        let name =
+            item.asset?.fileName ?? item.date?.formatted(date: .abbreviated, time: .shortened) ?? "Local original"
+        return "\(item.isVideo ? "Video" : "Photo"), \(name)"
+            + "\(item.localIdentifier == nil ? "" : ", on this iPhone")"
+            + "\(item.uploaded ? ", uploaded" : "")\(item.shared ? ", shared with you" : "")"
+    }
     var body: some View {
         Color.clear.aspectRatio(1, contentMode: .fit)
             .overlay {
@@ -821,10 +828,7 @@ private struct GalleryMediaTile: View {
             }
             .clipped().clipShape(RoundedRectangle(cornerRadius: 3))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "\(item.isVideo ? "Video" : "Photo")\(item.localIdentifier == nil ? "" : ", on this iPhone")"
-                    + "\(item.uploaded ? ", uploaded" : "")\(item.shared ? ", shared with you" : "")"
-            )
+            .accessibilityLabel(accessibilityDescription)
             .task(id: "\(model.photosGeneration)/\(item.id)") {
                 image = nil
                 if let identifier = item.localIdentifier {
