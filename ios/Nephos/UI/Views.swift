@@ -867,7 +867,7 @@ private struct LocalOriginalView: View {
 private struct GalleryMediaTile: View {
     let item: GalleryMedia
     let model: AppModel
-    @State private var image: UIImage?
+    @State private var preview = GalleryPreview<UIImage>()
     @State private var failure: String?
     @State private var retry = 0
     @State private var pixels: CGFloat = 1
@@ -884,7 +884,7 @@ private struct GalleryMediaTile: View {
             .overlay {
                 ZStack {
                     Rectangle().fill(.quaternary)
-                    if let image {
+                    if let image = preview.value {
                         Image(uiImage: image).resizable().scaledToFill()
                     } else {
                         Image(
@@ -928,18 +928,18 @@ private struct GalleryMediaTile: View {
                 id:
                     "\(model.epoch)/\(model.mediaGeneration)/\(item.localIdentifier == nil ? "" : model.photosGeneration.uuidString)/\(item.id)/\(retry)/\(pixels)"
             ) {
-                image = nil
+                preview.beginRefresh(epoch: model.epoch, generation: model.mediaGeneration, source: item.id)
                 failure = nil
                 let epoch = model.epoch
                 let generation = model.mediaGeneration
                 var localError: Error?
                 if let identifier = item.localIdentifier {
                     do {
-                        let preview = try await model.photos.thumbnail(
+                        let loaded = try await model.photos.thumbnail(
                             identifier, targetSize: CGSize(width: pixels, height: pixels))
                         try Task.checkCancellation()
                         guard epoch == model.epoch, generation == model.mediaGeneration else { return }
-                        image = preview
+                        preview.value = loaded
                     } catch is CancellationError {
                         return
                     } catch {
@@ -949,14 +949,16 @@ private struct GalleryMediaTile: View {
                         localError = error
                     }
                 }
-                if image == nil, let asset = item.asset, let api = model.api, let account = model.account {
+                if item.localIdentifier == nil || preview.value == nil || localError != nil,
+                    let asset = item.asset, let api = model.api, let account = model.account
+                {
                     do {
-                        let preview = try await MediaCache.shared.preview(asset, api: api, account: account)
+                        let loaded = try await MediaCache.shared.preview(asset, api: api, account: account)
                         try Task.checkCancellation()
                         guard epoch == model.epoch, generation == model.mediaGeneration, account == model.account else {
                             return
                         }
-                        image = preview
+                        preview.value = loaded
                     } catch is CancellationError {
                         return
                     } catch {
@@ -965,7 +967,7 @@ private struct GalleryMediaTile: View {
                         }
                         failure = error.localizedDescription
                     }
-                } else if let localError, image == nil {
+                } else if let localError {
                     failure = localError.localizedDescription
                 }
             }

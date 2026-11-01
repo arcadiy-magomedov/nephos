@@ -93,6 +93,33 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                             mountain.close()
                             mountain.fill()
                         }
+                    if env["NEPHOS_UI_SCREEN"] == "backup-people" {
+                        let page = RemoteList<FacePerson, UUID>()
+                        var acceptedName = ""
+                        let personID = UUID()
+                        let stale = Task {
+                            await page.load(
+                                reset: true, model: model, onLoaded: { acceptedName = "stale name" }
+                            ) { _ in
+                                try await Task.sleep(for: .milliseconds(100))
+                                return (
+                                    [FacePerson(id: personID, name: "stale name", aliases: [], redirectId: nil)], nil
+                                )
+                            }
+                        }
+                        try await Task.sleep(for: .milliseconds(20))
+                        await page.load(reset: true, model: model, onLoaded: { acceptedName = "current name" }) { _ in
+                            return ([FacePerson(id: personID, name: "current name", aliases: [], redirectId: nil)], nil)
+                        }
+                        await stale.value
+                        guard acceptedName == "current name", page.items.first?.name == "current name" else {
+                            throw ClientError.invalid("A stale People request overwrote the accepted name.")
+                        }
+                        window.rootViewController = UIHostingController(
+                            rootView: NavigationStack { PeopleView(model: model) })
+                        try report(["ready": true, "screen": "backup-people", "realAPI": false])
+                        return
+                    }
                     if env["NEPHOS_UI_SCREEN"] == "backup-publication" {
                         NetworkPolicy.shared.qualificationNetwork(constrained: true)
                         var record = model.ledger.records[0]
@@ -115,10 +142,24 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                     }
                     if env["NEPHOS_UI_SCREEN"] == "backup-gallery" {
                         try await qualifyGallery(model)
+                        if env["NEPHOS_UI_PREVIEW_REGRESSION"] == "1" {
+                            model.photos.qualificationGalleryAssets = [
+                                LocalGalleryAsset(
+                                    identifier: "fixture-0", date: Date(timeIntervalSince1970: 1_790_000_255),
+                                    isVideo: false)
+                            ]
+                            var record = BackupQualificationProtocol.records[0]
+                            record.phase = .ready
+                            record.assetId = UUID(uuidString: "00000000-0000-0000-0000-000000000251")!
+                            model.ledger.records = [record]
+                        }
                         window.rootViewController = UIHostingController(
                             rootView: QualificationGalleryHost(model: model))
                         Task {
-                            try await Task.sleep(for: .seconds(env["NEPHOS_UI_SCROLL_REGRESSION"] == "1" ? 12 : 3))
+                            try await Task.sleep(
+                                for: .seconds(
+                                    env["NEPHOS_UI_SCROLL_REGRESSION"] == "1"
+                                        || env["NEPHOS_UI_PREVIEW_REGRESSION"] == "1" ? 12 : 3))
                             BackupQualificationProtocol.setRevision(2)
                         }
                         try report(["ready": true, "screen": "backup-gallery", "realAPI": false])
@@ -477,6 +518,11 @@ private final class BackupQualificationProtocol: URLProtocol {
     private static var peak = 0
     private static var revision: Int64 = 1
     private static var pageCount = 0
+    private static let namedPerson = UUID()
+    private static let unnamedPerson = UUID()
+    private static var sourceName = "Source person"
+    private static var destinationName: String?
+    private static var merged = false
     static var assetPageCount: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -496,6 +542,49 @@ private final class BackupQualificationProtocol: URLProtocol {
             createdAt: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_790_000_000 + Double(index))),
             hasPreview: false)
     }
+    private func peopleResponse() throws -> (status: Int, data: Data) {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+        guard let path = request.url?.path else { throw ClientError.invalid("The fixture request has no URL.") }
+        let source = FacePerson(
+            id: Self.namedPerson, name: Self.sourceName, aliases: [],
+            redirectId: Self.merged ? Self.unnamedPerson : nil)
+        let target = FacePerson(id: Self.unnamedPerson, name: Self.destinationName, aliases: [], redirectId: nil)
+        if path == "/v1/faces/people" {
+            return (
+                200,
+                try JSONSerialization.data(
+                    withJSONObject: [
+                        "items": try (Self.merged ? [target] : [source, target]).map {
+                            try JSONSerialization.jsonObject(with: JSONEncoder().encode($0))
+                        }
+                    ])
+            )
+        }
+        if path == "/v1/faces/observations" || path.hasSuffix("/assets") {
+            return (200, Data("{\"items\":[]}".utf8))
+        }
+        if path.hasSuffix("/name"), request.httpMethod == "PUT" {
+            let input = try JSONSerialization.jsonObject(with: requestData()) as? [String: Any]
+            guard path.contains(Self.namedPerson.uuidString), let name = input?["name"] as? String else {
+                throw ClientError.invalid("Unexpected People rename fixture request.")
+            }
+            Self.sourceName = name
+            return (204, Data())
+        }
+        if path.hasSuffix("/merge"), request.httpMethod == "POST" {
+            let input = try JSONDecoder().decode([String: UUID].self, from: requestData())
+            guard path.contains(Self.namedPerson.uuidString), input["targetId"] == Self.unnamedPerson else {
+                throw ClientError.invalid("Unexpected People merge fixture request.")
+            }
+            Self.merged = true
+            Self.destinationName = Self.sourceName
+            return (204, Data())
+        }
+        if path == "/v1/faces/people/\(Self.namedPerson)" { return (200, try JSONEncoder().encode(source)) }
+        if path == "/v1/faces/people/\(Self.unnamedPerson)" { return (200, try JSONEncoder().encode(target)) }
+        throw ClientError.invalid("Unexpected People fixture route: \(path)")
+    }
     private var pending = false
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "backup-qualification.invalid"
@@ -507,6 +596,10 @@ private final class BackupQualificationProtocol: URLProtocol {
             let data: Data
             if Self.screen == "backup-gallery" {
                 respond(status: 200, data: try galleryResponse())
+                return
+            } else if Self.screen == "backup-people" {
+                let response = try peopleResponse()
+                respond(status: response.status, data: response.data)
                 return
             } else if request.httpMethod == "PUT", request.url?.path.contains("/resource-sets/") == true {
                 let intent = try JSONDecoder().decode(ResourceSetIntent.self, from: requestData())
@@ -656,6 +749,14 @@ private struct QualificationGalleryHost: View {
     @State private var phase: ScenePhase = .active
     var body: some View {
         GalleryView(model: model)
+            .safeAreaInset(edge: .bottom) {
+                if ProcessInfo.processInfo.environment["NEPHOS_UI_PREVIEW_REGRESSION"] == "1" {
+                    Button("Refresh previews") {
+                        model.photos.qualificationThumbnailDelay = .seconds(3)
+                        model.photosGeneration = UUID()
+                    }
+                }
+            }
             .environment(\.scenePhase, phase)
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                 phase = .inactive

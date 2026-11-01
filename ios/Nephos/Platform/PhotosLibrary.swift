@@ -66,6 +66,8 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
     private let imageManager: PHCachingImageManager
     #if UI_QUALIFICATION
         var qualificationThumbnail: UIImage?
+        var qualificationThumbnailDelay: Duration = .zero
+        var qualificationGalleryAssets: [LocalGalleryAsset]?
     #endif
 
     func thumbnail(
@@ -73,7 +75,10 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         contentMode: PHImageContentMode = .aspectFill, networkAllowed: Bool = false
     ) async throws -> UIImage {
         #if UI_QUALIFICATION
-            if let qualificationThumbnail { return qualificationThumbnail }
+            if let qualificationThumbnail {
+                try await Task.sleep(for: qualificationThumbnailDelay)
+                return qualificationThumbnail
+            }
         #endif
         guard authorization == .authorized || authorization == .limited else {
             throw ClientError.invalid("Allow Photos access to see the original preview.")
@@ -204,6 +209,9 @@ final class PhotosLibrary: NSObject, PHPhotoLibraryChangeObserver {
         return (0..<result.count).map { result.object(at: $0) }
     }
     func galleryAssets(limit: Int = 300) async throws -> [LocalGalleryAsset] {
+        #if UI_QUALIFICATION
+            if let qualificationGalleryAssets { return Array(qualificationGalleryAssets.prefix(limit)) }
+        #endif
         guard authorization == .authorized || authorization == .limited else { return [] }
         let worker = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()

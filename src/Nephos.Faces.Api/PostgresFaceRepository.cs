@@ -263,7 +263,10 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         await using var c = await data.OpenConnectionAsync(ct);
         await using var command = Command(c, """
             SELECT id,name,aliases,redirect_id FROM people WHERE owner=$1 AND ($2::uuid IS NULL OR id>$2)
-            AND ($4::text IS NULL OR lower(name)=lower($4) OR EXISTS(SELECT 1 FROM unnest(aliases) a WHERE lower(a)=lower($4)))
+            AND redirect_id IS NULL
+            AND ($4::text IS NULL OR EXISTS(
+                SELECT 1 FROM people labels WHERE labels.owner=$1 AND resolve_person(labels.owner,labels.id)=people.id
+                AND (lower(labels.name)=lower($4) OR EXISTS(SELECT 1 FROM unnest(labels.aliases) a WHERE lower(a)=lower($4)))))
             ORDER BY id LIMIT $3
             """, owner, after, limit, name);
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -319,6 +322,12 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
             UPDATE people SET redirect_id=$1 WHERE owner=$2 AND id=$3
             AND (($1::uuid IS NULL AND redirect_id IS NOT NULL) OR ($1::uuid IS NOT NULL AND redirect_id IS NULL))
             """, ct, root, owner, source) != 1) return false;
+        if (root is not null)
+            await Execute(c, """
+                UPDATE people target SET name=source.name
+                FROM people source WHERE target.owner=$1 AND target.id=$2
+                AND source.owner=target.owner AND source.id=$3 AND target.name IS NULL AND source.name IS NOT NULL
+                """, ct, owner, root, source);
         await Audit(c, owner, target is null ? "unmerge" : "merge", source, root, ct);
         await tx.CommitAsync(ct);
         return true;

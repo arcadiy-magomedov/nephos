@@ -77,6 +77,82 @@ public sealed class PersistenceTests
     }
 
     [DatabaseFact]
+    public async Task MergingNamedSourceIntoUnnamedDestinationPreservesNameAndSearchAcrossRestart()
+    {
+        await using var db = Open();
+        var repository = new PostgresFaceRepository(db);
+        var owner = "merge-label-" + Guid.NewGuid();
+        var first = Source(owner);
+        var second = Source(owner);
+        await repository.EnqueueAsync(owner, first, default);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, Result(first.Sha256), default);
+        await repository.EnqueueAsync(owner, second, default);
+        await repository.CompleteAsync((await repository.ClaimAsync(default))!, Result(second.Sha256, 1), default);
+        var faces = await repository.FacesAsync(owner, null, null, null, 100, default);
+        var source = faces.Single(face => face.AssetId == first.Id).PersonId!.Value;
+        var target = faces.Single(face => face.AssetId == second.Id).PersonId!.Value;
+        Assert.True(await repository.NameAsync(owner, source, new("Preserved name", ["source alias"]), default));
+        Assert.True(await repository.MergeAsync(owner, source, target, default));
+        await using var restarted = Open();
+        var reader = new PostgresFaceRepository(restarted);
+        Assert.Equal("Preserved name", (await reader.PersonAsync(owner, target, default))!.Name);
+        Assert.Equal(target, Assert.Single(await reader.PeopleAsync(owner, null, 100, "source alias", default)).Id);
+        Assert.Single(await reader.PeopleAsync(owner, null, 100, null, default));
+        Assert.Equal(2, (await reader.AssetsAsync(owner, target, null, 100, default)).Count);
+        Assert.True(await reader.NameAsync(owner, target, new("Target label", []), default));
+        Assert.True(await reader.NameAsync(owner, source, new("Source label", ["source alias"]), default));
+        Assert.Equal("Target label", (await reader.PersonAsync(owner, target, default))!.Name);
+        Assert.Equal(target, Assert.Single(await reader.PeopleAsync(owner, null, 100, "SOURCE LABEL", default)).Id);
+        Assert.Equal(target, Assert.Single(await reader.PeopleAsync(owner, null, 100, "source alias", default)).Id);
+        Assert.True(await reader.MergeAsync(owner, source, null, default));
+        Assert.Equal("Source label", (await reader.PersonAsync(owner, source, default))!.Name);
+        Assert.Equal("Target label", (await reader.PersonAsync(owner, target, default))!.Name);
+        Assert.Equal(2, (await reader.PeopleAsync(owner, null, 100, null, default)).Count);
+    }
+
+    [DatabaseFact]
+    public async Task LegacyMergedNamesBackfillOnlyUnambiguousLabelsAndNeverOverwriteUserNames()
+    {
+        await using var db = Open();
+        var repository = new PostgresFaceRepository(db);
+        var owner = "legacy-label-" + Guid.NewGuid();
+        var target = Guid.NewGuid();
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        await using (var insert = db.CreateCommand("""
+            INSERT INTO people(id,owner,name) VALUES($1,$2,NULL),($3,$2,'First label'),($4,$2,'Second label');
+            """))
+        {
+            insert.Parameters.AddWithValue(target);
+            insert.Parameters.AddWithValue(owner);
+            insert.Parameters.AddWithValue(first);
+            insert.Parameters.AddWithValue(second);
+            await insert.ExecuteNonQueryAsync();
+        }
+        await using (var merge = db.CreateCommand("UPDATE people SET redirect_id=$1 WHERE owner=$2 AND id IN ($3,$4)"))
+        {
+            merge.Parameters.AddWithValue(target);
+            merge.Parameters.AddWithValue(owner);
+            merge.Parameters.AddWithValue(first);
+            merge.Parameters.AddWithValue(second);
+            await merge.ExecuteNonQueryAsync();
+        }
+        var root = Environment.GetEnvironmentVariable("FACES_PROJECT_ROOT")!;
+        var sql = await File.ReadAllTextAsync(Path.Combine(root, "src/Nephos.Migrations/Sql/faces/006_merged_names.sql"));
+        await using var migrate = db.CreateCommand(sql);
+        await migrate.ExecuteNonQueryAsync();
+        Assert.Null((await repository.PersonAsync(owner, target, default))!.Name);
+        Assert.Equal(target, Assert.Single(await repository.PeopleAsync(owner, null, 100, "First label", default)).Id);
+        Assert.Equal(target, Assert.Single(await repository.PeopleAsync(owner, null, 100, "Second label", default)).Id);
+        Assert.True(await repository.NameAsync(owner, second, new("First label", []), default));
+        await migrate.ExecuteNonQueryAsync();
+        Assert.Equal("First label", (await repository.PersonAsync(owner, target, default))!.Name);
+        Assert.True(await repository.NameAsync(owner, target, new("User selected label", []), default));
+        await migrate.ExecuteNonQueryAsync();
+        Assert.Equal("User selected label", (await repository.PersonAsync(owner, target, default))!.Name);
+    }
+
+    [DatabaseFact]
     public async Task FencesStaleLeasesRetriesNoFacesAndModelChanges()
     {
         await using var db = Open();

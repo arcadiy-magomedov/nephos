@@ -111,7 +111,7 @@ struct PeopleView: View {
                 }
             }
         }
-        .task(id: query) {
+        .task(id: "\(query)/\(model.peopleGeneration)/\(model.epoch)") {
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             await load(reset: true)
         }
@@ -191,16 +191,21 @@ struct PersonView: View {
             })
     }
     private func load(reset: Bool = false) async {
-        await page.load(reset: reset, model: model) { cursor in
-            guard let api = model.api else { throw ClientError.signedOut }
-            let epoch = model.epoch
-            let latest = try await api.person(person.id)
-            let result = try await api.personAssets(person.id, after: cursor)
-            let assets = try await api.assets(ids: result.items)
-            guard epoch == model.epoch, !Task.isCancelled else { throw CancellationError() }
-            person = latest
-            return (assets, result.next)
-        }
+        var latest: FacePerson?
+        await page.load(
+            reset: reset, model: model,
+            onLoaded: {
+                if let latest { person = latest }
+            },
+            fetch: { cursor in
+                guard let api = model.api else { throw ClientError.signedOut }
+                let epoch = model.epoch
+                latest = try await api.person(person.id)
+                let result = try await api.personAssets(person.id, after: cursor)
+                let assets = try await api.assets(ids: result.items)
+                guard epoch == model.epoch, !Task.isCancelled else { throw CancellationError() }
+                return (assets, result.next)
+            })
     }
 }
 
@@ -245,6 +250,7 @@ struct PersonNameView: View {
                 aliases: aliases.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
             try await api.namePerson(person.id, input: input)
             guard epoch == model.epoch else { return }
+            model.peopleGeneration = UUID()
             dismiss()
         } catch {
             guard epoch == model.epoch else { return }
@@ -273,7 +279,7 @@ struct MergePeopleView: View {
                             portrait(source)
                         }
                         Text(
-                            "The name “\(target.displayName)” will be kept. Originals are unchanged. You can undo the merge in correction history."
+                            "The name “\(target.name ?? source.name ?? target.displayName)” will be kept. Names and aliases from both groups remain searchable. Originals are unchanged. You can undo the merge in correction history."
                         )
                         .foregroundStyle(.secondary)
                         if let failure { Text(failure).foregroundStyle(.red) }
@@ -312,6 +318,7 @@ struct MergePeopleView: View {
                 try await api.negativeMatch(target.id, other: source.id)
             }
             guard epoch == model.epoch else { return }
+            model.peopleGeneration = UUID()
             dismiss()
         } catch {
             guard epoch == model.epoch else { return }
@@ -431,6 +438,7 @@ private struct CorrectionRow: View {
             }
             try await api.undoMerge(correction.subjectId)
             guard epoch == model.epoch else { return }
+            model.peopleGeneration = UUID()
             await load()
         } catch {
             guard epoch == model.epoch else { return }

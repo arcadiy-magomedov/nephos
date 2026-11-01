@@ -26,6 +26,7 @@ final class AppModel {
     var timelineError: String?
     var mediaGeneration = UUID()
     var photosGeneration = UUID()
+    var peopleGeneration = UUID()
     var message: String?
     var activity = ""
     var backupNotice: String?

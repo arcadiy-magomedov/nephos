@@ -147,6 +147,15 @@ Explicit navigation/restoration scroll requests are consumed once, not replayed
 whenever upload-state changes rebuild the unified gallery.
 Publishing a phone original keeps its local cell ID, capture date and day group;
 the server reference changes its backup state without relocating the thumbnail.
+Preview refreshes retain the displayed image while its replacement loads; account,
+library and source changes still clear it. Core regressions cover both continuity
+and clearing at those privacy boundaries.
+The mandatory native suite also compares thumbnail pixels during a delayed refresh
+and local-to-server publication, and checks that rename/merge refresh the People list.
+People mutations invalidate cached lists, and stale detail requests cannot apply names.
+Merges keep a named destination, or inherit the source name when it is unnamed.
+Source names and aliases remain searchable through the destination; undo restores
+the separate groups without discarding either label.
 Historical/date windows remain historical.
 Failures keep cached metadata and use inline recovery with polling backoff up to
 five minutes, not repeated alerts. Media still requires current authorization.

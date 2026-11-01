@@ -136,7 +136,7 @@ and UUID `after`, and return `{items,next}`. Empty filtered pages can still have
 | `POST /jobs/{assetId}` | Authorize owner's original and enqueue, 202 + job location |
 | `GET /jobs`, `GET /jobs/{id}` | Persistent status/error/provenance; no internal lease token |
 | `POST /jobs/{id}/retry` | Reset failed/denied current-version jobs; worker reauthorizes |
-| `GET /people[?name=exact_name_or_alias]` | Bounded identities; ambiguous names return every match |
+| `GET /people[?name=exact_name_or_alias]` | Bounded root identities; exact names/aliases from merged groups resolve to their destination |
 | `GET /people/{id}` | Stable record, aliases and optional `redirectId` |
 | `PUT /people/{id}/name` | `{"name":"Publisher label","aliases":["Alias"]}` |
 | `POST /people/{id}/merge` | `{"targetId":"..."}`; preserves source record/provenance |
@@ -175,6 +175,13 @@ detections is `no_faces`; detections smaller than 48 pixels are preserved as
 `too_small` with no embedding/person (unknown), not forcibly identified.
 Unlabelled high-quality clusters have stable IDs but null names, not guessed
 names. A person name is supplied by the user.
+
+A merge keeps the destination's name; an unnamed destination inherits a named
+source. All source names and aliases remain searchable without overwriting the
+destination or changing its editable alias list. Undo separates the original
+groups and retains their labels. Migration `006` repairs previously unnamed
+destinations only when merged sources have one distinct name; conflicting names
+remain searchable but are not selected arbitrarily.
 `usable` means only the detector confidence/size gates passed; it is not a
 sharpness or liveness guarantee. These identities must never authorize access,
 replace passkeys, or make biometric authentication decisions.

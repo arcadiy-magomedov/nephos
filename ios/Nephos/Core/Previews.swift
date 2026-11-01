@@ -6,6 +6,22 @@ enum PreviewSize: Int, CaseIterable, Sendable {
     case detail = 2560
 }
 
+struct GalleryPreview<Value> {
+    var value: Value?
+    private var epoch: UUID?
+    private var generation: UUID?
+    private var source: String?
+
+    mutating func beginRefresh(epoch: UUID, generation: UUID, source: String) {
+        if self.epoch != epoch || self.generation != generation || self.source != source {
+            value = nil
+        }
+        self.epoch = epoch
+        self.generation = generation
+        self.source = source
+    }
+}
+
 extension API {
     func previewRequest(_ id: UUID, size: PreviewSize) async throws -> URLRequest {
         var result = try await request(

@@ -110,6 +110,7 @@ final class RemoteList<Item: Identifiable, Cursor: Hashable> {
 
     func load(
         reset: Bool = false, model: AppModel,
+        onLoaded: (() -> Void)? = nil,
         fetch: (Cursor?) async throws -> ([Item], Cursor?)
     ) async {
         if !reset && (loading || (loaded && next == nil)) { return }
@@ -139,6 +140,7 @@ final class RemoteList<Item: Identifiable, Cursor: Hashable> {
             if items.count > 300 { items.removeFirst(items.count - 300) }
             next = cursor
             loaded = true
+            onLoaded?()
         } catch {
             guard requestID == request, epoch == model.epoch, generation == model.mediaGeneration, !Task.isCancelled,
                 !(error is CancellationError)

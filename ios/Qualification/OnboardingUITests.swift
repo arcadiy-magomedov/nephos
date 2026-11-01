@@ -1,6 +1,39 @@
+import UIKit
 import XCTest
 
 final class BackupUITests: XCTestCase {
+    func testPeopleRenameAndMergeRefreshTheParentListAndKeepTheName() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-people"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Source person"].waitForExistence(timeout: 15), app.debugDescription)
+        app.staticTexts["Source person"].tap()
+        XCTAssertTrue(app.buttons["Edit name"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Edit name"].tap()
+        let name = app.textFields["Unnamed person"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10), app.debugDescription)
+        name.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        name.typeText(
+            String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Source person".count) + "Edited person")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Edited person"].waitForExistence(timeout: 10), app.debugDescription)
+        app.navigationBars.buttons["People"].tap()
+        XCTAssertTrue(app.staticTexts["Edited person"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Source person"].exists, app.debugDescription)
+        app.staticTexts["Unnamed person"].tap()
+        XCTAssertTrue(app.buttons["Merge…"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Merge…"].tap()
+        XCTAssertTrue(app.staticTexts["Edited person"].waitForExistence(timeout: 10), app.debugDescription)
+        app.staticTexts["Edited person"].tap()
+        XCTAssertTrue(app.buttons["Merge groups"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Merge groups"].tap()
+        XCTAssertTrue(app.staticTexts["Edited person"].waitForExistence(timeout: 10), app.debugDescription)
+        app.navigationBars.buttons["People"].tap()
+        XCTAssertTrue(app.staticTexts["Edited person"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Unnamed person"].exists, app.debugDescription)
+    }
+
     func testActualQueueOverlapsThreeRequestsAndFinishesAllSixUploads() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
@@ -163,6 +196,32 @@ final class BackupUITests: XCTestCase {
         let retained = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
         XCTAssertTrue(retained.exists, app.debugDescription)
         XCTAssertEqual(retained.frame.minY, before, accuracy: 4, app.debugDescription)
+    }
+
+    func testLocalThumbnailDoesNotBlinkOrMoveDuringRefreshAndPublication() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "app.nephos.ui-qualification")
+        app.launchEnvironment = ["NEPHOS_UI_SCREEN": "backup-gallery", "NEPHOS_UI_PREVIEW_REGRESSION": "1"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 20), app.debugDescription)
+        let cell = app.descendants(matching: .any).matching(identifier: "gallery.item.local:fixture-0").firstMatch
+        XCTAssertTrue(cell.waitForExistence(timeout: 10), app.debugDescription)
+        func thumbnailPixels() throws -> Data {
+            let image = try XCTUnwrap(cell.screenshot().image.cgImage)
+            let center = CGRect(x: image.width / 2 - 5, y: image.height / 2 - 5, width: 10, height: 10)
+            return try XCTUnwrap(UIImage(cgImage: XCTUnwrap(image.cropping(to: center))).pngData())
+        }
+        let before = cell.frame.minY
+        let pixels = try thumbnailPixels()
+        app.buttons["Refresh previews"].tap()
+        for _ in 0..<5 {
+            XCTAssertEqual(try thumbnailPixels(), pixels, "The displayed preview was cleared while refreshing.")
+        }
+        let published = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "new-photo.jpg"), object: cell)
+        wait(for: [published], timeout: 25)
+        XCTAssertEqual(cell.frame.minY, before, accuracy: 4, app.debugDescription)
+        XCTAssertEqual(try thumbnailPixels(), pixels, "Publication replaced the local thumbnail with a placeholder.")
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, upwards: Bool = true) {
