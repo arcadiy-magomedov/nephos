@@ -83,7 +83,8 @@ struct GalleryView: View {
             let localIdentifier = record?.source.localIdentifier
             let localAsset = localIdentifier.flatMap { localByIdentifier[$0] }
             if let localIdentifier, localAsset != nil { knownLocalIdentifiers.insert(localIdentifier) }
-            let shared = asset.sharedBy != nil
+            let shared =
+                asset.sharedBy != nil
                 || model.libraries.first(where: { $0.id == asset.libraryId })?.isReadOnly == true
             return GalleryMedia(
                 id: "asset:\(asset.id)", asset: asset, localAsset: localAsset,
@@ -179,8 +180,11 @@ struct GalleryView: View {
                                             item: item, model: model, selecting: selecting,
                                             isSelected: selected.contains(item.id),
                                             onTap: {
-                                                if selecting { toggleSelection(item) }
-                                                else { carousel = GalleryCarousel(items: filteredItems, startID: item.id) }
+                                                if selecting {
+                                                    toggleSelection(item)
+                                                } else {
+                                                    carousel = GalleryCarousel(items: filteredItems, startID: item.id)
+                                                }
                                             },
                                             onLongPress: {
                                                 guard !item.shared else { return }
@@ -269,7 +273,7 @@ struct GalleryView: View {
                     if selecting {
                         HStack {
                             Button("Share \(selectedRemoteAssets.count)") {
-                            if let library = model.selectedLibrary {
+                                if let library = model.selectedLibrary {
                                     shareSelection = ShareSelection(library: library, assets: selectedRemoteAssets)
                                 }
                             }
@@ -331,8 +335,7 @@ struct GalleryView: View {
     }
     private func toggleSelection(_ item: GalleryMedia) {
         guard !item.shared else { return }
-        if selected.contains(item.id) { selected.remove(item.id) }
-        else { selected.insert(item.id) }
+        if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }
     }
     private func loadSharedAssets() async {
         guard let api = model.api else { return }
@@ -347,7 +350,8 @@ struct GalleryView: View {
                     guard version == model.epoch, !Task.isCancelled else { return }
                     loaded.append(contentsOf: page.items)
                     cursor = page.nextCursor
-                } while cursor != nil && loaded.filter({ $0.libraryId == library.id }).count < GalleryWindow.maximumCount
+                } while cursor != nil
+                    && loaded.filter({ $0.libraryId == library.id }).count < GalleryWindow.maximumCount
             }
             guard version == model.epoch else { return }
             sharedAssets = loaded
@@ -388,13 +392,14 @@ struct GalleryView: View {
                     assetIDs: remoteIDs, localIdentifiers: localIdentifiers)
                 guard version == model.epoch else { return }
                 localAssets = model.photos.recentAssets()
-                selected = Set(items.compactMap { item -> String? in
-                    if let asset = item.asset, result.failed[asset.id] != nil { return item.id }
-                    if let identifier = item.localIdentifier, !result.removedLocal.contains(identifier) {
-                        return "local:\(identifier)"
-                    }
-                    return nil
-                })
+                selected = Set(
+                    items.compactMap { item -> String? in
+                        if let asset = item.asset, result.failed[asset.id] != nil { return item.id }
+                        if let identifier = item.localIdentifier, !result.removedLocal.contains(identifier) {
+                            return "local:\(identifier)"
+                        }
+                        return nil
+                    })
                 selecting = !selected.isEmpty
                 if !result.failed.isEmpty || result.photosError != nil || result.localStatusError != nil {
                     model.message =
@@ -450,14 +455,20 @@ private struct TrashView: View {
                                 TrashPreview(item: item, model: model)
                                     .overlay(alignment: .topTrailing) {
                                         if selecting {
-                                            Image(systemName: selected.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                                                .foregroundStyle(.white).shadow(radius: 2).padding(5)
+                                            Image(
+                                                systemName: selected.contains(item.id)
+                                                    ? "checkmark.circle.fill" : "circle"
+                                            )
+                                            .foregroundStyle(.white).shadow(radius: 2).padding(5)
                                         }
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        if selecting { toggle(item.id) }
-                                        else { viewer = TrashViewerSelection(startID: item.id) }
+                                        if selecting {
+                                            toggle(item.id)
+                                        } else {
+                                            viewer = TrashViewerSelection(startID: item.id)
+                                        }
                                     }
                                     .onLongPressGesture(minimumDuration: 0.45) {
                                         selecting = true
@@ -489,12 +500,18 @@ private struct TrashView: View {
                         selected = selected.count == model.trashItems.count ? [] : Set(model.trashItems.map(\.id))
                     }.disabled(busy)
                 } else if !model.trashItems.isEmpty {
-                    Button("Select") { selecting = true; selected = [] }.disabled(busy)
+                    Button("Select") {
+                        selecting = true
+                        selected = []
+                    }.disabled(busy)
                 }
             }
             if selecting {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { selecting = false; selected = [] }.disabled(busy)
+                    Button("Cancel") {
+                        selecting = false
+                        selected = []
+                    }.disabled(busy)
                 }
             }
         }
@@ -567,8 +584,11 @@ private struct TrashPreview: View {
         ZStack {
             Rectangle().fill(viewer ? Color.black : Color.secondary.opacity(0.15))
             if let image {
-                if viewer { Image(uiImage: image).resizable().scaledToFit() }
-                else { Image(uiImage: image).resizable().scaledToFill() }
+                if viewer {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else {
+                    Image(uiImage: image).resizable().scaledToFill()
+                }
             } else if let error {
                 VStack {
                     Image(systemName: "photo.badge.exclamationmark")
@@ -628,13 +648,15 @@ private struct TrashCarouselView: View {
                         TrashPreview(item: item, model: model, viewer: true).tag(Optional(item.id))
                     }
                 }.tabViewStyle(.page(indexDisplayMode: .never))
-                .disabled(model.isRestoringTrash)
+                    .disabled(model.isRestoringTrash)
             }
             VStack(spacing: 12) {
                 TrashRestoreStatus(model: model)
                 if let current {
-                    Text("Permanent deletion \(GalleryDates.parse(current.purgeAfter)?.formatted(date: .abbreviated, time: .omitted) ?? current.purgeAfter)")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(
+                        "Permanent deletion \(GalleryDates.parse(current.purgeAfter)?.formatted(date: .abbreviated, time: .omitted) ?? current.purgeAfter)"
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
                     Button {
                         Task { await model.restoreTrash([current.id]) }
                     } label: {
@@ -656,7 +678,10 @@ private struct TrashCarouselView: View {
         }
         .onAppear { currentID = startID }
         .onChange(of: model.trashItems.map(\.id)) { old, ids in
-            guard let currentID else { self.currentID = ids.first; return }
+            guard let currentID else {
+                self.currentID = ids.first
+                return
+            }
             guard !ids.contains(currentID) else { return }
             let index = old.firstIndex(of: currentID) ?? 0
             self.currentID = ids.isEmpty ? nil : ids[min(index, ids.count - 1)]

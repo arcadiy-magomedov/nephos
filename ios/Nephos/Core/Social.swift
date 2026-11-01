@@ -20,13 +20,15 @@ struct TrashPage: Codable, Sendable {
         guard items.count <= 50, Set(items.map(\.id)).count == items.count,
             items.allSatisfy({ item in
                 guard item.asset.sharedBy == nil, let deleted = GalleryDates.parse(item.deletedAt),
-                    let purge = GalleryDates.parse(item.purgeAfter) else { return false }
+                    let purge = GalleryDates.parse(item.purgeAfter)
+                else { return false }
                 return purge > deleted
             }),
             nextCursor == nil || nextCursor != before,
-            nextCursor == nil || items.last.map({
-                $0.id == nextCursor?.id && $0.deletedAt == nextCursor?.deletedAt
-            }) == true
+            nextCursor == nil
+                || items.last.map({
+                    $0.id == nextCursor?.id && $0.deletedAt == nextCursor?.deletedAt
+                }) == true
         else { throw ClientError.invalid("Invalid trash page. Previously loaded items were preserved.") }
     }
 }
@@ -153,9 +155,11 @@ extension API {
     }
 
     func trashPreviewRequest(_ id: UUID, size: PreviewSize = .thumbnail) async throws -> URLRequest {
-        var result = try await request("v1/trash/\(id)/preview", query: [
-            URLQueryItem(name: "size", value: String(size.rawValue))
-        ])
+        var result = try await request(
+            "v1/trash/\(id)/preview",
+            query: [
+                URLQueryItem(name: "size", value: String(size.rawValue))
+            ])
         result.setValue("image/jpeg", forHTTPHeaderField: "Accept")
         return result
     }

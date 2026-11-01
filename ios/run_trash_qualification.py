@@ -21,15 +21,12 @@ def main():
         shutil.rmtree(previous)
     app = build(workspace)
     command("xcrun", "simctl", "install", args.simulator, str(app))
-    container = Path(command(
-        "xcrun", "simctl", "get_app_container", args.simulator, BUNDLE, "data"
-    ).stdout.strip())
+    container = Path(command("xcrun", "simctl", "get_app_container", args.simulator, BUNDLE, "data").stdout.strip())
     report = container / "Documents" / "ui-report.json"
     report.unlink(missing_ok=True)
     environment = os.environ.copy()
     environment["SIMCTL_CHILD_NEPHOS_UI_SCREEN"] = "trash-native"
-    command("xcrun", "simctl", "launch", "--terminate-running-process",
-            args.simulator, BUNDLE, env=environment)
+    command("xcrun", "simctl", "launch", "--terminate-running-process", args.simulator, BUNDLE, env=environment)
     try:
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline and not report.exists():

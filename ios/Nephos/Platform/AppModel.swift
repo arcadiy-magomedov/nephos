@@ -136,10 +136,13 @@ final class AppModel {
                 try check(version)
                 guard boundary == account else { throw CancellationError() }
                 trashItems.removeAll {
-                    $0.id == item.id || (item.asset.resourceSetId != nil && $0.asset.resourceSetId == item.asset.resourceSetId)
+                    $0.id == item.id
+                        || (item.asset.resourceSetId != nil && $0.asset.resourceSetId == item.asset.resourceSetId)
                 }
-                for index in ledger.records.indices where ledger.records[index].committedAssetID == item.id
-                    || (item.asset.resourceSetId != nil && ledger.records[index].resourceSetId == item.asset.resourceSetId)
+                for index in ledger.records.indices
+                where ledger.records[index].committedAssetID == item.id
+                    || (item.asset.resourceSetId != nil
+                        && ledger.records[index].resourceSetId == item.asset.resourceSetId)
                 {
                     ledger.records[index].remoteRemoved = nil
                 }
@@ -160,11 +163,13 @@ final class AppModel {
         do {
             try persist()
         } catch {
-            trashRestoreNotice = "Restored \(trashRestoreCompleted) of \(trashRestoreTotal) on the server; "
+            trashRestoreNotice =
+                "Restored \(trashRestoreCompleted) of \(trashRestoreTotal) on the server; "
                 + "\(trashRestoreFailures.count) failed. Local backup status could not be saved: \(error.localizedDescription)"
         }
         if trashRestoreNotice == nil {
-            trashRestoreNotice = trashRestoreFailures.isEmpty
+            trashRestoreNotice =
+                trashRestoreFailures.isEmpty
                 ? "\(trashRestoreCompleted) item(s) restored."
                 : "Restored \(trashRestoreCompleted) of \(trashRestoreTotal). \(trashRestoreFailures.count) failed."
         }
@@ -201,7 +206,8 @@ final class AppModel {
             try persist()
         } catch {
             ledger = previous
-            throw ClientError.invalid("Could not save backup suppression. Nothing was deleted. \(error.localizedDescription)")
+            throw ClientError.invalid(
+                "Could not save backup suppression. Nothing was deleted. \(error.localizedDescription)")
         }
         var result = MediaDeletionResult()
         for id in remoteIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
@@ -638,7 +644,8 @@ final class AppModel {
         async
     {
         guard !isLoadingGallery, !isDeletingMedia, !isRestoringTrash, let api,
-            let library = ledger.selectedLibraryID else { return }
+            let library = ledger.selectedLibraryID
+        else { return }
         if !reset && gallery.hasLoaded && gallery.nextCursor == nil { return }
         isLoadingGallery = true
         let loadID = UUID()
@@ -767,7 +774,8 @@ final class AppModel {
             }
             try check(version)
             guard mutationVersion == mediaMutationGeneration, ledger.selectedLibraryID == library,
-                var candidate, let store, let account else { return }
+                var candidate, let store, let account
+            else { return }
             if !reset, let visibleAnchor, let item = candidate.window.items.first(where: { $0.id == visibleAnchor }) {
                 candidate.anchor = GalleryCursor(createdAt: item.createdAt, id: item.id)
             }
@@ -793,7 +801,8 @@ final class AppModel {
             scrollTarget = reset ? candidate.anchor?.id ?? candidate.window.items.first?.id : visibleAnchor
         } catch ClientError.http(410, _) where allowRebase {
             guard version == epoch, mutationVersion == mediaMutationGeneration,
-                ledger.selectedLibraryID == library else { return }
+                ledger.selectedLibraryID == library
+            else { return }
             retainedGallery = nil
             gallery.reset()
             isLoadingGallery = false
@@ -1639,7 +1648,8 @@ final class AppModel {
     }
     func scheduleAutomaticRun() {
         guard signedIn, !needsReauthentication, !needsOnboarding, !backupAccessBlocked, automaticTask == nil,
-            !isRunning, !isDeletingMedia, !isRestoringTrash, selectedLibrary != nil, ledger.settings.backupPaused != true,
+            !isRunning, !isDeletingMedia, !isRestoringTrash, selectedLibrary != nil,
+            ledger.settings.backupPaused != true,
             ledger.settings.automaticBackup
                 || BackupRetryPolicy.nextAttempt(ledger: ledger, library: ledger.selectedLibraryID) != nil,
             selectedLibrary?.isReadOnly != true

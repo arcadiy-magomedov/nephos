@@ -86,7 +86,7 @@ enum BackupRetryPolicy {
             $0.needsTransfer && $0.requiresUserAction != true
                 && !ledger.suppresses($0.source.localIdentifier, library: $0.libraryId)
         }
-            .map { $0.nextRetryAt ?? now }
+        .map { $0.nextRetryAt ?? now }
         let children = Dictionary(grouping: records, by: \.resourceSetId)
         for group in ledger.resourceSets ?? []
         where group.libraryId == library && group.manifest == nil && group.requiresUserAction != true

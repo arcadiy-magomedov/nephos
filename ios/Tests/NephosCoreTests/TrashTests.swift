@@ -19,21 +19,31 @@ final class TrashTests: XCTestCase {
         try decoded.validate(before: nil)
         XCTAssertEqual(decoded.items, [item])
         XCTAssertThrowsError(try decoded.validate(before: decoded.nextCursor))
-        XCTAssertThrowsError(try TrashPage(
-            items: [item, item], nextCursor: nil).validate(before: nil))
-        XCTAssertThrowsError(try TrashPage(
-            items: [item], nextCursor: TrashCursor(deletedAt: date, id: UUID())).validate(before: nil))
-        XCTAssertThrowsError(try TrashPage(
-            items: [TrashItem(asset: item.asset, deletedAt: date, purgeAfter: date)],
-            nextCursor: nil).validate(before: nil))
+        XCTAssertThrowsError(
+            try TrashPage(
+                items: [item, item], nextCursor: nil
+            ).validate(before: nil))
+        XCTAssertThrowsError(
+            try TrashPage(
+                items: [item], nextCursor: TrashCursor(deletedAt: date, id: UUID())
+            ).validate(before: nil))
+        XCTAssertThrowsError(
+            try TrashPage(
+                items: [TrashItem(asset: item.asset, deletedAt: date, purgeAfter: date)],
+                nextCursor: nil
+            ).validate(before: nil))
         var shared = item.asset
         shared.sharedBy = "another owner"
-        XCTAssertThrowsError(try TrashPage(
-            items: [TrashItem(asset: shared, deletedAt: date, purgeAfter: purge)],
-            nextCursor: nil).validate(before: nil))
-        XCTAssertThrowsError(try TrashPage(
-            items: [TrashItem(asset: item.asset, deletedAt: "invalid", purgeAfter: purge)],
-            nextCursor: nil).validate(before: nil))
+        XCTAssertThrowsError(
+            try TrashPage(
+                items: [TrashItem(asset: shared, deletedAt: date, purgeAfter: purge)],
+                nextCursor: nil
+            ).validate(before: nil))
+        XCTAssertThrowsError(
+            try TrashPage(
+                items: [TrashItem(asset: item.asset, deletedAt: "invalid", purgeAfter: purge)],
+                nextCursor: nil
+            ).validate(before: nil))
     }
 
     @MainActor
@@ -51,10 +61,12 @@ final class TrashTests: XCTestCase {
         XCTAssertEqual(preview.url?.path, "/v1/trash/\(id)/preview")
         XCTAssertEqual(preview.url?.query, "size=1280")
         XCTAssertEqual(preview.value(forHTTPHeaderField: "Accept"), "image/jpeg")
-        let url = try api.endpoint("v1/trash", query: [
-            URLQueryItem(name: "before", value: date),
-            URLQueryItem(name: "beforeId", value: id.uuidString),
-        ])
+        let url = try api.endpoint(
+            "v1/trash",
+            query: [
+                URLQueryItem(name: "before", value: date),
+                URLQueryItem(name: "beforeId", value: id.uuidString),
+            ])
         XCTAssertTrue(url.absoluteString.contains("%2B01:00"))
         api.invalidate()
         do {
@@ -89,8 +101,9 @@ final class TrashTests: XCTestCase {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".trash-tests-\(UUID())", isDirectory: true)
         defer {
-            do { try FileManager.default.removeItem(at: root) }
-            catch { XCTFail("Could not remove test ledger: \(error)") }
+            do { try FileManager.default.removeItem(at: root) } catch {
+                XCTFail("Could not remove test ledger: \(error)")
+            }
         }
         let store = try LedgerStore(root: root)
         let account = String(repeating: "a", count: 64)
@@ -120,8 +133,9 @@ final class TrashTests: XCTestCase {
         let first = trashItem()
         let second = trashItem(library: first.asset.libraryId)
         var window = GalleryWindow()
-        try window.append(AssetPage(items: [first.asset, second.asset], nextCursor: nil),
-                          libraryID: first.asset.libraryId)
+        try window.append(
+            AssetPage(items: [first.asset, second.asset], nextCursor: nil),
+            libraryID: first.asset.libraryId)
         window.remove([first.id])
         XCTAssertEqual(window.items.map(\.id), [second.id])
         XCTAssertTrue(window.hasLoaded)
@@ -141,9 +155,11 @@ final class TrashTests: XCTestCase {
         queued.remoteRemoved = nil
         ledger.records = [queued]
         XCTAssertNil(BackupRetryPolicy.nextAttempt(ledger: ledger, library: library))
-        ledger.resourceSets = [ResourceSetRecord(
-            id: group.id, libraryId: library,
-            source: record(library: library, identifier: "suppressed", modificationTime: 11).source, kind: "single")]
+        ledger.resourceSets = [
+            ResourceSetRecord(
+                id: group.id, libraryId: library,
+                source: record(library: library, identifier: "suppressed", modificationTime: 11).source, kind: "single")
+        ]
         XCTAssertNil(BackupRetryPolicy.nextAttempt(ledger: ledger, library: library))
     }
 
@@ -158,8 +174,9 @@ final class TrashTests: XCTestCase {
             id: group.id, libraryId: library, kind: group.kind, sourceRevision: "fixture",
             primaryAssetId: primary.id,
             resources: [primary, secondary].map {
-                ResourcePart(assetId: $0.id, role: "photo", sha256: $0.sha256, size: $0.size,
-                             fileName: $0.fileName, uniformTypeIdentifier: "public.jpeg")
+                ResourcePart(
+                    assetId: $0.id, role: "photo", sha256: $0.sha256, size: $0.size,
+                    fileName: $0.fileName, uniformTypeIdentifier: "public.jpeg")
             }, createdAt: date)
         var ledger = AccountLedger()
         ledger.records = [primary, secondary]

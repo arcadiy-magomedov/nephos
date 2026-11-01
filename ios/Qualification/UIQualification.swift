@@ -266,15 +266,18 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         try require(model.trashItems.count == 3 && model.trashLoadError == nil, "Owned trash did not load.")
         await model.restoreTrash([ids[0], ids[1]])
         try require(model.trashItems.map(\.id) == [ids[1], ids[2]], "Successful batch item remained in Trash.")
-        try require(model.trashRestoreCompleted == 1 && model.trashRestoreFailures[ids[1]] != nil,
-                    "Partial batch failure was not explicit.")
+        try require(
+            model.trashRestoreCompleted == 1 && model.trashRestoreFailures[ids[1]] != nil,
+            "Partial batch failure was not explicit.")
         try require(model.gallery.items.contains { $0.id == ids[0] }, "Restored item did not reappear in gallery.")
         await model.restoreTrash(Set(model.trashRestoreFailures.keys))
-        try require(model.trashItems.map(\.id) == [ids[2]] && model.trashRestoreFailures.isEmpty,
-                    "Retry did not restore only the failed resource.")
+        try require(
+            model.trashItems.map(\.id) == [ids[2]] && model.trashRestoreFailures.isEmpty,
+            "Retry did not restore only the failed resource.")
         await model.restoreTrash([ids[2]])
-        try require(model.trashRestoreFailures[ids[2]]?.contains("deadline") == true,
-                    "Permanent-deletion conflict was not explained.")
+        try require(
+            model.trashRestoreFailures[ids[2]]?.contains("deadline") == true,
+            "Permanent-deletion conflict was not explained.")
         model.ledger.records = Array(TrashQualificationProtocol.assets.prefix(2).enumerated()).map { index, asset in
             var record = UploadRecord(
                 id: asset.id, libraryId: asset.libraryId, fileName: asset.fileName, mediaType: asset.mediaType,
@@ -293,34 +296,43 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         TrashQualificationProtocol.configureLedger(root: root, account: account)
         // The uploaded mapping outside the currently loaded window must still be deleted.
         model.gallery.remove([ids[1]])
-        let result = try await model.deleteMediaEverywhere(assetIDs: [], localIdentifiers: ["trash-local-0", "trash-local-1"])
-        try require(result.deleted == [ids[0]] && result.failed[ids[1]] != nil,
-                    "Offscreen uploaded IDs or partial server deletion were lost.")
-        try require(result.photosError != nil && result.removedLocal.isEmpty,
-                    "Unavailable Photos originals were falsely reported removed.")
-        try require(TrashQualificationProtocol.suppressionWasDurable,
-                    "DELETE was sent before the source fence was persisted.")
+        let result = try await model.deleteMediaEverywhere(
+            assetIDs: [], localIdentifiers: ["trash-local-0", "trash-local-1"])
+        try require(
+            result.deleted == [ids[0]] && result.failed[ids[1]] != nil,
+            "Offscreen uploaded IDs or partial server deletion were lost.")
+        try require(
+            result.photosError != nil && result.removedLocal.isEmpty,
+            "Unavailable Photos originals were falsely reported removed.")
+        try require(
+            TrashQualificationProtocol.suppressionWasDurable,
+            "DELETE was sent before the source fence was persisted.")
         let restarted = try LedgerStore(root: root).load(account: account)
-        try require(restarted.suppresses("trash-local-0", library: TrashQualificationProtocol.library)
-                    && restarted.suppresses("trash-local-1", library: TrashQualificationProtocol.library),
-                    "Partial deletion lost durable backup suppression.")
+        try require(
+            restarted.suppresses("trash-local-0", library: TrashQualificationProtocol.library)
+                && restarted.suppresses("trash-local-1", library: TrashQualificationProtocol.library),
+            "Partial deletion lost durable backup suppression.")
         TrashQualificationProtocol.enablePaging()
         await model.loadTrash(reset: true)
-        try require(model.trashItems.map(\.id) == [ids[0]] && model.trashCursor != nil,
-                    "Trash did not retain its pagination cursor.")
+        try require(
+            model.trashItems.map(\.id) == [ids[0]] && model.trashCursor != nil,
+            "Trash did not retain its pagination cursor.")
         await model.restoreTrash([ids[0]])
-        try require(model.trashItems.map(\.id) == [ids[2]] && model.trashCursor == nil,
-                    "Restoring the loaded page falsely showed empty Trash instead of loading older items.")
-        try require(!TrashQualificationProtocol.requestedOriginal,
-                    "Marker-only restore downloaded an original or uploaded media.")
+        try require(
+            model.trashItems.map(\.id) == [ids[2]] && model.trashCursor == nil,
+            "Restoring the loaded page falsely showed empty Trash instead of loading older items.")
+        try require(
+            !TrashQualificationProtocol.requestedOriginal,
+            "Marker-only restore downloaded an original or uploaded media.")
         try await model.signOut()
-        try require(model.trashItems.isEmpty && model.trashRestoreFailures.isEmpty,
-                    "Sign-out retained another account's trash state.")
+        try require(
+            model.trashItems.isEmpty && model.trashRestoreFailures.isEmpty,
+            "Sign-out retained another account's trash state.")
     }
 }
 
-private extension Optional {
-    func unwrap(_ message: String) throws -> Wrapped {
+extension Optional {
+    fileprivate func unwrap(_ message: String) throws -> Wrapped {
         guard let value = self else { throw ClientError.invalid(message) }
         return value
     }
@@ -346,7 +358,10 @@ private final class TrashQualificationProtocol: URLProtocol {
     static var suppressionWasDurable: Bool { lock.withLock { durable } }
     static var requestedOriginal: Bool { lock.withLock { original } }
     static func configureLedger(root: URL, account: String) {
-        lock.withLock { ledgerRoot = root; self.account = account }
+        lock.withLock {
+            ledgerRoot = root
+            self.account = account
+        }
     }
     static func enablePaging() { lock.withLock { paging = true } }
     override class func canInit(with request: URLRequest) -> Bool {
@@ -365,9 +380,14 @@ private final class TrashQualificationProtocol: URLProtocol {
                     let before = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
                         .queryItems?.first { $0.name == "before" }?.value
                     let paged = Self.paging && before == nil && items.count > 1
-                    return (200, try JSONEncoder().encode(TrashPage(
-                        items: paged ? Array(items.prefix(1)) : items,
-                        nextCursor: paged ? items.first.map { TrashCursor(deletedAt: $0.deletedAt, id: $0.id) } : nil)))
+                    return (
+                        200,
+                        try JSONEncoder().encode(
+                            TrashPage(
+                                items: paged ? Array(items.prefix(1)) : items,
+                                nextCursor: paged
+                                    ? items.first.map { TrashCursor(deletedAt: $0.deletedAt, id: $0.id) } : nil))
+                    )
                 }
                 if path.hasSuffix("/restore"), let component = request.url?.pathComponents.dropLast().last,
                     let id = UUID(uuidString: component)
@@ -385,7 +405,8 @@ private final class TrashQualificationProtocol: URLProtocol {
                     let root = try Self.ledgerRoot.unwrap("Missing ledger root.")
                     let account = try Self.account.unwrap("Missing ledger account.")
                     let ledger = try LedgerStore(root: root).load(account: account)
-                    Self.durable = ledger.suppresses("trash-local-0", library: Self.library)
+                    Self.durable =
+                        ledger.suppresses("trash-local-0", library: Self.library)
                         && ledger.suppresses("trash-local-1", library: Self.library)
                         && ledger.records.allSatisfy { $0.remoteRemoved == true }
                     if id == Self.assets[1].id { return (503, Data()) }
@@ -394,21 +415,30 @@ private final class TrashQualificationProtocol: URLProtocol {
                     return (204, Data())
                 }
                 if path.hasSuffix("/snapshots") {
-                    return (200, try JSONEncoder().encode(GallerySnapshot(
-                        id: UUID(), revision: Self.revision, accessGeneration: 1,
-                        expiresAt: "2099-01-01T00:00:00Z",
-                        totalCount: Int64(Self.assets.filter { !Self.deleted.contains($0.id) }.count))))
+                    return (
+                        200,
+                        try JSONEncoder().encode(
+                            GallerySnapshot(
+                                id: UUID(), revision: Self.revision, accessGeneration: 1,
+                                expiresAt: "2099-01-01T00:00:00Z",
+                                totalCount: Int64(Self.assets.filter { !Self.deleted.contains($0.id) }.count)))
+                    )
                 }
                 if path.contains("/snapshots/") && path.hasSuffix("/assets") {
-                    return (200, try JSONEncoder().encode(AssetPage(
-                        items: Self.assets.filter { !Self.deleted.contains($0.id) }, nextCursor: nil)))
+                    return (
+                        200,
+                        try JSONEncoder().encode(
+                            AssetPage(
+                                items: Self.assets.filter { !Self.deleted.contains($0.id) }, nextCursor: nil))
+                    )
                 }
                 if path.hasSuffix("/changes") { return (410, Data()) }
                 return (404, Data())
             }
             let http = try HTTPURLResponse(
                 url: request.url!, statusCode: response.0, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/json"]).unwrap("Missing HTTP fixture response.")
+                headerFields: ["Content-Type": "application/json"]
+            ).unwrap("Missing HTTP fixture response.")
             client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
             if !response.1.isEmpty { client?.urlProtocol(self, didLoad: response.1) }
             client?.urlProtocolDidFinishLoading(self)

@@ -18,9 +18,10 @@ struct AccountLedger: Codable, Sendable {
     }
 
     func deletionAssets(assetIDs: Set<UUID>, localIdentifiers: Set<String>) -> Set<UUID> {
-        assetIDs.union(records.filter {
-            localIdentifiers.contains($0.source.localIdentifier) && ($0.phase == .ready || $0.assetId != nil)
-        }.map(\.committedAssetID))
+        assetIDs.union(
+            records.filter {
+                localIdentifiers.contains($0.source.localIdentifier) && ($0.phase == .ready || $0.assetId != nil)
+            }.map(\.committedAssetID))
     }
 
     func trackedRecords(for assetID: UUID) -> Set<UUID> {
@@ -38,22 +39,25 @@ struct AccountLedger: Codable, Sendable {
     }
 
     mutating func suppressDeletion(assetIDs: Set<UUID>, localIdentifiers: Set<String>) {
-        let identifiers = localIdentifiers.union(records.filter {
-            assetIDs.contains($0.committedAssetID)
-        }.map { $0.source.localIdentifier })
+        let identifiers = localIdentifiers.union(
+            records.filter {
+                assetIDs.contains($0.committedAssetID)
+            }.map { $0.source.localIdentifier })
         var sources = Set(suppressedSources ?? [])
         for index in records.indices {
             let record = records[index]
             if identifiers.contains(record.source.localIdentifier) || assetIDs.contains(record.committedAssetID) {
-                sources.insert(SuppressedBackupSource(
-                    libraryId: record.libraryId, localIdentifier: record.source.localIdentifier))
+                sources.insert(
+                    SuppressedBackupSource(
+                        libraryId: record.libraryId, localIdentifier: record.source.localIdentifier))
                 records[index].remoteRemoved = true
             }
         }
         if let library = selectedLibraryID {
-            sources.formUnion(localIdentifiers.map {
-                SuppressedBackupSource(libraryId: library, localIdentifier: $0)
-            })
+            sources.formUnion(
+                localIdentifiers.map {
+                    SuppressedBackupSource(libraryId: library, localIdentifier: $0)
+                })
         }
         suppressedSources = sources.sorted {
             ($0.libraryId.uuidString, $0.localIdentifier) < ($1.libraryId.uuidString, $1.localIdentifier)
