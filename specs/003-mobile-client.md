@@ -391,6 +391,23 @@ Server restore follows R33 without reviving revoked grants. Device export may
 have OS-limited fidelity; unsupported compound resources/edits must be identified.
 Show how to retrieve server originals before suggesting local removal.
 
+#### Trash UI and marker-only restoration
+
+Expose **Trash** from the gallery menu, without adding another primary tab.
+Show only the current user's server-deleted resources, with thumbnails and the
+scheduled permanent-deletion date. Tapping a thumbnail opens the carousel;
+long press enables selection for restoring multiple resources. Provide
+**Restore** for the current resource or selection and a concise empty state.
+Shared resources and local-only Photos deletions do not appear in server Trash.
+
+Restore only clears the server deletion marker and pending purge deadline.
+Refresh Trash and the unified gallery after the server confirms restoration;
+preserve resource IDs and source mappings instead of uploading again. Restore
+all members of a compound resource together. Do not download an original or
+recreate a Photos-library copy, including after **Delete everywhere**. Present
+expired/purged resources and partial batch failures explicitly; do not claim
+restoration based only on an optimistic local update.
+
 ### 3.14 C14 - Bounded storage and caches
 
 Maintain separate budgets for evictable thumbnails/previews, transient original

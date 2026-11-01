@@ -1717,10 +1717,24 @@ cannot delete the owner's asset by accepting a suggestion.
 
 Trash removes media from ordinary gallery/search/shared views with normal R29
 removals, but retains bytes and metadata for a 30-day recovery period measured
-from the first successful logical deletion. Authorized restore
-within that period preserves the asset identity and user decisions; it does not
-reactivate subsequently revoked grants. Final deletion follows R16 reference
-and retention rules, never a direct classifier call to storage.
+from the first successful logical deletion. Authorized restore within that
+period only clears the deletion marker and its pending purge deadline. It
+preserves asset identity, resource-set membership, originals, and user decisions;
+it does not upload, copy, or reconstruct the resource or reactivate subsequently
+revoked grants. Restore a compound resource's deleted members atomically.
+
+The owner's trash listing exposes deleted resources and their purge deadlines;
+shared viewers cannot list or restore another owner's trash. Restore is
+idempotent and requires an enabled owner with current library membership.
+Serialize restore against cleanup claims: a restored asset must not be purged,
+and a purge that has already become irreversible must return an explicit
+restore conflict, never a success-shaped missing resource. Publish ordinary
+gallery additions after restore and fence delayed deletion/analysis events
+against the restored lifecycle revision. Retain metadata required for this
+marker-only restore throughout the recovery period.
+
+Final deletion follows R16 reference and retention rules, never a direct
+classifier call to storage.
 
 Show selected logical bytes separately from physical space reclamation. Trash
 does not immediately free storage; other assets, backups, and retention holds
