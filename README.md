@@ -85,7 +85,7 @@ See the iOS documentation for supported resource restoration and
 device-only acceptance checks; a simulator build does not certify Face ID,
 background scheduling, or Photos deletion.
 
-The native Search screen currently supports exact person names/aliases and
+The native Search screen currently supports case-insensitive substrings of person names/aliases and
 explicitly scoped filename filtering of loaded items, not semantic search.
 The Albums tab exposes libraries and incoming/outgoing sharing; server album
 creation is explicitly unavailable. See the

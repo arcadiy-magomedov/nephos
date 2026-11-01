@@ -99,7 +99,7 @@ Existing English UI copy is retained; this is not a complete Russian localizatio
 - Appearance: `@AppStorage` plus `preferredColorScheme`, System by default,
   explicit Light/Dark overrides persisted on this installation, including sheets
   and the signed-out appearance settings. Both modes share the same layout.
-- People: real authorized face crops, exact name/alias search, person photos,
+- People: real authorized face crops, case-insensitive name/alias substring search, person photos,
   name/alias edits, confirmed merges, current-merge undo, individual-face
   reassignment/split, different-person rules and removal through history.
 - Sharing: known-user directory, selected originals or all/future media with
@@ -687,7 +687,7 @@ passkey/background/deletion gate is marked passed.
 
 | Area | Not implemented or not yet qualified |
 |---|---|
-| Semantic search | Image/video vector indexing, natural-language queries and combined scene + person search. Current person search is exact-name/alias; filename filtering covers only the loaded window. |
+| Semantic search | Image/video vector indexing, natural-language queries and combined scene + person search. Current person search matches case-insensitive name/alias substrings; filename filtering covers only the loaded window. |
 | Albums and favorites | Server album CRUD, album covers/membership, favorites and associated synchronization. The Albums tab currently exposes libraries and sharing, not fabricated collections. |
 | More ML/video | Video face recognition, automatically suggested duplicate-person review, representative large-library accuracy/scaling, optimized video transcodes and adaptive streaming. Original-range playback already works. |
 | Background updates | APNs device registration, durable push delivery and remote update hints. Existing background URLSession/BGProcessing backup is OS-scheduled, not guaranteed overnight execution. |

@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using Nephos.Faces.Api;
 using Npgsql;
 
@@ -75,6 +76,46 @@ public sealed class PersistenceTests
         Assert.NotEmpty(await rr.CorrectionsAsync(owner, null, 100, default));
         Assert.Single(await rr.PeopleAsync(owner, null, 100, "alias", default));
     }
+
+    [DatabaseFact]
+    public async Task PeopleSearchMatchesLiteralCaseInsensitiveSubstringsThroughApiAndMergedGroups()
+    {
+        await using var db = Open();
+        var owner = "substring-" + Guid.NewGuid();
+        var target = Guid.NewGuid();
+        var source = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        await using (var insert = db.CreateCommand("""
+            INSERT INTO people(id,owner,name,aliases,redirect_id) VALUES
+                ($1,$2,'Alexandra',ARRAY['Sasha 100%_literal'],NULL),
+                ($3,$2,'Former label',ARRAY['Old nickname'],$1),
+                ($4,$5,'Alexandra',ARRAY['Sasha 100%_literal'],NULL)
+            """))
+        {
+            insert.Parameters.AddWithValue(target);
+            insert.Parameters.AddWithValue(owner);
+            insert.Parameters.AddWithValue(source);
+            insert.Parameters.AddWithValue(other);
+            insert.Parameters.AddWithValue("another-" + owner);
+            await insert.ExecuteNonQueryAsync();
+        }
+        await using var app = new FacesApplication();
+        using var client = app.Authenticated(owner);
+        foreach (var term in new[] { "alex", "XAND", "DRA", "sAsH", "100%_", "oRmEr", "ICK", "" })
+        {
+            var result = await client.GetFromJsonAsync<PeopleSearchPage>(
+                "/v1/faces/people?name=" + Uri.EscapeDataString(term));
+            Assert.Equal(target, Assert.Single(result!.Items).Id);
+        }
+        foreach (var term in new[] { "missing", "%no-match", "_no-match", "alex' OR true--" })
+        {
+            var result = await client.GetFromJsonAsync<PeopleSearchPage>(
+                "/v1/faces/people?name=" + Uri.EscapeDataString(term));
+            Assert.Empty(result!.Items);
+        }
+    }
+
+    private sealed record PeopleSearchPage(Person[] Items);
 
     [DatabaseFact]
     public async Task MergingNamedSourceIntoUnnamedDestinationPreservesNameAndSearchAcrossRestart()

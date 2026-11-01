@@ -94,14 +94,15 @@ struct PeopleView: View {
             if page.loaded && people.isEmpty && page.failure == nil {
                 ContentUnavailableView(
                     "No people found", systemImage: "person.2",
-                    description: Text("Photos are analyzed on your server. Search uses an exact name or alias."))
+                    description: Text(
+                        "Photos are analyzed on your server. Search matches part of a name or alias, ignoring case."))
             }
             RemoteListFooter(page: page) { await load() }
             Text("Names and face corrections are private to your account.")
                 .font(.footnote).foregroundStyle(.secondary).padding()
         }
         .navigationTitle(choose == nil ? "People" : "Choose a person")
-        .searchable(text: $query, prompt: "Exact name or alias")
+        .searchable(text: $query, prompt: "Name or alias")
         .toolbar {
             if choose == nil {
                 NavigationLink {

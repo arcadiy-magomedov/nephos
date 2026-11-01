@@ -266,7 +266,8 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
             AND redirect_id IS NULL
             AND ($4::text IS NULL OR EXISTS(
                 SELECT 1 FROM people labels WHERE labels.owner=$1 AND resolve_person(labels.owner,labels.id)=people.id
-                AND (lower(labels.name)=lower($4) OR EXISTS(SELECT 1 FROM unnest(labels.aliases) a WHERE lower(a)=lower($4)))))
+                AND (strpos(lower(labels.name),lower($4))>0
+                    OR EXISTS(SELECT 1 FROM unnest(labels.aliases) a WHERE strpos(lower(a),lower($4))>0))))
             ORDER BY id LIMIT $3
             """, owner, after, limit, name);
         await using var reader = await command.ExecuteReaderAsync(ct);

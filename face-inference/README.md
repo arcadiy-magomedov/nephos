@@ -136,7 +136,7 @@ and UUID `after`, and return `{items,next}`. Empty filtered pages can still have
 | `POST /jobs/{assetId}` | Authorize owner's original and enqueue, 202 + job location |
 | `GET /jobs`, `GET /jobs/{id}` | Persistent status/error/provenance; no internal lease token |
 | `POST /jobs/{id}/retry` | Reset failed/denied current-version jobs; worker reauthorizes |
-| `GET /people[?name=exact_name_or_alias]` | Bounded root identities; exact names/aliases from merged groups resolve to their destination |
+| `GET /people[?name=name_or_alias]` | Case-insensitive literal substring search of names/aliases; merged groups resolve to their destination |
 | `GET /people/{id}` | Stable record, aliases and optional `redirectId` |
 | `PUT /people/{id}/name` | `{"name":"Publisher label","aliases":["Alias"]}` |
 | `POST /people/{id}/merge` | `{"targetId":"..."}`; preserves source record/provenance |
