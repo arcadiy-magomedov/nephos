@@ -7,11 +7,54 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import threading
+import urllib.parse
 
 from generate_project import oid
 
 IOS = Path(__file__).resolve().parent
 BUNDLE = "app.nephos.ui-qualification"
+
+
+def reauthentication_fixture(workspace, email, stop):
+    """Private host-side bridge; no service key is sent to the app or XCTest."""
+    import smoke
+
+    bridge = workspace / "reauth"
+    try:
+        while not stop.wait(1):
+            if not bridge.with_suffix(".revoke").exists():
+                continue
+            users = smoke.request(
+                smoke.IDENTITY + "/admin/realms/nephos/users?exact=true&email=" + urllib.parse.quote(email),
+                token=smoke.admin_token(),
+            )
+            assert len(users) == 1
+            private = smoke.IDENTITY + "/realms/nephos/nephos-admin"
+            headers = {"X-Nephos-Identity-Service-Key": smoke.ENV["IDENTITY_ADMIN_SERVICE_KEY"]}
+            devices = smoke.request(private + f"/users/{users[0]['id']}/devices", headers=headers)["devices"]
+            assert devices, "The first native login did not establish a device session."
+            for device in devices:
+                smoke.request(
+                    private + f"/users/{users[0]['id']}/devices/{device['id']}",
+                    method="DELETE",
+                    headers=headers,
+                    expected=204,
+                )
+            assert not smoke.request(private + f"/users/{users[0]['id']}/devices", headers=headers)["devices"]
+            bridge.with_suffix(".revoked").touch()
+            break
+        while not stop.wait(1):
+            pending = smoke.request(private + "/pin-requests", headers=headers)["requests"]
+            pin = next((item["pin"] for item in pending if item["email"] == email), None)
+            if pin:
+                path = bridge.with_suffix(".next")
+                path.touch(mode=0o600)
+                path.write_text(pin)
+                path.replace(bridge.with_suffix(".pin"))
+                return
+    except Exception:
+        bridge.with_suffix(".error").write_text("Private reauthentication fixture failed.")
 
 
 def project(workspace):
@@ -181,7 +224,9 @@ def main():
         "--signin-email", default="", help="Enabled known fixture account for the email-first PIN check."
     )
     parser.add_argument(
-        "--complete-signin", action="store_true", help="Also enter a disposable account PIN and open its own library."
+        "--complete-signin",
+        action="store_true",
+        help="Sign in a disposable account, revoke its device sessions, and verify PIN reauthentication.",
     )
     parser.add_argument(
         "--backup", action="store_true", help="Exercise foreground retries and backup UI with controlled responses."
@@ -212,6 +257,8 @@ def main():
     (IOS / ".logs").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="onboarding-ui-", dir=scratch) as directory:
         workspace = Path(directory)
+        stop_fixture = threading.Event()
+        fixture = None
         destination = project(workspace)
         common = [
             "xcodebuild",
@@ -258,9 +305,17 @@ def main():
                         "NEPHOS_UI_SIGNIN_EMAIL": args.signin_email,
                         "NEPHOS_UI_SIGNIN_PIN": signin_pin,
                         "NEPHOS_UI_DISCOVERY": "1" if args.discovery else "0",
+                        "NEPHOS_UI_REAUTH_BRIDGE": str(workspace / "reauth") if args.complete_signin else "",
                     }
                 )
             runfile.write_bytes(plistlib.dumps(run))
+            if args.complete_signin:
+                fixture = threading.Thread(
+                    target=reauthentication_fixture,
+                    args=(workspace, args.signin_email, stop_fixture),
+                    daemon=True,
+                )
+                fixture.start()
             subprocess.run(
                 [
                     "xcodebuild",
@@ -279,6 +334,9 @@ def main():
                 check=True,
             )
         finally:
+            stop_fixture.set()
+            if fixture:
+                fixture.join(timeout=15)
             subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE], check=False)
             subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE + ".uitests.xctrunner"], check=False)
 

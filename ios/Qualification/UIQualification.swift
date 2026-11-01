@@ -177,8 +177,8 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                 }
                 if env["NEPHOS_UI_SCREEN"] == "onboarding-flow" {
                     let model = AppModel()
-                    await model.restore()
                     if env["NEPHOS_UI_SEED_LEGACY"] == "1" {
+                        await model.restore()
                         let old = Connection(
                             baseURL: URL(string: "http://192.168.1.10:18080")!,
                             config: ServerConfig(
@@ -195,7 +195,13 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         UserDefaults.standard.removeObject(forKey: "onboardingCheckedURL")
                     }
                     window.rootViewController = UIHostingController(
-                        rootView: RootView(model: model).modifier(AppAppearanceModifier()))
+                        rootView: RootView(model: model).modifier(AppAppearanceModifier())
+                            .task {
+                                if env["NEPHOS_UI_RESTORE_DELAY"] == "1" {
+                                    try? await Task.sleep(for: .seconds(5))
+                                }
+                                await model.restore()
+                            })
                     try report(["ready": true, "screen": "onboarding-flow"])
                     return
                 }

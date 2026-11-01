@@ -236,6 +236,7 @@ final class BackupUITests: XCTestCase {
     }
 }
 
+@MainActor
 final class OnboardingUITests: XCTestCase {
     func testBonjourSelectionStillRequiresExplicitTrust() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -273,7 +274,7 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertFalse(server.exists)
     }
 
-    func testLegacyServerCertificateReplacementAndEmailFirstPINRequest() throws {
+    func testLegacyServerCertificateReplacementAndEmailFirstPINRequest() async throws {
         continueAfterFailure = false
         let environment = ProcessInfo.processInfo.environment
         let base = try XCTUnwrap(environment["NEPHOS_UI_BASE_URL"])
@@ -350,14 +351,90 @@ final class OnboardingUITests: XCTestCase {
         screenshot.name = "email-validated-pin-entry"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        // Immediate retries must reuse the pending PIN, not replace the entry screen with a cooldown failure.
+        app.buttons["Request PIN again"].tap()
+        XCTAssertTrue(app.buttons["onboarding.submitPin"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sign-in could not continue"].exists, app.debugDescription)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(pin.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(email.exists)
+        XCTAssertFalse(app.buttons["onboarding.submitPin"].isEnabled)
+        // Discarded local state must also be recoverable within the issuance cooldown.
+        app.buttons["Different email"].tap()
+        XCTAssertTrue(email.waitForExistence(timeout: 15))
+        replace(email, with: knownEmail)
+        XCTAssertEqual(email.value as? String, knownEmail)
+        app.buttons["onboarding.requestPin"].tap()
+        XCTAssertTrue(pin.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sign-in could not continue"].exists, app.debugDescription)
         if let suppliedPIN = environment["NEPHOS_UI_SIGNIN_PIN"], !suppliedPIN.isEmpty {
+            // Exhaust the real IP budget, then verify that a retry cannot strand an accepted user.
             pin.tap()
-            pin.typeText(suppliedPIN)
+            pin.typeText(String(suppliedPIN.prefix(4)))
+            for _ in 0..<11 {
+                var request = URLRequest(url: URL(string: base + "/realms/nephos/nephos-admin/request-pin")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(
+                    withJSONObject: ["email": knownEmail, "clientId": "nephos-ios"])
+                let (_, response) = try await URLSession.shared.data(for: request)
+                XCTAssertTrue([200, 429].contains((response as? HTTPURLResponse)?.statusCode ?? 0))
+            }
+            app.buttons["Request PIN again"].tap()
+            let cooldown = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Request again in"))
+            XCTAssertTrue(cooldown.firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(pin.exists)
+            XCTAssertEqual(pin.value as? String, String(suppliedPIN.prefix(4)))
+            XCTAssertFalse(app.buttons["Request PIN again"].isEnabled)
+            XCTAssertFalse(app.staticTexts["Sign-in could not continue"].exists)
+            pin.tap()
+            pin.typeText(String(suppliedPIN.suffix(4)))
             app.buttons["onboarding.submitPin"].tap()
             XCTAssertTrue(app.buttons["Set up backup"].waitForExistence(timeout: 30), app.debugDescription)
             XCTAssertTrue(app.buttons["Browse only"].isEnabled, app.debugDescription)
             XCTAssertFalse(app.staticTexts["No library is available yet"].exists, app.debugDescription)
             XCTAssertFalse(app.staticTexts["Sign-in could not continue"].exists, app.debugDescription)
+            app.buttons["Browse only"].tap()
+            XCTAssertTrue(app.buttons["Open library"].waitForExistence(timeout: 15))
+            app.buttons["Open library"].tap()
+            XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 30), app.debugDescription)
+            let bridge = URL(fileURLWithPath: try XCTUnwrap(environment["NEPHOS_UI_REAUTH_BRIDGE"]))
+            try Data().write(to: bridge.appendingPathExtension("revoke"))
+            try await waitForFixture(bridge.appendingPathExtension("revoked"))
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            if app.buttons["Library actions"].exists {
+                app.buttons["Library actions"].tap()
+                app.buttons["Newest"].tap()
+            }
+            if app.alerts.buttons["OK"].waitForExistence(timeout: 10) { app.alerts.buttons["OK"].tap() }
+            XCTAssertTrue(email.waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertFalse(pin.exists, "A consumed request must not resume after the session is revoked.")
+            replace(email, with: knownEmail)
+            let canRequest = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "enabled == true"), object: app.buttons["onboarding.requestPin"])
+            await fulfillment(of: [canRequest], timeout: 65)
+            app.buttons["onboarding.requestPin"].tap()
+            XCTAssertTrue(pin.waitForExistence(timeout: 30), app.debugDescription)
+            try await waitForFixture(bridge.appendingPathExtension("pin"))
+            let replacementPIN = try String(contentsOf: bridge.appendingPathExtension("pin"), encoding: .utf8)
+            XCTAssertEqual(replacementPIN.count, 8)
+            pin.tap()
+            pin.typeText(replacementPIN)
+            app.buttons["onboarding.submitPin"].tap()
+            XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertFalse(email.exists)
+            app.terminate()
+            app.launchEnvironment["NEPHOS_UI_RESTORE_DELAY"] = "1"
+            app.launch()
+            XCTAssertTrue(
+                app.descendants(matching: .any).matching(identifier: "startup.restoring").firstMatch
+                    .waitForExistence(timeout: 3), app.debugDescription)
+            let loginFlash = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: email)
+            loginFlash.isInverted = true
+            await fulfillment(of: [loginFlash], timeout: 2)
+            XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 30), app.debugDescription)
             return
         }
         app.buttons["Different email"].tap()
@@ -370,7 +447,16 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Certificate not trusted"].exists)
     }
 
+    private func waitForFixture(_ url: URL) async throws {
+        for _ in 0..<30 {
+            if FileManager.default.fileExists(atPath: url.path) { return }
+            try await Task.sleep(for: .seconds(1))
+        }
+        XCTFail("The private fixture did not complete: \(url.pathExtension)")
+    }
+
     private func replace(_ field: XCUIElement, with value: String) {
+        if field.value as? String == value { return }
         field.tap()
         let previous = field.value as? String ?? ""
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()

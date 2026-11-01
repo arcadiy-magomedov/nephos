@@ -7,6 +7,8 @@ struct OnboardingView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("onboardingCheckedURL") private var checkedURL = ""
+    @AppStorage("onboardingPinRequest") private var savedPinRequest = Data()
+    @AppStorage("onboardingPinRetryAt") private var pinRetryAt = 0.0
     @State private var step = Step.server
     @State private var url = ""
     @State private var allowHTTP = false
@@ -19,8 +21,7 @@ struct OnboardingView: View {
     @State private var wifiOnly = true
     @State private var email = ""
     @State private var pin = ""
-    @State private var requestedEmail: String?
-    @State private var pinExpiry: Date?
+    @State private var pendingPin: LoginPinRequest?
     @State private var permission = PHAuthorizationStatus.notDetermined
     @State private var initialized = false
     @State private var discovery = ServerDiscovery()
@@ -90,6 +91,7 @@ struct OnboardingView: View {
                             "Check the server again to confirm its current sign-in address. The saved connection has not been reused."
                     } else {
                         step = .signIn
+                        restorePinRequest(connection)
                     }
                 }
             }
@@ -109,9 +111,7 @@ struct OnboardingView: View {
                 if step != .server { discovery.stop() }
             }
             .onChange(of: model.connection) { _, _ in
-                requestedEmail = nil
-                pinExpiry = nil
-                pin = ""
+                clearPinRequest()
                 if step == .enterPin { step = .signIn }
             }
             .onDisappear {
@@ -180,7 +180,7 @@ struct OnboardingView: View {
         case .enterPin:
             heading("Enter your PIN", symbol: "key")
             description("Your administrator can now see the PIN in the admin console. Ask them to give it to you.")
-            if let requestedEmail { Text(requestedEmail).font(.subheadline).textSelection(.enabled) }
+            if let pendingPin { Text(pendingPin.email).font(.subheadline).textSelection(.enabled) }
             TextField("8-digit PIN", text: $pin)
                 .textContentType(.oneTimeCode).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("onboarding.pin")
@@ -189,9 +189,11 @@ struct OnboardingView: View {
                     pin = String(value.filter { $0 >= "0" && $0 <= "9" }.prefix(8))
                 }
             if let connection = model.connection { card("Sign-in address", text: connection.config.issuer) }
-            if let pinExpiry {
-                Text("PIN expires at \(pinExpiry.formatted(date: .omitted, time: .shortened)). It works once.")
-                    .font(.footnote).foregroundStyle(.secondary)
+            if let pendingPin {
+                Text(
+                    "PIN expires at \(pendingPin.expiresAt.formatted(date: .omitted, time: .shortened)). It works once."
+                )
+                .font(.footnote).foregroundStyle(.secondary)
             }
         case .library:
             heading("How will you use Nephos?", symbol: "folder")
@@ -305,14 +307,12 @@ struct OnboardingView: View {
 
     @ViewBuilder private var footer: some View {
         if failure != nil {
-            primary("Try again") {
+            primary(step == .enterPin ? "Edit PIN" : "Try again") {
                 failure = nil
                 if step == .server || step == .trust {
                     checkServer()
                 } else if step == .signIn {
                     requestPin()
-                } else if step == .enterPin {
-                    signIn()
                 } else if step == .library {
                     loadLibraries(reset: true)
                 } else if step == .ready {
@@ -323,6 +323,7 @@ struct OnboardingView: View {
                 if step == .signIn {
                     secondary("Edit email") { failure = nil }
                 } else if step == .enterPin {
+                    requestPinButton(primary: false)
                     secondary("Different email") {
                         failure = nil
                         resetPinRequest()
@@ -353,13 +354,12 @@ struct OnboardingView: View {
                 }.disabled(candidate == nil)
                 secondary("Different server", action: editServer)
             case .signIn:
-                primary("Continue", action: requestPin).disabled((try? LoginPinPolicy.email(email)) == nil)
-                    .accessibilityIdentifier("onboarding.requestPin")
+                requestPinButton(primary: true)
                 secondary("Change server", action: editServer)
             case .enterPin:
                 primary("Sign in", action: signIn).disabled(pin.count != 8)
                     .accessibilityIdentifier("onboarding.submitPin")
-                secondary("Request PIN again", action: requestPin)
+                requestPinButton(primary: false)
                 secondary("Different email") { resetPinRequest() }
             case .library:
                 primary("Set up backup") { chooseMode(true) }.disabled(
@@ -429,6 +429,23 @@ struct OnboardingView: View {
     private func secondary(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action).font(.subheadline).padding(.vertical, 4)
     }
+    private func requestPinButton(primary isPrimary: Bool) -> some View {
+        SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = max(0, Int(ceil(pinRetryAt - context.date.timeIntervalSince1970)))
+            VStack(spacing: 4) {
+                if isPrimary {
+                    primary("Continue", action: requestPin)
+                        .disabled(remaining > 0 || (try? LoginPinPolicy.email(email)) == nil)
+                        .accessibilityIdentifier("onboarding.requestPin")
+                } else {
+                    secondary("Request PIN again", action: requestPin).disabled(remaining > 0)
+                }
+                if remaining > 0 {
+                    Text("Request again in \(remaining)s").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
     private func perform(_ operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
         busy = true
@@ -457,6 +474,7 @@ struct OnboardingView: View {
         }
     }
     private func requestPin() {
+        guard Date().timeIntervalSince1970 >= pinRetryAt else { return }
         perform {
             guard let approved = model.connection else {
                 step = .server
@@ -470,25 +488,42 @@ struct OnboardingView: View {
             model.proposedConnection = nil
             let normalized = try LoginPinPolicy.email(email)
             let epoch = model.epoch
-            let receipt = try await AuthSession.requestPin(connection: approved, email: normalized)
+            let startedAt = Date()
+            let receipt: LoginPinReceipt
+            do {
+                receipt = try await AuthSession.requestPin(connection: approved, email: normalized)
+            } catch LoginPinError.rateLimited {
+                try Task.checkCancellation()
+                guard model.connection == approved, model.epoch == epoch else { throw CancellationError() }
+                pinRetryAt = Date().addingTimeInterval(60).timeIntervalSince1970
+                notice = LoginPinError.rateLimited.localizedDescription
+                return
+            } catch LoginPinError.unknownAccount {
+                try Task.checkCancellation()
+                guard model.connection == approved, model.epoch == epoch else { throw CancellationError() }
+                resetPinRequest()
+                throw LoginPinError.unknownAccount
+            }
             try Task.checkCancellation()
             guard model.connection == approved, model.epoch == epoch else { throw CancellationError() }
-            requestedEmail = normalized
+            let pending = try LoginPinRequest(
+                connection: approved, email: normalized, receipt: receipt, requestedAt: startedAt)
+            savedPinRequest = try JSONEncoder().encode(pending)
+            pendingPin = pending
             email = normalized
-            pin = ""
-            pinExpiry = Date().addingTimeInterval(TimeInterval(receipt.expiresIn))
             step = .enterPin
+            notice = "If you already requested a PIN, use the same one. Requesting again does not extend its expiry."
         }
     }
     private func signIn() {
         perform {
-            guard let requestedEmail, let pinExpiry, pinExpiry > Date() else {
+            guard let pendingPin, let connection = model.connection, pendingPin.isValid(for: connection) else {
                 resetPinRequest()
                 throw LoginPinError.expiredRequest
             }
             guard pin.count == 8 else { throw ClientError.invalid("Enter the 8-digit PIN.") }
-            if await model.login(email: requestedEmail, pin: pin) {
-                pin = ""
+            if await model.login(email: pendingPin.email, pin: pin) {
+                clearPinRequest()
                 if model.needsOnboarding { resumeSetup() }
             } else if let message = model.message {
                 throw ClientError.invalid(message)
@@ -516,10 +551,25 @@ struct OnboardingView: View {
         }
     }
     private func resetPinRequest() {
-        requestedEmail = nil
-        pinExpiry = nil
-        pin = ""
+        clearPinRequest()
         step = .signIn
+    }
+    private func clearPinRequest() {
+        pendingPin = nil
+        savedPinRequest = Data()
+        pin = ""
+    }
+    private func restorePinRequest(_ connection: Connection) {
+        guard let pending = try? JSONDecoder().decode(LoginPinRequest.self, from: savedPinRequest),
+            pending.isValid(for: connection)
+        else {
+            clearPinRequest()
+            return
+        }
+        pendingPin = pending
+        email = pending.email
+        step = .enterPin
+        notice = "Continue with the PIN from your administrator. Its original expiry has not changed."
     }
     private func loadLibraries(reset: Bool = false) {
         perform { try await model.loadLibraries(reset: reset) }

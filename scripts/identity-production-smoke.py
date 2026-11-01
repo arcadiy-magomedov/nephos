@@ -37,7 +37,19 @@ def docker(*args):
     ).stdout.strip()
 
 
-configuration = json.loads(docker("compose", "config", "--format", "json"))
+compose = ["compose", "--env-file", ".env"]
+if (smoke.ROOT / ".env.faces").exists() and (smoke.ROOT / "artifacts/lan/compose.yaml").exists():
+    compose += [
+        "--env-file",
+        ".env.faces",
+        "-f",
+        "compose.yaml",
+        "-f",
+        "compose.faces.yaml",
+        "-f",
+        "artifacts/lan/compose.yaml",
+    ]
+configuration = json.loads(docker(*compose, "config", "--format", "json"))
 postgres_image = configuration["services"]["postgres"]["image"]
 identity_image = configuration["services"]["keycloak"]["image"]
 with socket.socket() as reservation:
@@ -162,12 +174,25 @@ try:
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
 
     def request_pin(email, expected=200, **extra):
-        return smoke.request(
+        request = urllib.request.Request(
             pin_base + "/request-pin",
             method="POST",
-            data={"email": email, "clientId": "nephos-ios", **extra},
-            expected=expected,
+            data=json.dumps({"email": email, "clientId": "nephos-ios", **extra}).encode(),
+            headers={"Content-Type": "application/json"},
         )
+        try:
+            response = urllib.request.urlopen(request, timeout=10)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            assert response.status == expected, f"PIN request: expected {expected}, got {response.status}"
+            assert response.headers["Cache-Control"] == "no-store"
+            if expected == 429:
+                assert response.headers["Retry-After"] == "60"
+            payload = json.load(response)
+        if expected == 200:
+            assert set(payload) == {"expiresIn"}, "Public PIN responses must contain only the expiry receipt."
+        return payload
 
     smoke.request(
         pin_base + "/request-pin",
@@ -203,15 +228,11 @@ try:
     assert len(pending) == 1 and pending[0]["email"] == username + "@example.test"
     assert pending[0]["username"] == username and len(pending[0]["pin"]) == 8 and pending[0]["pin"].isdigit()
     issued = {"pin": pending[0]["pin"], "expiresIn": receipt["expiresIn"]}
-    assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
-    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
-    # The real cooldown elapses; a repeated request must preserve the original PIN and expiry.
-    time.sleep(61)
     repeated = request_pin(username + "@example.test")
-    assert set(repeated) == {"expiresIn"} and 1 <= repeated["expiresIn"] < 1800
+    assert set(repeated) == {"expiresIn"} and 1 <= repeated["expiresIn"] <= 1800
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
-    for _ in range(9):
-        request_pin(username + "@example.test", 429)
+    # Ten requests, including malformed/unknown requests and reuse, exhaust the IP budget.
+    assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
     assert request_pin("different-unknown@example.test", 429)["error"] == "rate_limited"
     smoke.request(
         pin_base + "/request-pin",
@@ -220,6 +241,24 @@ try:
         headers={"Content-Type": "application/json"},
         expected=429,
     )
+    time.sleep(61)
+    repeated = request_pin(username + "@example.test")
+    assert set(repeated) == {"expiresIn"} and 1 <= repeated["expiresIn"] < 1800
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
+    # Reuse did not renew the issuance cooldown. Revocation permits new issuance now.
+    smoke.request(pin_base + f"/users/{subject}/pin", method="DELETE", headers=service_headers, expected=204)
+    request_pin(username + "@example.test")
+    smoke.request(pin_base + f"/users/{subject}/pin", method="DELETE", headers=service_headers, expected=204)
+    assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    time.sleep(61)
+    receipt = request_pin(username + "@example.test")
+    pending = smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"]
+    issued = {"pin": pending[0]["pin"], "expiresIn": receipt["expiresIn"]}
+    for _ in range(3):
+        repeated = request_pin(username + "@example.test")
+        assert set(repeated) == {"expiresIn"} and 1 <= repeated["expiresIn"] <= receipt["expiresIn"]
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == pending
     smoke.request(
         f"http://localhost:{port}/realms/nephos/nephos-admin/users/{subject}/pin",
         method="POST",
@@ -254,6 +293,8 @@ try:
         claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
         assert claims["sub"] == subject, f"{token_type} must identify the known library account"
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
+    # Consumed PINs cannot be recovered or reissued through the pending-request path.
+    assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
     smoke.request(
         token_url,
         data=urllib.parse.urlencode(grant).encode(),
@@ -304,6 +345,7 @@ try:
         data={"enabled": False},
         expected=204,
     )
+    assert request_pin(disabled_username + "@example.test", 404)["error"] == "account_unavailable"
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
     smoke.request(
         token_url,
@@ -371,8 +413,37 @@ try:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         expected=400,
     )
+    locked_email = "locked-" + username + "@example.test"
+    smoke.request(
+        admin_base + "/users",
+        token=admin_token(),
+        method="POST",
+        expected=201,
+        data={"username": "locked-" + username, "email": locked_email, "enabled": True},
+    )
+    request_pin(locked_email)
+    locked_pending = smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"]
+    locked_pin = next(item["pin"] for item in locked_pending if item["email"] == locked_email)
+    wrong_pin = ("0" if locked_pin[0] != "0" else "1") + locked_pin[1:]
+    for _ in range(10):
+        smoke.request(
+            token_url,
+            data=urllib.parse.urlencode({**grant, "username": locked_email, "pin": wrong_pin}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected=400,
+        )
+    request_pin(locked_email)
+    assert smoke.request(pin_base + "/pin-requests", headers=service_headers)["requests"] == locked_pending
+    smoke.request(
+        token_url,
+        data=urllib.parse.urlencode({**grant, "username": locked_email, "pin": locked_pin}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        expected=400,
+    )
     print(
-        "PASS: production startup, email-only PIN requests/validation/rate limits/private list/consumption/replacement/disablement, offline refresh and device revocation/introspection"
+        "PASS: production startup, immediate PIN reuse without expiry extension, issuance/IP cooldowns, "
+        "email validation/private-only PINs/consumption/replacement/disablement/attempt lockout, "
+        "offline refresh and device revocation"
     )
 except Exception:
     if identity in containers:
