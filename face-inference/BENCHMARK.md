@@ -50,6 +50,7 @@ are never accepted if their hashes do not match (remove that individual partial 
 - AdaFace uses the official inspected, SHA-pinned IR101 architecture, loaded from
   safetensors with **strict** `model.net.` prefix removal. No unreviewed
   `trust_remote_code`, pickle weights, training dependencies or mutable model revisions.
+  The full upstream MIT notice is downloaded and retained beside the architecture.
 - Original six images remain a separate baseline (3 identities, 3 genuine/12 impostor
   pairs). Additional original images are documented in `scripts/face-benchmark-fixtures.json`.
   Rejected small/ambiguous detections are disclosed, never silently labelled.

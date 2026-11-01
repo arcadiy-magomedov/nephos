@@ -16,6 +16,12 @@
       "license": "Card requires following training dataset license; WebFace12M terms need separate review; not cleared for deployment"
     },
     {
+      "file": "adaface/LICENSE",
+      "url": "https://raw.githubusercontent.com/mk-minchul/CVLface/308142aa50adf2e187711354f7524635d3414f1e/LICENSE",
+      "sha256": "95b6e493eb9dba27f2150304e790ae254bab18d1611f4d6e2ade28fa3a271583",
+      "license": "Full CVLFace MIT copyright and permission notice, retained with the downloaded architecture code"
+    },
+    {
       "file": "adaface/model.py",
       "url": "https://huggingface.co/minchul/cvlface_adaface_ir101_webface12m/raw/54f602a0737bd1ee4a4e7e9fd089a485f397fefd/models/iresnet/model.py",
       "sha256": "e31be55c60b538c15151887e911b7535e2f0e1114a13427ba06483e1cd2a63f9",
