@@ -30,8 +30,24 @@
       "name": "05 · Connected devices"
     },
     {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf1817701",
+      "name": "06 · Revoke device"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf4a6d293",
+      "name": "07 · Revoking device"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf77eb208",
+      "name": "08 · Device revoked"
+    },
+    {
       "id": "e32bf810-72b3-4cc4-a19b-e0a65be9b174",
       "name": "Error · QR issuance"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdfc001757",
+      "name": "Error · Device revocation"
     }
   ],
   "mobileBoards": [
@@ -68,10 +84,10 @@
       "name": "Dark · QR error"
     }
   ],
-  "arrows": 13,
-  "adminArrows": 5,
+  "arrows": 20,
+  "adminArrows": 12,
   "mobileArrows": 8,
-  "components": 8,
+  "components": 9,
   "componentAssets": [
     "Button",
     "Text field",
@@ -80,7 +96,8 @@
     "Navigation item",
     "QR icon",
     "QR placeholder",
-    "Icon button"
+    "Icon button",
+    "Device row"
   ],
   "variantComponents": 52,
   "buttonVariantProperties": [
@@ -90,7 +107,7 @@
     "Theme"
   ],
   "prototypeInteractions": {
-    "admin": 9,
+    "admin": 23,
     "mobile": 10
   }
 }

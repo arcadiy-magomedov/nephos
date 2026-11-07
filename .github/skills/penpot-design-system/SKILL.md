@@ -50,6 +50,33 @@ Use English as the primary language for Nephos design copy, component names, and
 - Maintain readable flow diagrams with visible, labeled arrows when requested. A drawn arrow is not an interactive prototype: add actual prototype interactions and flow starts when interaction is required, and test them in View mode. Use overlays for modal behavior where appropriate.
 - Keep admin and mobile canvases separate when requested; demonstrate both light and dark mobile designs without implying they are approved. Preserve native system dialogs as platform behaviors rather than inventing additional application screens.
 - `.penpot` exports preserve editable design data but do not by themselves preserve Penpot comment threads or server history. Maintain an appropriate live-server backup for comments and snapshots; never delete or resolve user feedback without authorization. Validate exports by importing into an isolated temporary project, then clean up only that project.
+- In the verified 2.18.6 restore, a legacy theme description was cleared on import.
+  Compare token definitions, aliases, theme selections, bindings, and interactions
+  separately from that descriptive metadata; do not ignore functional differences.
+
+## Action consistency
+
+- Choose one published convention rather than mixing incompatible systems.
+  Nephos adopts Carbon's secondary-left / commit-right paired action order.
+  Destructive confirmation uses the commit position with explicit danger styling.
+- Nephos centers a **single modal-footer action**, regardless of positive or
+  destructive intent, following user feedback. This is a product override:
+  Carbon itself right-aligns single actions. Nephos also retains inset rounded
+  buttons rather than Carbon's full-bleed footer.
+- Use linked Button variants and shared sizing tokens, not raw rectangle/text
+  copies. Current admin dimensions are 180 x 44, or 224 x 44 for long labels,
+  with 16px paired gaps and 24px dialog content/footer insets. Native Flex child
+  order can differ from creation order: inspect actual saved button coordinates.
+- Card, empty-state, and row actions have different alignment contexts; document
+  them explicitly rather than treating every single action as a modal footer.
+- Destructive dialogs identify the selected target and consequences, provide a
+  safe exit, disable repeated submission while pending, and distinguish confirmed
+  success from an uncertain server result. Close does not undo an in-flight request.
+- Prototype templates must not substitute a different device for the selected
+  one. Label dynamic target fields explicitly and document simulated server outcomes.
+- Carbon and Fluent agree on concise action labels, limited primary emphasis,
+  and clear outcomes, but their paired-action ordering differs. Do not combine
+  their ordering recommendations.
 
 ## Sources
 
@@ -61,5 +88,6 @@ Use English as the primary language for Nephos design copy, component names, and
 - [Penpot: stale rendered text on component-instance overrides](https://github.com/penpot/penpot/issues/8826)
 - [Libraries](https://help.penpot.app/user-guide/design-systems/libraries/) and [using components and shared libraries](https://penpot.app/blog/tutorial-use-components-and-shared-libraries/)
 - [Design-system best practices](https://penpot.app/blog/design-systems-best-practices-with-penpot/) and [component libraries](https://penpot.app/blog/what-is-a-component-library/)
+- [Carbon modal guidelines](https://carbondesignsystem.com/components/modal/usage/), [Fluent button guidance](https://fluent2.microsoft.design/components/web/react/core/button/usage), and [Fluent dialog guidance](https://fluent2.microsoft.design/components/web/react/core/dialog/usage)
 - [Flex and Grid](https://help.penpot.app/user-guide/designing/flexible-layouts/), [prototyping](https://help.penpot.app/user-guide/prototyping-testing/prototyping/), and [export/import](https://help.penpot.app/user-guide/export-import/)
 - [Penpot Hub](https://penpot.app/penpothub/libraries-templates?category=Design+system): [Pencil](https://penpot.app/penpothub/libraries-templates/penpot-design-system), [variant examples](https://penpot.app/penpothub/libraries-templates/variant-examples), [Ant Design](https://penpot.app/penpothub/libraries-templates/ant-design-v6), and [Material Design 3](https://penpot.app/penpothub/libraries-templates/material-design-3). These are candidates for evaluation, not pre-approved dependencies.
