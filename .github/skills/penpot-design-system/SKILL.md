@@ -72,6 +72,9 @@ Use English as the primary language for Nephos design copy, component names, and
 - Destructive dialogs identify the selected target and consequences, provide a
   safe exit, disable repeated submission while pending, and distinguish confirmed
   success from an uncertain server result. Close does not undo an in-flight request.
+- For destructive confirmation dialogs, specify initial focus on Cancel, keep
+  keyboard focus inside the modal, and restore focus to the invoking control when
+  it closes. A static Penpot frame does not verify these implementation behaviors.
 - Prototype templates must not substitute a different device for the selected
   one. Label dynamic target fields explicitly and document simulated server outcomes.
 - Carbon and Fluent agree on concise action labels, limited primary emphasis,
