@@ -126,8 +126,12 @@ jobs:
       - run: python3 scripts/admin-test-tls.py
       - name: Use the generated qualification trust bundle
         run: |
-          echo "SSL_CERT_FILE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem" >> "$GITHUB_ENV"
-          echo "REQUESTS_CA_BUNDLE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem" >> "$GITHUB_ENV"
+          {
+            echo "SSL_CERT_FILE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem"
+            echo "REQUESTS_CA_BUNDLE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem"
+            echo "NEPHOS_QUALIFICATION_UID=$(id -u)"
+            echo "NEPHOS_QUALIFICATION_GID=$(id -g)"
+          } >> "$GITHUB_ENV"
       - name: Trust the disposable HTTPS fixture in Chromium
         run: |
           if ! command -v certutil >/dev/null; then
@@ -141,6 +145,12 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose run --rm --no-deps -v ./tests/alert-rules.test.yaml:/etc/prometheus/tests.yaml:ro --entrypoint promtool prometheus test rules /etc/prometheus/tests.yaml
       - run: docker compose up -d --build --quiet-pull
+      - name: Require trusted HTTPS ingress readiness
+        run: |
+          curl --fail --silent --show-error --retry 20 --retry-connrefused \
+            --retry-all-errors --retry-delay 2 --max-time 10 --cacert "$SSL_CERT_FILE" \
+            https://localhost:18443/realms/nephos/.well-known/openid-configuration \
+            --output /dev/null
       - run: python3 scripts/smoke.py
       - run: python3 scripts/admin-smoke.py
       - run: pip install -r scripts/browser-requirements.txt && python3 -m playwright install --with-deps chromium

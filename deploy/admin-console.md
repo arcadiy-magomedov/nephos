@@ -101,6 +101,8 @@ ports for local qualification; it is not a production overlay.
 
 ```sh
 python3 scripts/admin-test-tls.py
+export NEPHOS_QUALIFICATION_UID="$(id -u)"
+export NEPHOS_QUALIFICATION_GID="$(id -g)"
 python3 scripts/admin-tests.py
 python3 scripts/admin-smoke.py
 python3 scripts/admin-browser-smoke.py
@@ -109,6 +111,10 @@ python3 scripts/admin-ux-smoke.py
 
 The browser and database checks use real services. HTTPS qualification uses a
 throwaway CA added to the test trust store, never disabled TLS verification.
+The qualification ingress runs as the certificate-generating host user so it can
+read the private fixture key without relaxing its permissions or adding DAC
+override capabilities. CI requires the trusted HTTPS discovery endpoint to be
+responsive before beginning browser acceptance.
 Keep QR credentials, browser storage, cookies and authentication traces out of
 published evidence. Physical-camera behavior additionally requires an unlocked
 iPhone; simulator image decoding is not physical-camera acceptance.

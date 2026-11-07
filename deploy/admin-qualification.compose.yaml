@@ -22,6 +22,7 @@ services:
       Authentication__Authority: https://localhost:18443/realms/nephos
   qualification-edge:
     image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    user: "${NEPHOS_QUALIFICATION_UID:-0}:${NEPHOS_QUALIFICATION_GID:-0}"
     ports: ["127.0.0.1:18443:8443"]
     volumes:
       - ./deploy/admin-qualification.Caddyfile:/etc/caddy/Caddyfile:ro
