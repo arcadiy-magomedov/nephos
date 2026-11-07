@@ -18,21 +18,13 @@ struct TokenResponse: Decodable, Sendable {
     let expires_in: Double
     let token_type: String
 }
-struct Credentials: Codable, Sendable {
-    let connection: Connection
-    let subject: String
-    let nonce: String
-    var accessToken: String
-    var refreshToken: String?
-    var expiresAt: Date
-}
 enum Keychain {
     private static let service = "app.nephos.ios.session"
-    static func save(_ credentials: Credentials) throws {
-        let data = try JSONEncoder().encode(credentials)
+    private static let lock = NSRecursiveLock()
+    private static func write(_ data: Data, account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service, kSecAttrAccount as String: "current",
+            kSecAttrService as String: service, kSecAttrAccount as String: account,
         ]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
@@ -47,10 +39,10 @@ enum Keychain {
             throw ClientError.invalid("Keychain is unavailable.")
         }
     }
-    static func load() throws -> Credentials? {
+    private static func read(account: String) throws -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service, kSecAttrAccount as String: "current",
+            kSecAttrService as String: service, kSecAttrAccount as String: account,
             kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: CFTypeRef?
@@ -59,9 +51,76 @@ enum Keychain {
         guard status == errSecSuccess, let data = result as? Data else {
             throw ClientError.invalid("Unlock the device to access your saved session.")
         }
-        return try JSONDecoder().decode(Credentials.self, from: data)
+        return data
+    }
+    static func vault() throws -> EnrollmentVault {
+        lock.lock()
+        defer { lock.unlock() }
+        if let data = try read(account: "accounts-v1") {
+            return try JSONDecoder().decode(EnrollmentVault.self, from: data)
+        }
+        var vault = EnrollmentVault()
+        if let data = try read(account: "current") {
+            vault.save(try JSONDecoder().decode(Credentials.self, from: data))
+        }
+        try write(try JSONEncoder().encode(vault), account: "accounts-v1")
+        // Delete the legacy item only after the new atomic account-bound record exists.
+        let status = SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                kSecAttrAccount as String: "current",
+            ] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ClientError.invalid("Unable to finish secure session migration.")
+        }
+        return vault
+    }
+    static func update(_ change: (inout EnrollmentVault) throws -> Void) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        var value = try vault()
+        try change(&value)
+        try write(try JSONEncoder().encode(value), account: "accounts-v1")
+    }
+    static func save(_ credentials: Credentials) throws {
+        try update { $0.save(credentials) }
+    }
+    static func refresh(_ credentials: Credentials, previous: Credentials) throws {
+        try update { value in
+            let account = LedgerStore.accountKey(connection: previous.connection, subject: previous.subject)
+            guard value.activeAccount == account, value.current?.nonce == previous.nonce,
+                value.current?.refreshToken == previous.refreshToken
+            else { throw CancellationError() }
+            value.sessions[account] = credentials
+        }
+    }
+    static func load() throws -> Credentials? { try vault().current }
+    static func prepare(qr: EnrollmentQR, connection: Connection) throws -> PendingEnrollment {
+        var result: PendingEnrollment?
+        try update { value in
+            if let pending = value.pending, pending.qr == qr, pending.connection == connection {
+                guard pending.installationID == value.installationID else { throw QREnrollmentError.invalidProof }
+                result = pending
+            } else {
+                let pending = try PendingEnrollment(
+                    qr: qr, connection: connection, installationID: value.installationID,
+                    deviceName: UIDevice.current.name)
+                value.pending = pending
+                result = pending
+            }
+        }
+        guard let result else { throw QREnrollmentError.invalidProof }
+        return result
+    }
+    static func commit(_ credentials: Credentials, requestID: UUID) throws {
+        try update { try $0.commit(credentials, requestID: requestID) }
+    }
+    static func cancelEnrollment() throws {
+        try update { $0.pending = nil }
     }
     static func remove() throws {
+        lock.lock()
+        defer { lock.unlock() }
         let status = SecItemDelete(
             [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -167,7 +226,7 @@ final class AuthSession: AccessTokenProviding {
             updated.accessToken = tokens.access_token
             updated.refreshToken = tokens.refresh_token ?? saved.refreshToken
             updated.expiresAt = Date().addingTimeInterval(tokens.expires_in)
-            try Keychain.save(updated)
+            try Keychain.refresh(updated, previous: saved)
             self.credentials = updated
             return updated.accessToken
         }
@@ -235,6 +294,27 @@ enum JWTVerifier {
     ) async throws
         -> String
     {
+        let claims = try await verifiedClaims(token, discovery: discovery)
+        return try IdentityTokenClaims.validate(claims, issuer: discovery.issuer, clientID: clientID, purpose: purpose)
+    }
+    static func verifyAccess(_ token: String, discovery: OIDCDiscovery, clientID: String, subject: String) async throws
+    {
+        let claims = try await verifiedClaims(token, discovery: discovery)
+        guard claims["iss"] as? String == discovery.issuer, claims["sub"] as? String == subject,
+            claims["azp"] as? String == clientID, claims["typ"] as? String == "Bearer",
+            let expiry = claims["exp"] as? NSNumber, CFGetTypeID(expiry) != CFBooleanGetTypeID(),
+            expiry.doubleValue.isFinite, expiry.doubleValue > Date().timeIntervalSince1970,
+            let issued = claims["iat"] as? NSNumber, CFGetTypeID(issued) != CFBooleanGetTypeID(),
+            issued.doubleValue.isFinite, issued.doubleValue <= Date().timeIntervalSince1970 + 30,
+            expiry.doubleValue > issued.doubleValue
+        else { throw ClientError.invalid("Access token identity or lifetime validation failed.") }
+        if let notBefore = claims["nbf"] {
+            guard let date = notBefore as? NSNumber, CFGetTypeID(date) != CFBooleanGetTypeID(),
+                date.doubleValue.isFinite, date.doubleValue <= Date().timeIntervalSince1970 + 30
+            else { throw ClientError.invalid("Access token is not valid yet.") }
+        }
+    }
+    private static func verifiedClaims(_ token: String, discovery: OIDCDiscovery) async throws -> [String: Any] {
         let segments = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
         guard segments.count == 3, token.count < 128 * 1024,
             let header = try JSONSerialization.jsonObject(with: decode(segments[0])) as? [String: Any],
@@ -266,7 +346,7 @@ enum JWTVerifier {
                 Data("\(segments[0]).\(segments[1])".utf8) as CFData, try decode(segments[2]) as CFData, nil),
             let claims = try JSONSerialization.jsonObject(with: decode(segments[1])) as? [String: Any]
         else { throw ClientError.invalid("Identity token signature is invalid.") }
-        return try IdentityTokenClaims.validate(claims, issuer: discovery.issuer, clientID: clientID, purpose: purpose)
+        return claims
     }
     private static func length(_ count: Int) -> Data {
         if count < 128 { return Data([UInt8(count)]) }

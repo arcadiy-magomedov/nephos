@@ -125,6 +125,7 @@ def generate():
         "LSRequiresIPhoneOS": True,
         "CFBundleURLTypes": [{"CFBundleURLName": "app.nephos.oidc", "CFBundleURLSchemes": ["nephos"]}],
         "NSPhotoLibraryUsageDescription": "Back up original photos and videos, verify unchanged sources, and remove only explicitly confirmed retained copies.",
+        "NSCameraUsageDescription": "Scan your administrator's single-use Nephos sign-in QR code.",
         "NSPhotoLibraryAddUsageDescription": "Restore SHA-256 verified originals and supported unedited resource pairs to your Photos library.",
         "NSLocalNetworkUsageDescription": "Find and connect to the Nephos server you choose on your local network.",
         "NSBonjourServices": ["_nephos._tcp"],

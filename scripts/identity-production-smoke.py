@@ -27,6 +27,8 @@ environment = {
     "IDENTITY_ADMIN_SERVICE_KEY": identity_admin_service_key,
     "NEPHOS_PIN_PEPPER": pin_pepper,
     "API_INTROSPECTION_CLIENT_SECRET": introspection_secret,
+    "NEPHOS_PUBLIC_ORIGIN": "https://photos.example.test",
+    "NEPHOS_QR_DELIVERY_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
 }
 containers = []
 
@@ -51,7 +53,7 @@ if (smoke.ROOT / ".env.faces").exists() and (smoke.ROOT / "artifacts/lan/compose
     ]
 configuration = json.loads(docker(*compose, "config", "--format", "json"))
 postgres_image = configuration["services"]["postgres"]["image"]
-identity_image = configuration["services"]["keycloak"]["image"]
+identity_image = os.environ.get("NEPHOS_TEST_IDENTITY_IMAGE", configuration["services"]["keycloak"]["image"])
 with socket.socket() as reservation:
     reservation.bind(("127.0.0.1", 0))
     port = reservation.getsockname()[1]
@@ -112,6 +114,10 @@ try:
         "IDENTITY_ADMIN_SERVICE_KEY",
         "-e",
         "NEPHOS_PIN_PEPPER",
+        "-e",
+        "NEPHOS_PUBLIC_ORIGIN",
+        "-e",
+        "NEPHOS_QR_DELIVERY_KEY",
         "-e",
         "KC_HTTP_ENABLED=true",
         "-e",

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Unable to continue - Nephos administration{% endblock %}
+{% block title %}Ошибка — Nephos{% endblock %}
 {% block content %}
-<section class="card login error" role="alert">
-  <h1>Unable to continue</h1>
-  <p>{{ message }}</p>
-  <a class="button" href="/">Return to administration</a>
+<section class="card">
+  <h1>Не удалось выполнить действие</h1>
+  <p class="error" role="alert">{{ message }}</p>
+  <div class="actions"><a class="button" href="/">Открыть актуальное состояние</a><a class="button primary" href="/login">Войти заново</a></div>
 </section>
 {% endblock %}

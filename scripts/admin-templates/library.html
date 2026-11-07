@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ library.name }} — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>{{ library.name }}</h1><p class="muted">Владелец: {{ library.ownerName or 'не назначен' }}</p></div><a class="button" href="/libraries/{{ library.id }}/edit">Изменить название</a></div>
+<a class="back" href="/libraries">← Все медиатеки</a>
+<section class="card"><h2>Участники и доступ</h2><p class="hint">Участие в медиатеке и доступ по обмену медиа — разные основания доступа. Права на отдельные файлы сохраняются за загрузившим их пользователем.</p><div class="table-wrap"><table><thead><tr><th scope="col">Пользователь</th><th scope="col">Основание доступа</th><th scope="col">Доступ аккаунта</th></tr></thead><tbody>{% for member in library.members %}<tr><td><a href="/users/{{ member.subject }}">{{ member.displayName or member.login or member.subject }}</a></td><td>{{ member.access|member_access }}{% if member.access == 'subset' %}<p class="hint">Выбранных медиа: {{ member.sharedAssetCount }}</p>{% endif %}</td><td>{{ 'Включён' if member.enabled else 'Отключён' }}</td></tr>{% else %}<tr><td colspan="3">Участников нет.</td></tr>{% endfor %}</tbody></table></div>
+{% if not library.ownerSubject %}<p class="warning">Исторический владелец не записан. Можно явно назначить владельца из существующих прямых участников, не меняя права на медиа.</p>{% if library.members|selectattr('scope','equalto','member')|list %}<a class="button" href="/libraries/{{ library.id }}/owner">Назначить владельца</a>{% else %}<p class="hint">Прямых участников нет. Назначение владельца без существующего участника недоступно.</p>{% endif %}{% endif %}</section>
+{% endblock %}

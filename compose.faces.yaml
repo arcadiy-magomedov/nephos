@@ -1,5 +1,8 @@
 # Optional overlay; start only the services listed in face-inference/README.md.
 services:
+  admin-console:
+    environment:
+      ADMIN_FACES_URL: http://faces-api:8080
   cleanup:
     environment:
       Services__Faces: http://faces-api:8080
@@ -77,6 +80,7 @@ services:
       Inference__Url: http://face-inference:8090
       Inference__Key: ${FACES_INFERENCE_KEY:?Required}
       ConnectionStrings__Faces: Host=faces-postgres;Database=faces;Username=faces_app;Password=${FACES_APP_PASSWORD}
+      Administration__Key: ${ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
     ports: ["127.0.0.1:18085:8080"]
     depends_on:
       migrate-faces: {condition: service_completed_successfully}

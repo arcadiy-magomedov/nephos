@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Изменить профиль' if user else 'Создать пользователя' }} — Nephos{% endblock %}
+{% block content %}
+<h1>{{ 'Изменить профиль' if user else 'Создать пользователя' }}</h1>
+<section class="card form-card">
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if user %}<input type="hidden" name="revision" value="{{ user.revision }}">{% endif %}<input type="hidden" name="command" value="{{ command }}">
+    <label for="name">Имя</label><input id="name" name="displayName" value="{{ values.get('displayName', user.displayName if user else '') }}" required maxlength="100" autocomplete="name">
+    {% if not user %}
+    <label for="login">Логин</label><input id="login" name="login" value="{{ values.get('login','') }}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" autocomplete="off">
+    <p class="hint">Уникальный идентификатор. На телефоне вводить его не нужно.</p>
+    {% else %}<p class="muted">Логин: @{{ user.login }}. Логин изменить нельзя.</p>{% endif %}
+    <label class="check"><input type="checkbox" name="discoverable" value="yes" {% if values.get('discoverable', user.discoverable if user else True) %}checked{% endif %}>Видим другим пользователям для обмена медиа</label>
+    <p class="hint">Скрытие из каталога не отзывает ранее предоставленный доступ.</p>
+    {% if not user %}<p class="warning">Личная медиатека создаётся автоматически. Права администратора не предоставляются. Для подключения телефона выдайте одноразовый QR.</p>{% endif %}
+    <div class="actions"><a class="button" href="{{ '/users/' ~ user.subject if user else '/users' }}">Отмена</a><button class="primary">{{ 'Сохранить' if user else 'Создать' }}</button></div>
+  </form>
+</section>
+{% endblock %}

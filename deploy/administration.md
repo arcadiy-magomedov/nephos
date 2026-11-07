@@ -15,9 +15,19 @@ and the operator's configured authentication/MFA policy.
 
 ## Media-user sign-in
 
+The primary administrator and mobile enrollment flow is now described in
+[admin-console.md](admin-console.md): known user, one-time QR, independently
+revocable device session. New accounts do not require email. The console no
+longer uses a PIN-request dashboard as the primary onboarding interface.
+Existing device refresh sessions survive the change.
+
+### Legacy provider compatibility
+
 The admin console is the only account-creation path. Creating a known account
-does not email a credential. The native client's initial sign-in asks only for
-email. Public `POST /realms/nephos/nephos-admin/request-pin` accepts bounded JSON
+does not email a credential. The legacy email/PIN provider contract remains
+available for existing configured accounts and compatibility qualification;
+it is not the new native client's primary login. Public
+`POST /realms/nephos/nephos-admin/request-pin` accepts bounded JSON
 `{"email":"known@example.test","clientId":"nephos-ios"}` and generates an eight-digit,
 one-use, 30-minute PIN only for a known enabled account. Its response contains
 only `{"expiresIn":1800}`, never the PIN or user ID. Invalid input returns 400,
@@ -27,22 +37,22 @@ Requests are limited to ten per IP per minute and one per normalized email per
 60 seconds. After cooldown, repeated pending requests return the original
 remaining lifetime without replacing the PIN.
 
-The operator reads **Requested sign-in PINs** in the private console and
-conveys the PIN manually after verifying the recipient; no email is sent.
-The console fetches `GET /realms/nephos/nephos-admin/pin-requests` server-side
-using `X-Nephos-Identity-Service-Key`; neither that key nor operator credentials
-are available to the native client. The response is
+The private compatibility endpoint
+`GET /realms/nephos/nephos-admin/pin-requests` requires
+`X-Nephos-Identity-Service-Key`; neither that key nor operator credentials
+are available to the native client. The legacy response is
 `{"requests":[{"email":"known@example.test","username":"known","pin":"12345678","expiresAt":"...Z"}]}`.
 Requested PIN ciphertext (AES-256-GCM, random IV, account-bound authenticated
 data, a domain-separated key derived from `NEPHOS_PIN_PEPPER`), expiry and the
 peppered HMAC verifier share one single-use record. PINs are never logged.
 Consumption, revocation, expiry, disabled users and manual reissue remove the
-requested entry. Manual issuance remains available and displays its PIN once
-in the operator session, replacing the earlier PIN. Invalid grant attempts are
+requested entry. Legacy private manual issuance returns the PIN only in its
+response, replacing the earlier PIN; it is not cached in the operator session.
+Invalid grant attempts are
 limited to ten per account per 15 minutes. Keycloak and the public API must use
 HTTPS at the deployment edge.
 
-The native client submits the email and PIN to the Keycloak token endpoint using
+Legacy clients submit the email and PIN to the Keycloak token endpoint using
 the `urn:nephos:params:oauth:grant-type:login-pin` OAuth extension grant. It
 receives normal Keycloak OIDC access, ID and offline refresh tokens; Nephos does
 not mint a parallel token format. The PIN is the bootstrap credential for that
@@ -132,10 +142,11 @@ Restarting the console preserves sessions; restarting the nonpersistent session
 store signs operators out. Media, accounts and libraries are unaffected.
 
 Actions use POST/Redirect/GET to avoid browser refresh resubmission. Provisioning
-still spans identity and library services: if a dependency fails midway, inspect
-existing state before retrying; the UI reports this limitation rather than
-claiming transactional rollback. This is an existing platform gap, not a
-production-readiness certification of provisioning.
+spans identity and library services, but durable Library administration
+operations now record progress, identity provenance and immutable command
+payloads. The reconciler resumes accepted operations after logout/restart.
+The console reports authoritative operation status, not transactional rollback
+or successful completion merely because a request timed out.
 
 Request telemetry records bounded method/status fields, not callback URLs,
 cookies, credentials or request bodies. Gunicorn access logging is not enabled.

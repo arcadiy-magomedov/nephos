@@ -1,0 +1,40 @@
+# Isolated qualification ports; use a unique COMPOSE_PROJECT_NAME and fresh .env.
+services:
+  keycloak:
+    image: nephos-admin-test-keycloak:26.8.1
+    environment:
+      KC_HOSTNAME: https://localhost:28443
+      NEPHOS_PUBLIC_ORIGIN: https://localhost:28443
+    ports: !override ["127.0.0.1:28081:8080"]
+  admin-init:
+    environment:
+      ADMIN_PUBLIC_URL: http://localhost:28082
+      ADMIN_IDENTITY_PUBLIC_URL: http://localhost:28081
+  admin-console:
+    environment:
+      ADMIN_PUBLIC_URL: http://localhost:28082
+      ADMIN_IDENTITY_PUBLIC_URL: http://localhost:28081
+    ports: !override ["127.0.0.1:28082:8080"]
+  mailpit:
+    ports: !override ["127.0.0.1:28083:8025"]
+  gateway:
+    ports: !override ["127.0.0.1:28080:8080"]
+  grafana:
+    ports: !override ["127.0.0.1:23000:3000"]
+  library-api:
+    environment:
+      Authentication__Authority: https://localhost:28443/realms/nephos
+  library-worker:
+    environment:
+      Authentication__Authority: https://localhost:28443/realms/nephos
+  library-admin:
+    environment:
+      Authentication__Authority: https://localhost:28443/realms/nephos
+  storage-api:
+    environment:
+      Authentication__Authority: https://localhost:28443/realms/nephos
+  storage-worker:
+    environment:
+      Authentication__Authority: https://localhost:28443/realms/nephos
+  qualification-edge:
+    ports: !override ["127.0.0.1:28443:8443"]

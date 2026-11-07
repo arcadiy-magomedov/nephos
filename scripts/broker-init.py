@@ -4,9 +4,26 @@
 import base64
 import json
 import os
+import time
+import urllib.error
 import urllib.request
 
 authorization = "Basic " + base64.b64encode(("nephos:" + os.environ["RABBITMQ_PASSWORD"]).encode()).decode()
+
+for attempt in range(30):
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request("http://rabbitmq:15672/api/overview", headers={"Authorization": authorization}),
+            timeout=3,
+        ) as response:
+            response.read()
+        break
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, TimeoutError):
+        if attempt == 29:
+            raise RuntimeError("Broker management endpoint unavailable; provisioning did not run.") from None
+        time.sleep(2)
 
 
 def put(path, value):

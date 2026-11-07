@@ -12,6 +12,7 @@ builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage");
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = MediaProtocol.ChunkSize);
 builder.Services.AddSingleton<IVolumeStore, VolumeStore>();
 builder.Services.AddSingleton<IUploadRepository, PostgresUploadRepository>();
+builder.Services.AddSingleton<StorageAdministrationRepository>();
 builder.Services.AddSingleton<BlobCleanupRepository>();
 builder.Services.AddHttpClient("derivatives", client => client.Timeout = TimeSpan.FromSeconds(55))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -31,6 +32,7 @@ app.UseAuthorization();
 app.MapServiceHealth();
 app.MapUploads();
 app.MapBlobCleanup();
+app.MapStorageAdministration();
 app.Run();
 
 public sealed class StorageHealthCheck(

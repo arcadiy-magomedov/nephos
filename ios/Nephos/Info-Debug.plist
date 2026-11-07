@@ -44,6 +44,8 @@
 	<array>
 		<string>_nephos._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan your administrator's single-use Nephos sign-in QR code.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Find and connect to the Nephos server you choose on your local network.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -2,6 +2,7 @@
 """Append new development settings without rotating existing credentials."""
 
 import os
+import base64
 from pathlib import Path
 import secrets
 
@@ -23,6 +24,11 @@ with path.open("a") as output:
     ):
         if name not in existing:
             output.write(f"{name}={secrets.token_hex(24)}\n")
+    output.flush()
+    if "NEPHOS_QR_DELIVERY_KEY" not in existing:
+        output.write(f"NEPHOS_QR_DELIVERY_KEY={base64.b64encode(secrets.token_bytes(32)).decode()}\n")
+    if "NEPHOS_QR_KEY_VERSION" not in existing:
+        output.write("NEPHOS_QR_KEY_VERSION=1\n")
     output.flush()
     os.fsync(output.fileno())
 os.chmod(path, 0o600)

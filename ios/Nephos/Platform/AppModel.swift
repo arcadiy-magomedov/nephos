@@ -386,8 +386,8 @@ final class AppModel {
                 try await persistence.markInstallation()
                 guard version == epoch else { throw CancellationError() }
             }
-            connection = loaded.connection
-            if let credentials, credentials.connection == connection {
+            connection = credentials?.connection ?? loaded.connection
+            if let credentials {
                 restoredCredentials = credentials
             }
         }
@@ -409,7 +409,10 @@ final class AppModel {
             defer { hasRestoredSession = true }
             do {
                 try await bootstrap()
-                guard let restoredCredentials else { return }
+                guard let restoredCredentials else {
+                    if try Keychain.vault().pending != nil { try await resumeQREnrollment() }
+                    return
+                }
                 self.restoredCredentials = nil
                 try await establish(AuthSession(credentials: restoredCredentials))
                 scheduleAutomaticRun()
@@ -421,7 +424,7 @@ final class AppModel {
     }
     private var activeAuth: AuthSession?
     private func establish(_ session: AuthSession) async throws {
-        guard let connection, let subject = session.subject else {
+        guard let connection = session.credentials?.connection, let subject = session.subject else {
             throw ClientError.invalid("No valid server/account storage is configured.")
         }
         let startingEpoch = epoch
@@ -488,6 +491,7 @@ final class AppModel {
             cached = nil
         }
         guard boundary == epoch else { throw CancellationError() }
+        self.connection = connection
         activeAuth = session
         account = key
         ledger = loaded
@@ -571,6 +575,72 @@ final class AppModel {
         connection = nil
         proposedConnection = nil
     }
+    var hasPendingEnrollment: Bool {
+        guard let vault = try? Keychain.vault() else { return false }
+        return vault.pending != nil || (!signedIn && vault.current != nil)
+    }
+
+    func enroll(qr: EnrollmentQR) async throws {
+        try await bootstrap()
+        guard !isSigningIn else { throw CancellationError() }
+        isSigningIn = true
+        defer { isSigningIn = false }
+        let version = epoch
+        let candidate = try await QREnrollmentClient.connection(for: qr)
+        try checkEnrollment(version)
+        let pending = try Keychain.prepare(qr: qr, connection: candidate)
+        try await finishEnrollment(pending, version: version)
+    }
+
+    func resumeQREnrollment() async throws {
+        try await bootstrap()
+        guard !isSigningIn else { return }
+        let vault = try Keychain.vault()
+        guard let pending = vault.pending else {
+            guard let saved = vault.current else { return }
+            isSigningIn = true
+            defer { isSigningIn = false }
+            let session = AuthSession(credentials: saved)
+            try await establish(session)
+            auth = session
+            scheduleAutomaticRun()
+            return
+        }
+        guard pending.installationID == vault.installationID else { throw QREnrollmentError.invalidProof }
+        isSigningIn = true
+        defer { isSigningIn = false }
+        let version = epoch
+        let candidate = try await QREnrollmentClient.connection(for: pending.qr)
+        try checkEnrollment(version)
+        guard candidate == pending.connection else {
+            throw ClientError.invalid("The saved sign-in server identity changed. Request a new QR code.")
+        }
+        try await finishEnrollment(pending, version: version)
+    }
+
+    private func finishEnrollment(_ pending: PendingEnrollment, version: UUID) async throws {
+        let credentials = try await QREnrollmentClient.exchange(pending)
+        try checkEnrollment(version)
+        try Keychain.commit(credentials, requestID: pending.requestID)
+        // Once the atomic token/key commit succeeds, UI cancellation must not interrupt session setup.
+        let task = Task { @MainActor in
+            guard self.epoch == version else { throw CancellationError() }
+            let session = AuthSession(credentials: credentials)
+            self.auth = session
+            try await self.establish(session)
+            self.connectionRevision += 1
+            try await self.persistence.saveConnection(credentials.connection, revision: self.connectionRevision)
+            self.scheduleAutomaticRun()
+        }
+        try await task.value
+    }
+
+    private func checkEnrollment(_ version: UUID) throws {
+        try Task.checkCancellation()
+        guard epoch == version else { throw CancellationError() }
+    }
+
+    func cancelQREnrollment() throws { try Keychain.cancelEnrollment() }
     @discardableResult
     func login(email: String, pin: String) async -> Bool {
         do { try await bootstrap() } catch {

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ user.displayName or user.login }} — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>{{ user.displayName or user.login }}</h1><p class="muted">@{{ user.login }}</p></div>{% if user.enabled %}<a class="button primary" href="/users/{{ user.subject }}/invitations/new">Подключить устройство</a>{% endif %}</div>
+<a class="back" href="/users">← Все пользователи</a>
+{% if operation and operation.status != 'completed' %}
+<section class="card"><h2>Создание аккаунта</h2><p>{{ operation.status|operation_status }}</p>{% if operation.error %}<p class="error">{{ operation.error }}</p>{% endif %}<p class="hint">Операция {{ operation.id }}. Повтор не создаёт другой аккаунт или медиатеку.</p><form method="post" action="/operations/{{ operation.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Повторить безопасно</button></form></section>
+{% endif %}
+<div class="layout"><div>
+  <section class="card"><h2>Аккаунт</h2><div class="row"><span>Имя</span><strong>{{ user.displayName }}</strong></div><div class="row"><span>Доступ к системе</span><span class="pill {{ '' if user.enabled else 'off' }}">{{ 'Включён' if user.enabled else 'Отключён' }}</span></div><div class="row"><span>Обмен медиа</span><span>{{ 'Видим другим пользователям' if user.discoverable else 'Скрыт из каталога' }}</span></div><div class="actions"><a class="button" href="/users/{{ user.subject }}/edit">Изменить профиль</a><a class="button {{ 'danger' if user.enabled else 'primary' }}" href="/users/{{ user.subject }}/access">{{ 'Отключить доступ' if user.enabled else 'Включить доступ' }}</a></div></section>
+  <section class="card"><h2>Устройства</h2>
+    {% if devices_error %}<p class="error" role="alert">{{ devices_error }}</p><a class="button" href="/users/{{ user.subject }}">Обновить состояние</a>
+    {% else %}{% for device in devices %}
+      <div class="row"><div><strong>{{ device.name }}</strong><p class="hint">Последняя активность: <time datetime="{{ device.lastAccess }}">{{ device.lastAccess|datetime_ru }}</time></p></div><a class="button danger" href="/users/{{ user.subject }}/devices/{{ device.id }}/revoke">Отозвать</a></div>
+    {% else %}<div class="empty"><h3>Устройства не подключены</h3><p class="muted">Выдайте пользователю QR для первого входа.</p></div>{% endfor %}{% endif %}
+    {% if not user.enabled %}<p class="warning">Аккаунт отключён. Подключение новых устройств недоступно.</p>{% endif %}
+  </section>
+  <section class="card"><h2>Приглашения</h2>
+    {% if invitations_error %}<p class="error" role="alert">{{ invitations_error }}</p>
+    {% else %}{% for invitation in invitations %}<div class="row"><div><strong>{{ invitation.status|invitation_status }}</strong><p class="hint">Действует до <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_ru }}</time></p></div>{% if invitation.status == 'pending' %}<form method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="danger">Отменить QR</button></form>{% endif %}</div>{% else %}<p class="muted">Приглашений пока нет.</p>{% endfor %}{% endif %}
+    <p class="hint">Использованные, отменённые и истёкшие QR не предоставляют доступ.</p>
+  </section>
+</div><div>
+  <section class="card"><h2>Медиатеки</h2>{% for library in libraries %}<div class="row"><a href="/libraries/{{ library.id }}">{{ library.name }}</a><span class="hint">{{ 'Личная' if library.id == user.personalLibraryId else 'Участник' }}</span></div>{% else %}<p class="muted">Медиатеки ещё не созданы.</p>{% endfor %}<p class="hint">Медиа сохраняется при отключении аккаунта или отзыве устройства.</p></section>
+  {% if memberships %}<section class="card"><h2>Основания доступа</h2>{% for membership in memberships %}<div class="row"><a href="/libraries/{{ membership.libraryId }}">{{ membership.name }}</a><span>{{ ('member' if membership.scope == 'member' else ('all' if membership.allAssets else 'subset'))|member_access }}{% if membership.scope == 'share' and not membership.allAssets %} · {{ membership.sharedAssetCount }} медиа{% endif %}</span></div>{% endfor %}</section>{% endif %}
+  <section class="card"><h2>Подключение по QR</h2><p class="muted">Пользователь сканирует код в Nephos и сразу получает доступ. Email и PIN не нужны.</p><p class="hint">Каждое устройство получает отдельную сессию.</p>{% if user.enabled %}<a class="button primary" href="/users/{{ user.subject }}/invitations/new">Создать QR</a>{% endif %}</section>
+</div></div>
+{% endblock %}

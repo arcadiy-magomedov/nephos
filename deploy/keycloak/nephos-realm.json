@@ -1,6 +1,9 @@
 {
   "realm": "nephos",
   "enabled": true,
+  "eventsListeners": ["jboss-logging", "nephos-enrollment"],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "rememberMe": false,

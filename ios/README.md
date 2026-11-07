@@ -38,27 +38,26 @@ and VoiceOver with Accessibility Inspector before claiming performance budgets.
 
 ## Native design and social journeys
 
-The [approved first-launch wizard](../design/ios/onboarding.html) is now native
-SwiftUI. Server/issuer preflight, explicit trust, email/PIN sign-in, library
-selection, optional Photos access and a final confirmation are separate steps.
-Unreachable API/identity endpoints and untrusted certificates have inline recovery
-guidance; a remote server advertising a loopback issuer is rejected before login.
-The issuer is displayed explicitly even when it differs from the API origin.
-TLS validation and OIDC issuer/nonce checks remain mandatory. The native client
-first validates an email against enabled known accounts, then requests a
-one-time 8-digit PIN. Only the private admin console displays the generated PIN
-for manual delivery; the unauthenticated requester never receives it. A separate
-PIN-entry screen exchanges it for standard Keycloak OIDC access, identity, and
-offline refresh tokens. PINs expire after 30 minutes. Repeating an accepted public
-request reuses its unconsumed PIN and original expiry, even during the email
-issuance cooldown. Only explicit administrator reissue replaces a pending PIN.
-Accepted email/server/expiry metadata (never the PIN or tokens) survives app
-restart and is cleared on success, expiry, or changing email/server. Request
-rate limits show a one-minute countdown without hiding an already accepted PIN
-entry; without an accepted request they never unlock PIN entry. Per-IP request,
-per-email issuance, and PIN-exchange attempt limits remain enforced.
-The public client does not use a client
-secret or receive a password. Initial ID tokens require the generated nonce.
+The primary native login scans an administrator-issued single-use QR code using
+AVFoundation, or imports its image using PhotosPicker when the code is on the
+same phone or camera access is denied. Import does not request PhotoKit library
+permission or enable backup. Both configurations declare Camera and Photos
+usage. No manual discovery, email/PIN entry, or certificate bypass is offered.
+
+Only the exact version-1 JSON schema `{v,origin,inviteId,secret}` is accepted.
+Origin must be canonical HTTPS without path, credentials, query or fragment.
+Before sending the invitation secret, the app verifies `/v1/config`, same-origin
+OIDC discovery and the provider's versioned enrollment configuration with
+`nephos-ios`. URLSession uses system TLS trust and rejects every redirect.
+The installation-bound P256 key, invitation and immutable request/nonce are
+saved in Keychain before exchange. Fresh challenges are checked against the
+expected canonical origin/client/invitation/request/public-key hash before DER
+ECDSA-SHA256 signing. Lost responses and restarts reuse that key and request.
+Expired, used, cancelled, disabled, revoked and offline states have explicit
+messages; retry never silently generates a different device identity.
+
+Normal Keycloak access, ID and offline refresh tokens are used, never a parallel
+token issuer. Initial ID tokens require the generated nonce.
 Refresh ID tokens may omit it (OIDC Core 12.2), but cannot change it or the
 account subject. Signature, issuer, audience and lifetime validation still
 apply before refreshed credentials are saved. Offline refresh sessions survive
@@ -69,26 +68,17 @@ flow.
 Cold launch shows a neutral session-restoration indicator until the saved
 Keychain session and account state have resolved. Concurrent restoration callers
 share that work; an authenticated relaunch does not briefly show the login wizard.
-Manual sign-in keeps its view alive until account setup finishes, so switching
+QR sign-in keeps its view alive until account setup finishes, so switching
 to the gallery cannot cancel a returning account's session setup.
-Explicit sign-out and rejected sessions still enter the email-first flow.
+Explicit sign-out and rejected sessions enter the QR flow. Existing single-slot
+Keychain credentials migrate only after the account-bound vault is durably saved.
+One atomic Keychain item commits the active account, tokens, account-bound key
+and pending-enrollment removal. Crashes between that commit and disk connection
+save restore the connection from Keychain. Failed scans, cancellation and failed
+exchanges do not delete an existing session. PIN DTOs/client methods remain for
+legacy compatibility and tests, but are not a primary login surface.
 
-**Find nearby servers** starts an optional Bonjour search on the first step.
-The host advertises `_nephos._tcp` with a versioned TXT record containing its
-canonical HTTPS URL; see [host setup](../deploy/discovery/README.md).
-Results never overwrite a manually entered address until selected. Selection
-performs normal preflight and still requires explicit trust. No passkey, token
-or certificate is accepted from discovery. Both app configurations declare
-Bonjour/Local Network usage; discovery stops when leaving the server step or
-backgrounding the app. Manual URLs remain available if discovery is denied,
-blocked by the network or unsupported by the server.
-
-The validated server-address draft survives restart even if TLS or discovery
-fails. Change server signs out and removes the old approved connection, without
-deleting account upload ledgers or staged originals. A saved remote server with a
-localhost issuer cannot resume directly into sign-in. Every replacement requires
-a successful preflight and explicit approval; failed checks never reuse a previous
-proposal. Authenticated setup choices are
+Authenticated setup choices are
 saved in the account-isolated ledger; interrupted setup resumes without enabling
 backup. Completing browse-only setup does not request Photos access. Shared
 libraries cannot be upload targets; denied/limited Photos access is handled
@@ -101,6 +91,23 @@ enable full trust in Settings > General > About > Certificate Trust Settings.
 Use the certificate's hostname, not an arbitrary IP address. App signing trust
 and HTTPS certificate trust are separate. Account creation remains an
 administrator operation; installing the app does not create a Nephos account.
+
+### QR qualification
+
+Run `swift test`, strict `xcrun swift-format lint --strict --recursive Nephos Tests
+Qualification`, and a signing-disabled simulator build. Core tests include real
+CoreImage QR image decoding, strict origin/schema failures, tampered challenge
+rejection, immutable key/request recovery and atomic account transitions.
+`python3 qr_qualification.py --simulator UUID` executes isolated native Keychain
+migration/recovery and camera-denied UI checks. For real-service acceptance, pass
+`--qr-image /path/to/fresh-real-invitation.png` from the disposable trusted-HTTPS
+fixture: the native app decodes the actual image, persists a request before a
+crash, discards a real token exchange response, cold-restarts same-key recovery,
+calls the actual libraries API, and verifies gallery setup plus cold restore.
+No access tokens are injected. Keep invitation images outside tracked files;
+the fixture owner must cancel unused invitations and remove secret images.
+Physical-camera capture and permission/TLS/relaunch acceptance still require an
+unlocked iPhone; simulator image decoding does not claim to qualify its camera.
 
 The approved [design board](../design/ios/screens.html) is implemented using
 native SwiftUI controls (including the host iOS version's navigation/tab-bar

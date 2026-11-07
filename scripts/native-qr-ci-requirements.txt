@@ -1,0 +1,2 @@
+qrcode[pil]==8.2
+Pillow==13.0.0
