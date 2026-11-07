@@ -61,6 +61,7 @@ def main():
                 response = page.goto(base + "/")
                 assert response.status == 200
                 assert "www-authenticate" not in response.headers
+                expect(page.locator('nav[aria-label="Main navigation"]')).to_have_count(0)
                 page.get_by_role("link", name="Sign in", exact=True).click()
                 expect(page.locator("#username")).to_be_visible()
                 assert page.url.startswith(smoke.IDENTITY + "/realms/master/")
@@ -137,12 +138,14 @@ with app.test_request_context():
                 method="DELETE",
                 expected=204,
             )
+            # A denied page must not expose navigation when the stylesheet is unavailable.
+            page.route(f"{base}/admin-static/admin.css", lambda route: route.abort())
             begin()
             page.locator("#username").fill(outsider)
             page.locator("#password").fill(outsider_password)
             page.locator("#kc-login").click()
             expect(page.get_by_text("This account is not an administrator.", exact=False)).to_be_visible()
-            assert not page.locator('nav[aria-label="Main navigation"]').is_visible()
+            expect(page.locator('nav[aria-label="Main navigation"]')).to_have_count(0)
             context.close()
             browser.close()
         print("PASS: real OIDC browser login, incorrect password, reload, CSRF, logout/replay and operator-role denial")

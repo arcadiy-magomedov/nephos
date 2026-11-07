@@ -51,7 +51,6 @@ nav a[aria-current=page] { background: #eef2ff; color: #264ab6; font-weight: 600
 .logout button { min-width: 0; }
 main { max-width: 1450px; margin-left: 230px; padding: 36px 42px; }
 .signed-out main { max-width: 800px; margin: 0 auto; }
-.signed-out aside { display: none; }
 .top, .toolbar, .actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .top, .toolbar { justify-content: space-between; }
 h1 { margin: 0 0 8px; font-size: 29px; }
