@@ -61,6 +61,7 @@ jobs:
       - run: python3 -m unittest discover -s ios -p 'test_*.py'
       - run: python3 -m pip install -r scripts/quality-requirements.txt
       - run: pip-audit -r scripts/admin-requirements.txt
+      - run: pip-audit -r scripts/qr-identity-requirements.txt
       - run: ruff check . && ruff format --check .
       - run: node --check scripts/admin-static/invitation.js
       - run: yamllint -s .github compose*.yaml deploy tests/alert-rules.test.yaml .yamllint.yaml
@@ -153,7 +154,9 @@ jobs:
             --output /dev/null
       - run: python3 scripts/smoke.py
       - run: python3 scripts/admin-smoke.py
-      - run: pip install -r scripts/browser-requirements.txt && python3 -m playwright install --with-deps chromium
+      - run: |
+          python3 -m pip install -r scripts/browser-requirements.txt -r scripts/qr-identity-requirements.txt
+          python3 -m playwright install --with-deps chromium
       - run: python3 scripts/admin-browser-smoke.py
       - run: python3 scripts/admin-ux-smoke.py
       - name: Administration session recovery
