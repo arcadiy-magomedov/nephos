@@ -111,8 +111,6 @@ jobs:
     timeout-minutes: 40
     env:
       COMPOSE_FILE: compose.yaml:deploy/admin-qualification.compose.yaml
-      SSL_CERT_FILE: ${{ github.workspace }}/artifacts/admin-tls/trust.pem
-      REQUESTS_CA_BUNDLE: ${{ github.workspace }}/artifacts/admin-tls/trust.pem
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -126,6 +124,10 @@ jobs:
       - run: python3 scripts/admin-tests.py
       - run: python3 scripts/dev-env.py
       - run: python3 scripts/admin-test-tls.py
+      - name: Use the generated qualification trust bundle
+        run: |
+          echo "SSL_CERT_FILE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem" >> "$GITHUB_ENV"
+          echo "REQUESTS_CA_BUNDLE=$GITHUB_WORKSPACE/artifacts/admin-tls/trust.pem" >> "$GITHUB_ENV"
       - name: Trust the disposable HTTPS fixture in Chromium
         run: |
           if ! command -v certutil >/dev/null; then
