@@ -2,6 +2,7 @@
 """Generate local-only credentials without putting them in command output."""
 
 import os
+import base64
 from pathlib import Path
 import secrets
 
@@ -33,4 +34,6 @@ fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 with os.fdopen(fd, "w") as output:
     for name in names:
         output.write(f"{name}={secrets.token_hex(24)}\n")
+    output.write(f"NEPHOS_QR_DELIVERY_KEY={base64.b64encode(secrets.token_bytes(32)).decode()}\n")
+    output.write("NEPHOS_QR_KEY_VERSION=1\n")
 print("Created ignored .env with owner-only permissions. Existing files are never overwritten.")

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Users — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>Users</h1><p class="muted">Accounts, library access and connected devices.</p></div>{% if data.total or search or access %}<a class="button primary" href="/users/new">Create user</a>{% endif %}</div>
+{% if data.total == 0 and not search and not access %}
+<section class="card empty"><h2>No users yet</h2><p class="muted">Create an account, then issue a QR code to connect a device. Self-registration is not available.</p><a class="button primary" href="/users/new">Create user</a></section>
+{% else %}
+<section class="card">
+  <form class="toolbar" method="get">
+    <label>Search<input name="search" value="{{ search }}" maxlength="100" placeholder="Name or username"></label>
+    <label>Access<select name="access"><option value="">All users</option><option value="enabled" {% if access == 'enabled' %}selected{% endif %}>Enabled</option><option value="disabled" {% if access == 'disabled' %}selected{% endif %}>Disabled</option></select></label>
+    <button>Search</button><a class="button" href="/users">Reset</a>
+  </form>
+  <p class="hint">Found: {{ data.total }}. {% if data.observedAt %}Last updated: <time datetime="{{ data.observedAt }}">{{ data.observedAt|datetime_utc }}</time>.{% endif %}</p>
+  <div class="table-wrap"><table><thead><tr><th scope="col">User</th><th scope="col">Access</th><th scope="col">Account creation</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>
+  {% for user in data["items"] %}
+    <tr><td><div class="name"><span class="avatar" aria-hidden="true">{{ (user.displayName or user.login)[:1] }}</span><div><strong>{{ user.displayName or user.login }}</strong><small>@{{ user.login }}</small></div></div></td><td><span class="pill {{ '' if user.enabled else 'off' }}">{{ 'Enabled' if user.enabled else 'Disabled' }}</span></td><td>{{ user.provisioningStatus|operation_status }}</td><td><a href="/users/{{ user.subject }}">Open<span class="visually-hidden"> {{ user.displayName or user.login }}</span></a></td></tr>
+  {% else %}<tr><td colspan="4"><div class="empty"><h2>No matches</h2><p class="muted">Change the search or access filter.</p></div></td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="pagination"><a href="{{ first_url }}">First page</a>{% if next_url %}<a class="button" href="{{ next_url }}">Next page</a>{% endif %}</div>
+</section>
+{% endif %}
+{% endblock %}

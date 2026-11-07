@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit profile' if user else 'Create user' }} — Nephos{% endblock %}
+{% block content %}
+<h1>{{ 'Edit profile' if user else 'Create user' }}</h1>
+<section class="card form-card">
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if user %}<input type="hidden" name="revision" value="{{ user.revision }}">{% endif %}<input type="hidden" name="command" value="{{ command }}">
+    <label for="name">Name</label><input id="name" name="displayName" value="{{ values.get('displayName', user.displayName if user else '') }}" required maxlength="100" autocomplete="name" placeholder="Enter a name">
+    {% if not user %}
+    <label for="login">Username</label><input id="login" name="login" value="{{ values.get('login','') }}" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" autocomplete="off" placeholder="Enter a username" aria-describedby="username-hint">
+    <p class="hint" id="username-hint">Unique identifier. It is not required on the phone.</p>
+    {% else %}<p class="muted">Username: @{{ user.login }}. Usernames cannot be changed.</p>{% endif %}
+    <label class="check"><input type="checkbox" name="discoverable" value="yes" {% if values.get('discoverable', user.discoverable if user else True) %}checked{% endif %}>Visible to other users for media sharing</label>
+    <p class="hint">Hiding a user from the directory does not revoke existing shares.</p>
+    {% if not user %}<p class="warning">A personal library is created automatically.<br>No administrator privileges are granted.</p>{% endif %}
+    <div class="actions"><a class="button" href="{{ '/users/' ~ user.subject if user else '/users' }}">Cancel</a><button class="primary">{{ 'Save' if user else 'Create' }}</button></div>
+  </form>
+</section>
+{% endblock %}

@@ -1,1 +1,2 @@
 app.nephos.keycloak.LoginPinGrantFactory
+app.nephos.keycloak.QrGrantFactory

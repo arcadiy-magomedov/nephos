@@ -23,6 +23,16 @@ builder.Services.AddSingleton<IResourceSetRepository, PostgresResourceSetReposit
 builder.Services.AddSingleton<ISharingRepository, PostgresSharingRepository>();
 builder.Services.AddSingleton<IAnalysisRepository, PostgresAnalysisRepository>();
 builder.Services.AddSingleton<IAdministrationRepository, PostgresAdministrationRepository>();
+if (builder.Configuration.GetValue<bool>("Administration:Enabled") &&
+    !string.IsNullOrWhiteSpace(builder.Configuration["Administration:IdentityUrl"]))
+{
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Administration:IdentityKey"]))
+        throw new InvalidOperationException("Administration:IdentityKey is required for administration reconciliation.");
+    builder.Services.AddHttpClient("administration-identity", client => client.Timeout = TimeSpan.FromSeconds(20))
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    builder.Services.AddHostedService<AdministrationWorker>();
+    builder.Services.AddHostedService<IdentityProjectionWorker>();
+}
 builder.Services.AddHttpClient("storage", client => client.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 if (builder.Configuration.GetValue<bool>("Worker:Enabled")) builder.Services.AddHostedService<ProjectionWorker>();

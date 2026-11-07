@@ -5,6 +5,7 @@ import base64
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 import json
+import os
 from pathlib import Path
 import secrets
 import re
@@ -17,9 +18,9 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = dict(line.split("=", 1) for line in (ROOT / ".env").read_text().splitlines() if line and not line.startswith("#"))
-API = "http://localhost:18080"
-IDENTITY = "http://localhost:18081"
-GRAFANA = "http://localhost:13000"
+API = os.environ.get("NEPHOS_TEST_API_URL", "http://localhost:18080")
+IDENTITY = os.environ.get("NEPHOS_TEST_IDENTITY_URL", "http://localhost:18081")
+GRAFANA = os.environ.get("NEPHOS_TEST_GRAFANA_URL", "http://localhost:13000")
 
 
 def request(url, *, data=None, token=None, basic=None, method=None, headers=None, expected=200, opener=None):
@@ -37,7 +38,7 @@ def request(url, *, data=None, token=None, basic=None, method=None, headers=None
             status, body = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, body = error.code, error.read()
-    if status != expected:
+    if status not in (expected if isinstance(expected, tuple) else (expected,)):
         raise AssertionError(f"{method or 'GET'} {urllib.parse.urlsplit(url).path}: expected {expected}, got {status}")
     if not body:
         return None
@@ -50,14 +51,18 @@ def request(url, *, data=None, token=None, basic=None, method=None, headers=None
 class AdminSession:
     """Exercise the actual local OIDC browser-form flow, without password grants or Basic Auth."""
 
-    def __init__(self, base="http://localhost:18082"):
-        self.base = base.rstrip("/")
+    def __init__(self, base=None):
+        self.base = (base or os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082")).rstrip("/")
 
         class LocalBrowserCookies(DefaultCookiePolicy):
             def return_ok_secure(self, cookie, request):
                 url = urllib.parse.urlsplit(request.get_full_url())
                 # Browsers treat localhost as trustworthy even without HTTPS.
-                if url.scheme == "http" and url.hostname == "localhost" and url.port == 18081:
+                if (
+                    url.scheme == "http"
+                    and url.hostname == "localhost"
+                    and url.port == urllib.parse.urlsplit(IDENTITY).port
+                ):
                     return True
                 return super().return_ok_secure(cookie, request)
 
@@ -77,15 +82,16 @@ class AdminSession:
         form = LoginForm()
         form.feed(page)
         target = urllib.parse.urlsplit(form.action or "")
-        if target.scheme != "http" or target.hostname != "localhost" or target.port != 18081:
+        identity = urllib.parse.urlsplit(IDENTITY)
+        if target.scheme != identity.scheme or target.hostname != "localhost" or target.port != identity.port:
             raise AssertionError("Expected the private local Keycloak operator login form.")
         page = request(
             form.action,
             opener=self.opener,
             data=urllib.parse.urlencode({"username": "admin", "password": ENV["KEYCLOAK_ADMIN_PASSWORD"]}).encode(),
-            headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://localhost:18081"},
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": IDENTITY},
         )
-        assert "Nephos local administration" in page, "Operator browser-form authentication did not complete."
+        assert "<button>Sign out</button>" in page, "Operator browser-form authentication did not complete."
         self.csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
 
     def request(self, path="/", **kwargs):

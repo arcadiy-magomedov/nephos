@@ -1,0 +1,23 @@
+{
+	auto_https disable_redirects
+}
+
+https://localhost:8443 {
+	tls /etc/nephos/tls.crt /etc/nephos/tls.key
+	@identity_management path /realms/nephos/nephos-admin/users /realms/nephos/nephos-admin/users/* /realms/nephos/nephos-admin/identities /realms/nephos/nephos-admin/identities/* /realms/nephos/nephos-admin/pin-requests
+	handle @identity_management {
+		respond "Not found" 404
+	}
+	handle /v1/* {
+		reverse_proxy gateway:8080
+	}
+	handle /realms/nephos/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

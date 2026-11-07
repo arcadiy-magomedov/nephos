@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ library.name }} — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>{{ library.name }}</h1><p class="muted">Owner: {{ library.ownerName or 'not assigned' }}</p></div><a class="button" href="/libraries/{{ library.id }}/edit">Rename library</a></div>
+<a class="back" href="/libraries">← All libraries</a>
+<section class="card"><h2>Members and access</h2><p class="hint">Library membership and shared-media access are different. Individual file permissions remain with their uploader.</p><div class="table-wrap"><table><thead><tr><th scope="col">User</th><th scope="col">Access basis</th><th scope="col">Account access</th></tr></thead><tbody>{% for member in library.members %}<tr><td><a href="/users/{{ member.subject }}">{{ member.displayName or member.login or member.subject }}</a></td><td>{{ member.access|member_access }}{% if member.access == 'subset' %}<p class="hint">Selected media: {{ member.sharedAssetCount }}</p>{% endif %}</td><td>{{ 'Enabled' if member.enabled else 'Disabled' }}</td></tr>{% else %}<tr><td colspan="3">No members.</td></tr>{% endfor %}</tbody></table></div>
+{% if not library.ownerSubject %}<p class="warning">The previous owner was not recorded. You can assign an existing direct member without changing media permissions.</p>{% if library.members|selectattr('scope','equalto','member')|list %}<a class="button" href="/libraries/{{ library.id }}/owner">Assign owner</a>{% else %}<p class="hint">There are no direct members. An owner cannot be assigned without an existing member.</p>{% endif %}{% endif %}</section>
+{% endblock %}

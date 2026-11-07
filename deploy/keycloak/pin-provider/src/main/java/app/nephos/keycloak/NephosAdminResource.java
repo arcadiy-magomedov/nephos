@@ -25,16 +25,18 @@ import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.services.resource.RealmResourceProvider;
 
-public final class NephosAdminResource implements RealmResourceProvider {
+public final class NephosAdminResource extends EnrollmentResource implements RealmResourceProvider {
     private static final String REALM = "nephos";
     private final KeycloakSession session;
 
     NephosAdminResource(KeycloakSession session) {
+        super(session);
         this.session = session;
     }
 
     @Override public Object getResource() { return this; }
     @Override public void close() {}
+
 
     @POST
     @Path("request-pin")
@@ -42,6 +44,7 @@ public final class NephosAdminResource implements RealmResourceProvider {
     @Produces(MediaType.APPLICATION_JSON)
     public Response requestPin(InputStream body) {
         try {
+            new EnrollmentStore(session).lock();
             var singleUse = session.singleUseObjects();
             String ip = session.getContext().getConnection().getRemoteAddr();
             boolean allowed = false;
@@ -146,7 +149,7 @@ public final class NephosAdminResource implements RealmResourceProvider {
         return Response.ok(Map.of("expiresIn", expiresIn)).header("Cache-Control", "no-store").build();
     }
 
-    private Response failure(int status, String error) {
+    static Response failure(int status, String error) {
         Response.ResponseBuilder response = Response.status(status).entity(Map.of("error", error))
                 .header("Cache-Control", "no-store");
         if (status == 429) response.header("Retry-After", "60");
@@ -158,6 +161,7 @@ public final class NephosAdminResource implements RealmResourceProvider {
     @Produces(MediaType.APPLICATION_JSON)
     public Response issuePin(@PathParam("userId") String userId, @Context HttpHeaders headers) {
         if (!authorized(headers)) return Response.status(Response.Status.UNAUTHORIZED).build();
+        new EnrollmentStore(session).lock();
         UserModel user = findUser(userId);
         if (user == null || !user.isEnabled()) return Response.status(Response.Status.NOT_FOUND).build();
         var singleUse = session.singleUseObjects();
@@ -205,16 +209,17 @@ public final class NephosAdminResource implements RealmResourceProvider {
         if (!authorized(headers)) return Response.status(Response.Status.UNAUTHORIZED).build();
         UserModel user = findUser(userId);
         if (user == null) return Response.status(Response.Status.NOT_FOUND).build();
-        var sessions = new ArrayList<Map<String, Object>>();
+        var sessions = new java.util.LinkedHashMap<String, Map<String, Object>>();
         try (Stream<UserSessionModel> online = session.sessions().getUserSessionsStream(session.getContext().getRealm(), user);
              Stream<UserSessionModel> offline = session.sessions().getOfflineUserSessionsStream(session.getContext().getRealm(), user)) {
-            Stream.concat(online, offline).filter(this::isDeviceSession).forEach(item ->
-                    sessions.add(Map.of(
+            Stream.concat(online, offline).forEach(item ->
+                    sessions.put(item.getId(), Map.of(
                             "id", item.getId(),
-                            "name", item.getNote(PinSupport.DEVICE_NAME_NOTE),
+                            "name", item.getNote(PinSupport.DEVICE_NAME_NOTE) == null
+                                    ? "Browser / passkey" : item.getNote(PinSupport.DEVICE_NAME_NOTE),
                             "lastAccess", java.time.Instant.ofEpochSecond(item.getLastSessionRefresh()).toString())));
         }
-        return Response.ok(Map.of("devices", sessions)).build();
+        return Response.ok(Map.of("devices", sessions.values())).build();
     }
 
     @DELETE
@@ -223,12 +228,18 @@ public final class NephosAdminResource implements RealmResourceProvider {
                                  @PathParam("sessionId") String sessionId,
                                  @Context HttpHeaders headers) {
         if (!authorized(headers)) return Response.status(Response.Status.UNAUTHORIZED).build();
+        EnrollmentStore store = new EnrollmentStore(session);
+        store.lock();
         UserModel user = findUser(userId);
         if (user == null) return Response.status(Response.Status.NOT_FOUND).build();
         UserSessionModel target = findDeviceSession(user, sessionId);
         if (target == null) return Response.status(Response.Status.NOT_FOUND).build();
-        if (target.isOffline()) session.sessions().removeOfflineUserSession(session.getContext().getRealm(), target);
-        else session.sessions().removeUserSession(session.getContext().getRealm(), target);
+        store.invalidateSession(sessionId);
+        UserSessionModel online = session.sessions().getUserSession(session.getContext().getRealm(), sessionId);
+        UserSessionModel offline = session.sessions().getOfflineUserSession(session.getContext().getRealm(), sessionId);
+        if (online != null) session.sessions().removeUserSession(session.getContext().getRealm(), online);
+        if (offline != null) session.sessions().removeOfflineUserSession(session.getContext().getRealm(), offline);
+        QrGrant.prepare(session);
         return Response.noContent().build();
     }
 
@@ -243,7 +254,7 @@ public final class NephosAdminResource implements RealmResourceProvider {
     private UserSessionModel findDeviceSession(UserModel user, String id) {
         try (Stream<UserSessionModel> online = session.sessions().getUserSessionsStream(session.getContext().getRealm(), user);
              Stream<UserSessionModel> offline = session.sessions().getOfflineUserSessionsStream(session.getContext().getRealm(), user)) {
-            return Stream.concat(online, offline).filter(this::isDeviceSession)
+            return Stream.concat(online, offline)
                     .filter(item -> item.getId().equals(id)).findFirst().orElse(null);
         }
     }
@@ -255,10 +266,13 @@ public final class NephosAdminResource implements RealmResourceProvider {
                 .anyMatch(clientSession -> "nephos-ios".equals(clientSession.getClient().getClientId()));
     }
 
-    private boolean authorized(HttpHeaders headers) {
+    private boolean authorized(HttpHeaders headers) { return authorized(headers, session); }
+
+    static boolean authorized(HttpHeaders headers, KeycloakSession session) {
         String expected = System.getenv("IDENTITY_ADMIN_SERVICE_KEY");
         String provided = headers.getHeaderString("X-Nephos-Identity-Service-Key");
         return expected != null && expected.length() >= 32 && provided != null
+                && "nephos".equals(session.getContext().getRealm().getName())
                 && MessageDigest.isEqual(expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 provided.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }

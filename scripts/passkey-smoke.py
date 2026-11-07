@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
 import secrets
+import subprocess
 import threading
 import urllib.parse
 import uuid
@@ -32,6 +33,7 @@ class Callback(BaseHTTPRequestHandler):
 
 def main():
     issuer = smoke.request(smoke.API + "/v1/config")["issuer"]
+    mail_url = os.environ.get("NEPHOS_TEST_MAIL_URL", "http://localhost:18083")
     admin_url = smoke.IDENTITY + "/admin/realms/nephos"
     admin = smoke.AdminSession()
     username = "passkey-smoke-" + uuid.uuid4().hex
@@ -66,14 +68,14 @@ def main():
             return next(
                 (
                     message
-                    for message in smoke.request("http://localhost:18083/api/v1/messages")["messages"]
+                    for message in smoke.request(mail_url + "/api/v1/messages")["messages"]
                     if any(r["Address"] == username + "@example.test" for r in message["To"])
                 ),
                 None,
             )
 
         message = smoke.wait("enrollment email delivered", delivered)
-        mail = smoke.request("http://localhost:18083/api/v1/message/" + message["ID"])
+        mail = smoke.request(mail_url + "/api/v1/message/" + message["ID"])
         links = re.findall(r'href="([^"]+)"', mail["HTML"])
         invitation = next(html.unescape(link) for link in links if "/login-actions/action-token?" in link)
         smoke.request(
@@ -186,7 +188,10 @@ def main():
             )
             assert len(smoke.request(smoke.API + "/v1/libraries", token=token)["items"]) == 1
             # Exercise membership denial independently of full identity/session revocation.
-            smoke.sql("UPDATE principals SET enabled=false WHERE subject=:'subject';", subject=subject)
+            smoke.sql(
+                "UPDATE principals SET enabled=false,administration_denied=true WHERE subject=:'subject';",
+                subject=subject,
+            )
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
             provider_credentials = smoke.request(
                 admin_url + "/users/" + subject + "/credentials", token=smoke.admin_token()
@@ -211,7 +216,7 @@ def main():
                 return candidate if candidate and candidate["ID"] != message["ID"] else None
 
             replacement = smoke.wait("operator recovery invitation delivered", replacement_delivered)
-            recovery = smoke.request("http://localhost:18083/api/v1/message/" + replacement["ID"])
+            recovery = smoke.request(mail_url + "/api/v1/message/" + replacement["ID"])
             recovery_link = next(
                 html.unescape(link)
                 for link in re.findall(r'href="([^"]+)"', recovery["HTML"])
@@ -225,7 +230,39 @@ def main():
             page.get_by_text("Your account has been updated.").wait_for()
             assert len(session.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})["credentials"]) == 1
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
-            submit({"action": "access", "subject": subject})
+
+            def identity_projected():
+                identity = smoke.request(
+                    smoke.IDENTITY + "/realms/nephos/nephos-admin/users/" + subject,
+                    headers={"X-Nephos-Identity-Service-Key": smoke.ENV["IDENTITY_ADMIN_SERVICE_KEY"]},
+                )
+                projected = subprocess.check_output(
+                    [
+                        "docker",
+                        "compose",
+                        "exec",
+                        "-T",
+                        "postgres",
+                        "psql",
+                        "-U",
+                        "postgres",
+                        "-d",
+                        "library",
+                        "-At",
+                        "-c",
+                        "SELECT identity_revision FROM principals WHERE subject='" + str(uuid.UUID(subject)) + "';",
+                    ],
+                    text=True,
+                    cwd=smoke.ROOT,
+                )
+                return int(projected.strip()) == identity["revision"]
+
+            smoke.wait(
+                "out-of-band passkey recovery revision projected without clearing local denial",
+                identity_projected,
+            )
+            smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
+            assert "Completed" in submit({"action": "access", "subject": subject}), "Durable disable did not complete."
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
             browser.close()
             print(
@@ -242,6 +279,8 @@ def main():
             smoke.sql(
                 """
                 CREATE TEMP TABLE fixture_libraries AS SELECT library_id FROM library_members WHERE subject=:'subject';
+                DELETE FROM administration_events WHERE operation_id IN(SELECT id FROM administration_operations WHERE subject=:'subject');
+                DELETE FROM administration_operations WHERE subject=:'subject';
                 DELETE FROM library_members WHERE subject=:'subject';
                 DELETE FROM principals WHERE subject=:'subject';
                 DELETE FROM libraries WHERE id IN (SELECT library_id FROM fixture_libraries);

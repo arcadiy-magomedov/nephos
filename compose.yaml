@@ -92,6 +92,8 @@ services:
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       IDENTITY_ADMIN_SERVICE_KEY: ${IDENTITY_ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
       NEPHOS_PIN_PEPPER: ${NEPHOS_PIN_PEPPER:?Run scripts/upgrade-dev-env.py}
+      NEPHOS_PUBLIC_ORIGIN: ${NEPHOS_PUBLIC_ORIGIN:-}
+      NEPHOS_QR_DELIVERY_KEY: ${NEPHOS_QR_DELIVERY_KEY:?Run scripts/upgrade-dev-env.py}
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Required}
       KC_HEALTH_ENABLED: "true"
@@ -183,6 +185,8 @@ services:
       ConnectionStrings__LibraryAdmin: Host=postgres;Database=library;Username=library_owner;Password=${LIBRARY_OWNER_PASSWORD}
       Administration__Enabled: "true"
       Administration__Key: ${ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
+      Administration__IdentityUrl: http://keycloak:8080/realms/nephos/nephos-admin
+      Administration__IdentityKey: ${IDENTITY_ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
     depends_on:
       migrate-library: {condition: service_completed_successfully}
     read_only: true
@@ -261,6 +265,7 @@ services:
       <<: *app-environment
       ConnectionStrings__Storage: Host=postgres;Database=storage;Username=storage_app;Password=${STORAGE_APP_PASSWORD:?Required}
       Storage__Root: /data/media
+      Administration__Key: ${ADMIN_SERVICE_KEY:?Run scripts/upgrade-dev-env.py}
       Services__Derivatives: http://image-derivatives:8091
     networks: [default, image-private]
     volumes: ["media:/data"]

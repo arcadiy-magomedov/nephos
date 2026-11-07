@@ -8,6 +8,7 @@ builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(builder.Configuration.GetConnectionString("Faces")
     ?? throw new InvalidOperationException("ConnectionStrings:Faces is required.")));
 builder.Services.AddSingleton<IFaceRepository, PostgresFaceRepository>();
+builder.Services.AddSingleton<FaceAdministrationRepository>();
 builder.Services.AddSingleton<IAnalysisSourceClient, AnalysisSourceClient>();
 builder.Services.AddSingleton<IInferenceClient, InferenceClient>();
 foreach (var (name, setting, timeout) in new[] { ("library", "Services:Library", 10), ("storage", "Services:Storage", 30), ("inference", "Inference:Url", 55) })
@@ -33,6 +34,7 @@ app.UseActiveTokenStatus();
 app.UseAuthorization();
 app.MapServiceHealth();
 app.MapFaceEndpoints();
+app.MapFaceAdministration();
 app.Run();
 
 public partial class Program;

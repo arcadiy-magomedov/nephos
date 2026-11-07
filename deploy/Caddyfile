@@ -1,4 +1,8 @@
 {$PUBLIC_HOST} {
+	@identity_management path /realms/nephos/nephos-admin/users /realms/nephos/nephos-admin/users/* /realms/nephos/nephos-admin/identities /realms/nephos/nephos-admin/identities/* /realms/nephos/nephos-admin/pin-requests
+	handle @identity_management {
+		respond "Not found" 404
+	}
 	handle /v1/* {
 		reverse_proxy gateway:8080
 	}

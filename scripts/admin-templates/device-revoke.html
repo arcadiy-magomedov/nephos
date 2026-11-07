@@ -1,0 +1,15 @@
+{% extends "user.html" %}
+{% block title %}Revoke device — Nephos{% endblock %}
+{% block user_overlay %}
+<div class="modal-scrim" aria-hidden="true"></div>
+<dialog class="modal" open aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" data-return-url="/users/{{ user.subject }}#device-{{ device.id }}">
+  <header class="modal-header"><h2 id="dialog-title">{{ 'Revocation not confirmed' if revoke_failed else 'Revoke device access?' }}</h2><a class="icon-button" href="/users/{{ user.subject }}#device-{{ device.id }}" aria-label="Close dialog">×</a></header>
+  <div class="selected-device"><strong>{{ device.name }}</strong><p class="hint">Last active: <time datetime="{{ device.lastAccess }}">{{ device.lastAccess|datetime_utc }}</time></p></div>
+  {% if revoke_failed %}<p id="dialog-description" class="error" role="alert">The server response could not be confirmed. Check the device list before retrying. Do not assume the device is signed out.</p>
+  {% else %}<p id="dialog-description" class="muted">Signs out this device and blocks future access. Other sessions and stored media are unaffected.</p>{% endif %}
+  <form method="post" data-pending-label="Revoking...">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <div class="actions"><a class="button" href="/users/{{ user.subject }}#device-{{ device.id }}" data-initial-focus>{{ 'Check devices' if revoke_failed else 'Cancel' }}</a><button class="danger">{{ 'Retry revoke' if revoke_failed else 'Revoke device' }}</button></div>
+  </form>
+</dialog>
+{% endblock %}

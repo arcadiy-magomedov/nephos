@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Overview — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>Overview</h1><p class="muted">Users, libraries and media processing.</p></div><a class="button" href="/overview">Refresh</a></div>
+<p class="hint">Snapshot: {{ checked_at|datetime_utc }}. Identity synchronization: {{ identity_synced_at|datetime_utc }}. {% if identity_stale %}Identity data is missing or stale; check the current state before changing access.{% endif %}</p>
+<div class="stats">{% for title,value in [('Users',counts.users),('Access enabled',counts.enabledUsers),('Libraries',counts.libraries)] %}<section class="card"><h2>{{ title }}</h2><div class="stat">{{ value if value is not none else 'No data' }}</div></section>{% endfor %}</div>
+<div class="layout"><div>
+<section class="card"><h2>Users and access</h2><p class="muted">Create an account, issue a QR code or review connected devices.</p><div class="actions actions-start"><a class="button" href="/users">All users</a><a class="button primary" href="/users/new">Create user</a></div></section>
+<section class="card"><h2>Operations</h2><p class="hint">Pending: {{ pending_count }}. Need attention: {{ failed_count }}. The latest operations for each state are shown below.</p>{% for operation in operations %}<div class="row"><div><strong>{{ operation.kind|command_kind }}</strong><p class="hint">{{ operation.status|operation_status }}{% if operation.error %} · {{ operation.error }}{% endif %}</p></div><a href="/operations/{{ operation.id }}">Open</a></div>{% else %}<p class="muted">No incomplete operations.</p>{% endfor %}<a class="button" href="/operations">All operations</a></section>
+</div><div><section class="card"><h2>Storage and processing</h2>{% for metric in metrics %}<div class="row"><div>{{ metric.label }}<p class="hint">{{ metric.unit }}{% if metric.observedAt %} · {{ metric.observedAt|datetime_utc }}{% endif %}</p></div><span>{{ metric.value if metric.value is not none else metric.state }}</span></div>{% endfor %}<p class="hint">Processing stages are counted separately: a file may appear in multiple queues. No data does not mean zero.</p><a class="button" href="/services">Service status</a></section></div></div>
+{% endblock %}

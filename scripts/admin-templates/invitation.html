@@ -1,0 +1,32 @@
+{% extends "user.html" %}
+{% block title %}Connect device — Nephos{% endblock %}
+{% block user_overlay %}
+<div class="modal-scrim" aria-hidden="true"></div>
+<dialog class="modal" open aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" data-return-url="/users/{{ user.subject }}#connect-device">
+  <header class="modal-header"><h2 id="dialog-title">Connect device</h2><a class="icon-button" href="/users/{{ user.subject }}#connect-device" aria-label="Close dialog" data-initial-focus>×</a></header>
+  {% if invitation %}
+    {% set terminal = invitation.status in ('used', 'consumed', 'expired', 'cancelled') %}
+    <p id="dialog-description" class="muted">{{ 'The invitation can no longer be used.' if terminal else 'Show the code to the account owner.' }}</p>
+    {% if qr_data and not terminal %}<img class="qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Single-use QR code for signing in">
+    {% elif not terminal %}<p class="warning">This invitation was already issued, but the code was not retained. Cancel it before creating another code.</p>{% endif %}
+    <p class="center status-text {{ 'status-warning' if invitation.status not in ('pending', 'used', 'consumed') }}" id="invitation-state" role="status">{{ invitation.status|invitation_status }}</p>
+    <p class="center hint">Expires <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_utc }}</time>. <span id="countdown"></span></p>
+    <div id="invitation-monitor" data-url="/users/{{ user.subject }}/invitations/{{ invitation.id }}/status" data-expires="{{ invitation.expiresAt }}" data-status="{{ invitation.status }}"></div>
+    {% if not terminal %}<p class="warning" id="qr-warning">This code grants account access. Show it only to the device owner. It can be used once.</p>{% endif %}
+    <form id="cancel-invitation" method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel" data-pending-label="Cancelling..." {% if terminal %}hidden{% endif %}>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="actions single-action"><button class="danger">Cancel QR code</button></div>
+    </form>
+    <div class="actions single-action" id="invitation-finished-actions" {% if not terminal %}hidden{% endif %}><a id="invitation-finished" class="button primary" href="/users/{{ user.subject }}#devices-heading">{{ 'View devices' if invitation.status in ('used', 'consumed') else 'Close' if terminal else 'View devices' }}</a></div>
+    <noscript><p class="hint">Open the user page to check the latest invitation and device status.</p></noscript>
+    <script src="/admin-static/invitation.js" defer></script>
+  {% elif issue_error %}
+    <p id="dialog-description" class="error" role="alert">Unable to get the QR code. If the server response was lost, retry safely and cancel any existing invitation before creating another.</p>
+    <form method="post" data-pending-label="Retrying..."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions single-action"><button class="primary">Retry safely</button></div></form>
+  {% else %}
+    <p id="dialog-description" class="muted">The account owner can scan a single-use QR code in Nephos to connect a device.</p>
+    <p class="warning">The code expires after 10 minutes. Show it only to the account owner.</p>
+    <form method="post" data-pending-label="Creating QR..."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions single-action"><button class="primary">Create QR code</button></div></form>
+  {% endif %}
+</dialog>
+{% endblock %}

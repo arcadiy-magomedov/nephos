@@ -3,48 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Nephos administration{% endblock %}</title>
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; background: #111827; color: #f3f4f6; }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    header, main { max-width: 980px; margin: auto; padding: 24px; }
-    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #374151; }
-    header a { color: #f3f4f6; text-decoration: none; font-size: 22px; font-weight: 700; }
-    h1 { font-size: clamp(26px, 4vw, 36px); margin-top: 0; }
-    h2 { font-size: 20px; }
-    p { line-height: 1.6; color: #cbd5e1; }
-    .card { border: 1px solid #374151; border-radius: 16px; padding: 28px; background: #1f2937; }
-    .login { max-width: 480px; margin: 64px auto; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
-    label { display: block; margin: 16px 0; }
-    input:not([type=hidden]):not([type=checkbox]), select { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #64748b; border-radius: 8px; background: #111827; color: #f3f4f6; font: inherit; }
-    button, .button { display: inline-block; border: 0; border-radius: 8px; padding: 12px 18px; background: #93c5fd; color: #111827; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
-    .secondary { background: #374151; color: #f3f4f6; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    a { color: #93c5fd; }
-    :focus-visible { outline: 3px solid #fbbf24; outline-offset: 4px; }
-    .notice { padding: 16px; border: 1px solid #60a5fa; border-radius: 8px; margin-bottom: 20px; }
-    .error { border-color: #fca5a5; }
-    li { margin: 10px 0; overflow-wrap: anywhere; }
-    small { color: #cbd5e1; }
-    code { overflow-wrap: anywhere; }
-  </style>
+  <title>{% block title %}Nephos{% endblock %}</title>
+  <link rel="stylesheet" href="/admin-static/admin.css">
+  <script src="/admin-static/dialog.js" defer></script>
 </head>
-<body>
-  <header>
-    <a href="/">Nephos <small>administration</small></a>
-    {% if session.get("token") %}
-    <form method="post" action="/logout">
+<body class="{{ '' if operator_authenticated else 'signed-out' }}">
+  <a class="skip" href="#content">Skip to content</a>
+  <aside>
+    <a class="brand" href="/">Nephos</a>
+    <nav aria-label="Main navigation">
+      {% for href, label, key in [('/overview','Overview','overview'),('/users','Users','users'),('/libraries','Libraries','libraries'),('/services','Service status','services')] %}
+      <a href="{{ href }}" {% if section == key %}aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% if operator_authenticated %}
+    <form class="logout" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-      <button class="secondary">Sign out</button>
+      <button>Sign out</button>
     </form>
     {% endif %}
-  </header>
-  <main>
+  </aside>
+  <main id="content" tabindex="-1">
     {% for message in get_flashed_messages() %}
     <div class="notice" role="status">{{ message }}</div>
     {% endfor %}
+    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

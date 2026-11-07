@@ -19,14 +19,13 @@ not a claim that the entire platform is production-qualified.
 
 - Explicit [API major-version contracts](specs/005-api-compatibility.md):
   public `/v1`, private `/internal/v1`, and v1-pinned legacy peer aliases.
-- Optional [Bonjour LAN discovery](deploy/discovery/README.md): a host-side
-  advertiser and native iOS server picker, with HTTPS/OIDC verification and
-  explicit trust preserved.
+- Optional [Bonjour LAN discovery](deploy/discovery/README.md) for compatible
+  clients; primary iOS connection uses the server origin embedded in a QR.
 - Known-user Keycloak authentication; real JWT validation and immediate platform
   disablement checks. No public registration or application password grant.
 - A separate, localhost-only administration console for known users, personal
-  libraries, membership enablement, single-use 30-minute first-login PINs, and
-  per-device session revocation.
+  libraries, durable account/access operations, single-use ten-minute QR
+  enrollment, real service state and per-device session revocation.
 - Idempotent upload intents, 4 MiB immutable out-of-order chunks, persisted part
   receipts, resumable status, cancellation before sealing, and asynchronous
   SHA-256/length verification. Uploads are limited to 8 GiB each, 16 pending per
@@ -130,16 +129,16 @@ rebuilding the administration services. See
 [administration deployment and recovery](deploy/administration.md) for the OIDC
 bootstrap, private origins, session lifecycle and verification commands.
 
-In the Nephos administration console, create a user and personal library.
-The user enters only their email initially in the native iOS app; a known,
-enabled account receives a sign-in request, not the PIN. Read **Requested
-sign-in PINs** in the private console and give the 8-digit PIN directly to the
-verified user; it is one-use, expires after 30 minutes, and is never emailed.
-The user then enters the PIN in the app. The PIN exchange creates a revocable
-Keycloak device session with a persistent offline refresh token.
+In the Nephos administration console, create a user; the personal library is
+provisioned automatically. Open the user and issue a single-use QR. The iOS app
+scans it or imports a QR image, verifies the configured HTTPS server and creates
+a revocable Keycloak device session with persistent offline refresh. No email,
+PIN or server discovery is required in this flow.
+See [complete administrator console](deploy/admin-console.md) for all screens,
+durable-operation recovery, QR lifecycle and deployment requirements.
 
-Then follow [ios/README.md](ios/README.md) to build/run the native client, approve
-the server, sign in, select a library, and import Photos resources. Automatic
+Then follow [ios/README.md](ios/README.md) to build/run the native client, scan
+the QR, select a library, and import Photos resources. Automatic
 backup and phone cleanup are independent opt-in settings, initially off.
 
 ## API
@@ -288,10 +287,11 @@ Run smoke scripts only against the disposable local profile. They create/remove
 test users and records, briefly stop/restart the Collector/broker/API, and
 validate real JWT/JWKS and immediate Keycloak session revocation, PostgreSQL, immutable chunk retry, restart/resume,
 verification failure, deduplication, authorization, original/ranged bytes,
-previews, retention, paging, first-login PIN issue/one-use exchange and stored correlated telemetry.
+previews, retention, paging, administrator persistence, QR enrollment, legacy
+PIN compatibility and stored correlated telemetry.
 The browser suite uses Keycloak's virtual authenticator to exercise the existing
-passkey flow through disposable Keycloak enrollment emails (not the PIN-only admin
-console), signs in with Code+PKCE, verifies membership denial (403) and full account
+passkey flow through disposable Keycloak enrollment emails, signs in with
+Code+PKCE, verifies membership denial (403) and full account
 revocation (401), and exercises credential recovery without restoring platform
 membership. This is not a physical iOS passkey or real Photos
 removal test. The edge suite exercises the actual Caddy route configuration

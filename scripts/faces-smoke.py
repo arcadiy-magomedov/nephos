@@ -221,7 +221,7 @@ def admin_access(subject, enabled):
         values["enabled"] = "yes"
     with smoke.AdminSession() as admin:
         result = admin.submit(values)
-    assert "Platform membership updated" in result
+    assert "Completed" in result
 
 
 def blank_png():

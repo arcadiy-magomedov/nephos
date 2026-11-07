@@ -15,7 +15,7 @@ import smoke
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:18082")
+    parser.add_argument("--base-url", default=os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082"))
     parser.add_argument("--screenshots", type=Path)
     parser.add_argument(
         "--native-claims", type=Path, help="Write only verified fixture claims for native policy tests."
@@ -63,7 +63,7 @@ def main():
                 assert "www-authenticate" not in response.headers
                 page.get_by_role("link", name="Sign in", exact=True).click()
                 expect(page.locator("#username")).to_be_visible()
-                assert page.url.startswith("http://localhost:18081/realms/master/")
+                assert page.url.startswith(smoke.IDENTITY + "/realms/master/")
 
             begin()
             if args.screenshots:
@@ -77,8 +77,8 @@ def main():
             page.locator("#username").fill(outsider)
             page.locator("#password").fill(outsider_password)
             page.locator("#kc-login").click()
-            page.wait_for_url(base + "/")
-            expect(page.get_by_role("heading", name="Nephos local administration")).to_be_visible()
+            page.wait_for_url(base + "/users")
+            expect(page.get_by_role("heading", name="Users", exact=True)).to_be_visible()
             cookies = [cookie for cookie in context.cookies(base) if cookie["name"] == "nephos_admin"]
             assert len(cookies) == 1 and cookies[0]["httpOnly"] and cookies[0]["sameSite"] == "Lax"
             assert smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"] not in cookies[0]["value"]
@@ -141,8 +141,8 @@ with app.test_request_context():
             page.locator("#username").fill(outsider)
             page.locator("#password").fill(outsider_password)
             page.locator("#kc-login").click()
-            expect(page.get_by_text("This account is not an operator.", exact=False)).to_be_visible()
-            assert "Nephos local administration" not in page.content()
+            expect(page.get_by_text("This account is not an administrator.", exact=False)).to_be_visible()
+            assert not page.locator('nav[aria-label="Main navigation"]').is_visible()
             context.close()
             browser.close()
         print("PASS: real OIDC browser login, incorrect password, reload, CSRF, logout/replay and operator-role denial")

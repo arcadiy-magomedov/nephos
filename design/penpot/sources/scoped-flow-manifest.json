@@ -1,0 +1,113 @@
+{
+  "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+  "projectId": "2a4e1ac4-5a73-80ac-8008-e8cd57443e12",
+  "teamId": "2a4e1ac4-5a73-80ac-8008-e8cce365ad2f",
+  "status": "draft",
+  "approval": null,
+  "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
+  "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
+  "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+  "mobilePageId": "e827db53-5187-4b5b-9a4a-14097bc19764",
+  "boards": [
+    {
+      "id": "acd17e70-ca48-433e-afd9-e0b225e2c73f",
+      "name": "01 · Users"
+    },
+    {
+      "id": "eb3737c0-080d-4c85-bf31-85096778bfca",
+      "name": "02 · Create user"
+    },
+    {
+      "id": "258f936e-5174-47d1-be8d-94b13e207e26",
+      "name": "03 · User created"
+    },
+    {
+      "id": "2b39cc6f-3ff4-42de-885a-ef2091ae265d",
+      "name": "04 · QR modal"
+    },
+    {
+      "id": "1488ae7b-64d5-427f-b7e7-7d4cfc2ca23f",
+      "name": "05 · Connected devices"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf1817701",
+      "name": "06 · Revoke device"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf4a6d293",
+      "name": "07 · Revoking device"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdf77eb208",
+      "name": "08 · Device revoked"
+    },
+    {
+      "id": "e32bf810-72b3-4cc4-a19b-e0a65be9b174",
+      "name": "Error · QR issuance"
+    },
+    {
+      "id": "64b4dca5-66e0-80a8-8008-e8fdfc001757",
+      "name": "Error · Device revocation"
+    }
+  ],
+  "mobileBoards": [
+    {
+      "id": "3f7aeeb4-ee1c-4389-8df0-d367096e3e83",
+      "name": "Light · 01 · Sign in"
+    },
+    {
+      "id": "2ed4e2df-49bd-4bf2-a81a-21049c4fdb6b",
+      "name": "Light · 02 · Scan"
+    },
+    {
+      "id": "41c5e307-5d7f-40cd-b888-e1fa9dd29245",
+      "name": "Light · 03 · Signing in"
+    },
+    {
+      "id": "22a4d159-a842-46c2-bd4e-ead754537221",
+      "name": "Light · QR error"
+    },
+    {
+      "id": "7924eb43-916a-4bb1-91ce-9b55845e3953",
+      "name": "Dark · 01 · Sign in"
+    },
+    {
+      "id": "c0525ad1-4aaf-4c32-9db2-d8e16001e3a2",
+      "name": "Dark · 02 · Scan"
+    },
+    {
+      "id": "c29b4ee2-f5dc-4779-8e97-570a2d95557b",
+      "name": "Dark · 03 · Signing in"
+    },
+    {
+      "id": "612cbb01-054d-4ddd-9e8e-7500155f3328",
+      "name": "Dark · QR error"
+    }
+  ],
+  "arrows": 20,
+  "adminArrows": 12,
+  "mobileArrows": 8,
+  "components": 9,
+  "componentAssets": [
+    "Button",
+    "Text field",
+    "Checkbox",
+    "Alert",
+    "Navigation item",
+    "QR icon",
+    "QR placeholder",
+    "Icon button",
+    "Device row"
+  ],
+  "variantComponents": 52,
+  "buttonVariantProperties": [
+    "Type",
+    "State",
+    "Platform",
+    "Theme"
+  ],
+  "prototypeInteractions": {
+    "admin": 23,
+    "mobile": 10
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "sourceOfTruth": "Penpot",
+  "designs": [
+    {
+      "id": "nephos-admin-user-qr",
+      "title": "User creation and QR sign-in",
+      "status": "draft",
+      "approval": null,
+      "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+      "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+      "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
+      "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
+      "mobilePageId": "e827db53-5187-4b5b-9a4a-14097bc19764",
+      "export": "exports/nephos-admin-user-qr.penpot",
+      "notes": "Draft only. Native token foundations and reusable component variants support separate admin and light/dark mobile flow canvases. Changes require explicit user approval."
+    }
+  ]
+}

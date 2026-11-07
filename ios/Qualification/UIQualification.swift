@@ -30,6 +30,49 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
         Task {
             do {
                 let env = ProcessInfo.processInfo.environment
+                if env["NEPHOS_UI_SCREEN"] == "qr-native-checks" {
+                    try QRNativeQualification.checkPersistence()
+                    window.rootViewController = UIHostingController(rootView: Text("QR native checks passed"))
+                    return
+                }
+                if env["NEPHOS_UI_SCREEN"] == "qr-real-login" {
+                    let model = AppModel()
+                    if env["NEPHOS_QR_PHASE"] == "refresh", let saved = try Keychain.load() {
+                        let session = AuthSession(credentials: saved)
+                        _ = try await session.recoverAccessToken(rejected: saved.accessToken)
+                    }
+                    if env["NEPHOS_QR_PHASE"] != "discard-response" { await model.restore() }
+                    if !model.signedIn, let image = env["NEPHOS_QR_IMAGE"], !image.isEmpty {
+                        let raw = try QRImageDecoder.payload(Data(contentsOf: URL(fileURLWithPath: image)))
+                        let qr = try EnrollmentQR.parse(raw)
+                        if env["NEPHOS_QR_PHASE"] == "prepare" {
+                            let connection = try await QREnrollmentClient.connection(for: qr)
+                            _ = try Keychain.prepare(qr: qr, connection: connection)
+                            window.rootViewController = UIHostingController(rootView: Text("QR request persisted"))
+                            return
+                        }
+                        if env["NEPHOS_QR_PHASE"] == "discard-response" {
+                            let pending = try Keychain.vault().pending
+                            guard let pending else { throw QREnrollmentError.invalidProof }
+                            _ = try await QREnrollmentClient.exchange(pending)
+                            window.rootViewController = UIHostingController(
+                                rootView: Text("QR response deliberately lost"))
+                            return
+                        }
+                        try await model.enroll(qr: qr)
+                    }
+                    guard model.signedIn, let api = model.api else {
+                        throw ClientError.invalid(model.message ?? "Real QR session did not restore.")
+                    }
+                    let page = try await api.libraries()
+                    guard let library = page.items.first else {
+                        throw ClientError.invalid("The real QR fixture account has no accessible library.")
+                    }
+                    _ = try await api.assets(library: library.id, cursor: nil)
+                    try await model.loadLibraries(reset: true)
+                    window.rootViewController = UIHostingController(rootView: RootView(model: model))
+                    return
+                }
                 if env["NEPHOS_UI_SCREEN"] == "trash-native" {
                     let configuration = URLSessionConfiguration.ephemeral
                     configuration.protocolClasses = [TrashQualificationProtocol.self]
@@ -257,6 +300,33 @@ final class UIQualification: UIResponder, UIApplicationDelegate {
                         .modifier(AppAppearanceModifier()))
                 try report(["ready": true, "screen": screen, "realAPI": true])
             } catch {
+                if ProcessInfo.processInfo.environment["NEPHOS_UI_SCREEN"] == "qr-real-login" {
+                    let code: String
+                    if let error = error as? QREnrollmentError {
+                        code = error.rawValue
+                    } else if let error = error as? URLError {
+                        code = "url:\(error.code.rawValue)"
+                    } else if let error = error as? DecodingError {
+                        switch error {
+                        case .keyNotFound(let key, _): code = "decode.key:\(key.stringValue)"
+                        case .typeMismatch: code = "decode.type"
+                        case .valueNotFound: code = "decode.value"
+                        case .dataCorrupted: code = "decode.corrupt"
+                        @unknown default: code = "decode.unknown"
+                        }
+                    } else if case ClientError.http(let status, _) = error {
+                        code = "http:\(status)"
+                    } else if case ClientError.invalid(let detail) = error {
+                        code =
+                            "invalid:"
+                            + detail.components(separatedBy: .alphanumerics.inverted)
+                            .filter { !$0.isEmpty }.prefix(12).joined(separator: "_")
+                    } else {
+                        code = "unexpected"
+                    }
+                    window.rootViewController = UIHostingController(rootView: Text("QR_ERROR=\(code)"))
+                    return
+                }
                 window.rootViewController = UIHostingController(rootView: Text(error.localizedDescription).padding())
                 do { try report(["ready": false, "error": error.localizedDescription]) } catch {
                     NSLog("Qualification report could not be written.")

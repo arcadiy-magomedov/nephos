@@ -15,6 +15,7 @@ using PostgresUploadRepository = storage::Nephos.Storage.Api.Uploads.PostgresUpl
 using UploadIntent = storage::Nephos.Storage.Api.Uploads.UploadIntent;
 using UploadConflictException = storage::Nephos.Storage.Api.Uploads.UploadConflictException;
 using VolumeStore = storage::Nephos.Storage.Api.Uploads.VolumeStore;
+using StorageAdministrationRepository = storage::Nephos.Storage.Api.Uploads.StorageAdministrationRepository;
 
 namespace Nephos.Tests;
 
@@ -84,6 +85,28 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    [CleanupStorageFact]
+    public async Task Administration_summary_uses_actual_mount_capacity_and_durable_queue_and_blob_counts()
+    {
+        var runtime = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("STORAGE_CLEANUP_TEST_CONNECTION")!)
+        { Options = "-c role=storage_app" };
+        await using var db = NpgsqlDataSource.Create(runtime.ConnectionString);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:Root"] = root }).Build();
+        var repository = new StorageAdministrationRepository(db, new PostgresUploadRepository(db, volume), config);
+        var before = await repository.SummaryAsync(default);
+        await StoredAsync(sent: false, state: "verifying");
+        var after = await repository.SummaryAsync(default);
+        Assert.True(after.CapacityBytes > 0);
+        Assert.True(after.FreeBytes > 0);
+        Assert.True(after.FreeBytes <= after.CapacityBytes);
+        Assert.Equal(before.BlobCount + 1, after.BlobCount);
+        Assert.Equal(before.BlobBytes + 4, after.BlobBytes);
+        Assert.Equal(before.Verifying + 1, after.Verifying);
+        Assert.Equal(before.OutboxPending + 1, after.OutboxPending);
+        Assert.True(after.CheckedAt >= before.CheckedAt);
+        var missing = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:Root"] = Path.Combine(root, "not-mounted") }).Build();
+        await Assert.ThrowsAsync<IOException>(() => new StorageAdministrationRepository(db, uploads, missing).SummaryAsync(default));
+    }
     [CleanupStorageFact]
     public async Task Cleanup_unknown_asset_release_binds_owner_and_prevents_late_upload_creation()
     {
