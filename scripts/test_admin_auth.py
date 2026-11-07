@@ -94,6 +94,18 @@ class AdminAuthTests(unittest.TestCase):
         self.assertEqual(self.get(headers={"Host": "attacker.example"}).status_code, 400)
         self.assertEqual(self.get(base_url="http://127.0.0.1:18082").headers["Location"], self.origin)
 
+    def test_navigation_is_rendered_only_for_authenticated_operators(self):
+        navigation = 'aria-label="Main navigation"'
+        self.assertNotIn(navigation, self.get().get_data(as_text=True))
+        self.seed(roles=[])
+        denied = self.get("/users/new")
+        self.assertEqual(denied.status_code, 403)
+        self.assertNotIn(navigation, denied.get_data(as_text=True))
+        self.seed()
+        authorized = self.get("/users/new")
+        self.assertEqual(authorized.status_code, 200)
+        self.assertIn(navigation, authorized.get_data(as_text=True))
+
     def test_private_origins_reject_insecure_remote_and_ambiguous_urls(self):
         from admin_config import origin
 
