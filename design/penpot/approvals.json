@@ -10,7 +10,7 @@
       "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
       "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
       "export": "exports/nephos-admin-user-qr.penpot",
-      "notes": "Draft only. Changes require explicit user approval; preserve approved versions before replacing them."
+      "notes": "Draft only. Administrator and mobile flows have separate canvases; mobile has light and dark variants. Changes require explicit user approval."
     }
   ]
 }

@@ -1,13 +1,21 @@
 # Nephos designs in Penpot
 
 The local editable source is the **Nephos Admin — Design System & UX** file
-in the **Nephos Admin** project. Its first page contains the complete user
-creation and QR login flow on one canvas; the second contains only components
-used by that scenario. Materials are drafts, not approved designs.
+in the **Nephos Admin** project. The administrator's user-creation and QR
+issuance flow is on the first canvas, its components are on the second, and the
+mobile QR login flow for iOS and Android is on a separate canvas in light and
+dark themes. Materials are drafts, not approved designs.
 
 On this Mac, open
 <http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=7b06007a-4a5b-4f2b-be6e-58af0c4f965d>.
 Credentials are in the ignored `.credentials.json` file.
+
+Mobile canvas:
+<http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=e827db53-5187-4b5b-9a4a-14097bc19764>.
+Original feedback remains in Penpot; comments are not included in `.penpot`
+exports and require a live-server backup to preserve. The two mobile-feedback
+threads remain on the admin canvas because Penpot does not move comments
+between pages.
 
 ## Run
 
