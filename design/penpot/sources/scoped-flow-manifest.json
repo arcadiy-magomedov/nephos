@@ -26,6 +26,10 @@
       "name": "04 · QR modal"
     },
     {
+      "id": "1488ae7b-64d5-427f-b7e7-7d4cfc2ca23f",
+      "name": "05 · Connected devices"
+    },
+    {
       "id": "e32bf810-72b3-4cc4-a19b-e0a65be9b174",
       "name": "Error · QR issuance"
     }
@@ -64,10 +68,10 @@
       "name": "Dark · QR error"
     }
   ],
-  "arrows": 12,
-  "adminArrows": 4,
+  "arrows": 13,
+  "adminArrows": 5,
   "mobileArrows": 8,
-  "components": 7,
+  "components": 8,
   "componentAssets": [
     "Button",
     "Text field",
@@ -75,7 +79,8 @@
     "Alert",
     "Navigation item",
     "QR icon",
-    "QR placeholder"
+    "QR placeholder",
+    "Icon button"
   ],
   "variantComponents": 52,
   "buttonVariantProperties": [
@@ -85,7 +90,7 @@
     "Theme"
   ],
   "prototypeInteractions": {
-    "admin": 8,
+    "admin": 9,
     "mobile": 10
   }
 }

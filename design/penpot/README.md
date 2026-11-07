@@ -5,14 +5,15 @@ The editable source is **Nephos Admin — Design System & UX** in the
 
 - [Foundations](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=a7237ac9-d665-41b8-a500-6294db96931c)
 - [Reusable components](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=5f1a2c5b-c560-492f-860c-a6e250be0720)
-- [Admin user creation and QR flow](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=7b06007a-4a5b-4f2b-be6e-58af0c4f965d)
+- [Admin user creation, QR, and connected devices](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=7b06007a-4a5b-4f2b-be6e-58af0c4f965d)
 - [Mobile QR flow, light and dark](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef&page-id=e827db53-5187-4b5b-9a4a-14097bc19764)
 
 The file is published as a library to the local Penpot team. Connect it from
-another file through **Assets → Manage library**. Its seven reusable assets
-are Button, Text field, Checkbox, Alert, Navigation item, QR icon, and QR
-placeholder. Button variants use Type, State, Platform, and Theme; action text
-such as “Cancel QR code” is an instance override, not a separate component.
+another file through **Assets → Manage library**. Its eight reusable assets
+are Button, Text field, Checkbox, Alert, Navigation item, QR icon, QR
+placeholder, and Icon button. Button variants use Type, State, Platform, and
+Theme; action text such as “Cancel QR code” is an instance override, not a
+separate component.
 
 Native token sets separate primitives, semantic roles, and component roles.
 The `Nephos Preview / Light` and `Dark` themes switch the foundations preview;
@@ -20,16 +21,17 @@ the mobile flows show both themes together. In Penpot 2.18.6, disabled opacity
 is mirrored from `opacity.disabled` rather than dynamically bound: update the
 disabled components if that token changes.
 
-The arrows document the flows, and View mode has clickable prototype paths.
-Camera scanning and photo selection are simulations; real sign-in and the
-native photo picker are not implemented in the prototype. All designs remain
-**drafts**, not approved designs.
+The admin flow includes the connected-devices screen and generic close-icon
+controls on both QR dialogs. The arrows document the flows, and View mode has
+clickable prototype paths. Camera scanning and photo selection are simulations;
+real sign-in and the native photo picker are not implemented in the prototype.
+All designs remain **drafts**, not approved designs.
 
-Original feedback remains unresolved in Penpot. Comments are not included in
-`.penpot` exports and require a live-server backup to preserve. The two
-mobile-feedback threads remain on the admin canvas because Penpot does not
-move comments between pages. Credentials are in the ignored `.credentials.json`
-file.
+All ten addressed comment threads are marked resolved on the live Penpot file;
+their history remains there. Comments are not included in `.penpot` exports
+and require a live-server backup to preserve. The two mobile-feedback threads
+remain on the admin canvas because Penpot does not move comments between pages.
+Credentials are in the ignored `.credentials.json` file.
 
 ## Run
 
