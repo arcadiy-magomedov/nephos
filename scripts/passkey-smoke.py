@@ -227,7 +227,11 @@ def main():
             assert len(session.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})["credentials"]) == 1
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
             submit({"action": "access", "subject": subject})
-            smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
+            smoke.request(smoke.API + "/v1/libraries", token=token, expected=(401, 403))
+            smoke.wait(
+                "revoked token rejected after bounded introspection cache expiry",
+                lambda: smoke.request(smoke.API + "/v1/libraries", token=token, expected=401),
+            )
             browser.close()
             print(
                 "PASS: fresh passkey login, Code+PKCE, membership denial, recovery without platform access and full account revocation"

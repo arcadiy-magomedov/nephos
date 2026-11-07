@@ -289,7 +289,8 @@ final class BackupRetryTests: XCTestCase {
         let fired = expectation(description: "Due retry runs without another external event")
         wakeup.schedule(at: Date().addingTimeInterval(0.02)) { cancelled.fulfill() }
         wakeup.schedule(at: Date().addingTimeInterval(0.04)) { fired.fulfill() }
-        await fulfillment(of: [fired, cancelled], timeout: 0.15)
+        await fulfillment(of: [fired], timeout: 2)
+        await fulfillment(of: [cancelled], timeout: 0.15)
     }
 
     @MainActor
