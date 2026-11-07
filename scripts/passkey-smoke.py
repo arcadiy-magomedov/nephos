@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
 import secrets
+import subprocess
 import threading
 import urllib.parse
 import uuid
@@ -187,7 +188,10 @@ def main():
             )
             assert len(smoke.request(smoke.API + "/v1/libraries", token=token)["items"]) == 1
             # Exercise membership denial independently of full identity/session revocation.
-            smoke.sql("UPDATE principals SET enabled=false WHERE subject=:'subject';", subject=subject)
+            smoke.sql(
+                "UPDATE principals SET enabled=false,administration_denied=true WHERE subject=:'subject';",
+                subject=subject,
+            )
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
             provider_credentials = smoke.request(
                 admin_url + "/users/" + subject + "/credentials", token=smoke.admin_token()
@@ -226,12 +230,40 @@ def main():
             page.get_by_text("Your account has been updated.").wait_for()
             assert len(session.send("WebAuthn.getCredentials", {"authenticatorId": authenticator})["credentials"]) == 1
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
-            submit({"action": "access", "subject": subject})
-            smoke.request(smoke.API + "/v1/libraries", token=token, expected=(401, 403))
+
+            def identity_projected():
+                identity = smoke.request(
+                    smoke.IDENTITY + "/realms/nephos/nephos-admin/users/" + subject,
+                    headers={"X-Nephos-Identity-Service-Key": smoke.ENV["IDENTITY_ADMIN_SERVICE_KEY"]},
+                )
+                projected = subprocess.check_output(
+                    [
+                        "docker",
+                        "compose",
+                        "exec",
+                        "-T",
+                        "postgres",
+                        "psql",
+                        "-U",
+                        "postgres",
+                        "-d",
+                        "library",
+                        "-At",
+                        "-c",
+                        "SELECT identity_revision FROM principals WHERE subject='" + str(uuid.UUID(subject)) + "';",
+                    ],
+                    text=True,
+                    cwd=smoke.ROOT,
+                )
+                return int(projected.strip()) == identity["revision"]
+
             smoke.wait(
-                "revoked token rejected after bounded introspection cache expiry",
-                lambda: smoke.request(smoke.API + "/v1/libraries", token=token, expected=401),
+                "out-of-band passkey recovery revision projected without clearing local denial",
+                identity_projected,
             )
+            smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
+            assert "Готово" in submit({"action": "access", "subject": subject}), "Durable disable did not complete."
+            smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
             browser.close()
             print(
                 "PASS: fresh passkey login, Code+PKCE, membership denial, recovery without platform access and full account revocation"
