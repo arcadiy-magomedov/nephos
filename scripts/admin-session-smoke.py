@@ -40,7 +40,7 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
         )
 
     def signed_in():
-        return "<button>Выйти</button>" in admin.request()
+        return "<button>Sign out</button>" in admin.request()
 
     try:
         alter("refresh")
@@ -51,20 +51,20 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
                     range(4),
                 )
             )
-        assert all("<button>Выйти</button>" in page for page in results), "Concurrent token refresh failed."
+        assert all("<button>Sign out</button>" in page for page in results), "Concurrent token refresh failed."
         subprocess.run(["docker", "restart", args.console_container], check=True, capture_output=True)
         smoke.wait("administration session survives console restart", signed_in)
         if not args.skip_store_outage:
             subprocess.run(["docker", "pause", args.session_container], check=True, capture_output=True)
             try:
                 page = admin.request(expected=503)
-                assert "Хранилище сессий недоступно" in page
+                assert "session store is unavailable" in page
             finally:
                 subprocess.run(["docker", "unpause", args.session_container], check=True, capture_output=True)
             smoke.wait("session service recovers without accepting an unauthenticated request", signed_in)
         alter("expire")
-        assert "Сессия администратора завершена" in admin.request(expected=401)
-        assert "Вход в Nephos" in admin.request()
+        assert "administrator session has ended" in admin.request(expected=401)
+        assert "Sign in to Nephos" in admin.request()
         print("PASS: concurrent real token refresh, console restart and absolute session expiry")
     finally:
         if signed_in():
@@ -89,7 +89,7 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
             logout.result()
             for result in reads:
                 result.result()
-        assert "Вход в Nephos" in smoke.request(args.base_url + "/", headers=headers)
+        assert "Sign in to Nephos" in smoke.request(args.base_url + "/", headers=headers)
         print("PASS: in-flight refresh/read requests cannot resurrect a logged-out session")
     finally:
         if signed_in():

@@ -7,14 +7,14 @@ Media users cannot become operators by being created in this console.
 
 ## Screens and operations
 
-- **Обзор:** authoritative user/library totals, unfinished administration
+- **Overview:** authoritative user/library totals, unfinished administration
   operations and independently measured storage/processing stages.
-- **Пользователи:** paginated search and access filters, persistent account
+- **Users:** paginated search and access filters, persistent account
   creation, editable display name and directory visibility, access changes,
   actual devices and single-device revocation, invitations and real QR display.
-- **Медиатеки:** paginated library search, creation, renaming, recorded owner,
+- **Libraries:** paginated library search, creation, renaming, recorded owner,
   direct memberships and share-derived access to all or selected media.
-- **Состояние сервисов:** fixed private readiness probes, observation times,
+- **Service status:** fixed private readiness probes, observation times,
   timeouts and optional-not-installed states. HTTP readiness alone is not
   evidence that a worker is progressing.
 

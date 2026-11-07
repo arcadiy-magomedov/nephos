@@ -1,28 +1,56 @@
 {% extends "base.html" %}
 {% block title %}{{ user.displayName or user.login }} — Nephos{% endblock %}
 {% block content %}
-<div class="top"><div><h1>{{ user.displayName or user.login }}</h1><p class="muted">@{{ user.login }}</p></div>{% if user.enabled %}<a class="button primary" href="/users/{{ user.subject }}/invitations/new">Подключить устройство</a>{% endif %}</div>
-<a class="back" href="/users">← Все пользователи</a>
-{% if operation and operation.status != 'completed' %}
-<section class="card"><h2>Создание аккаунта</h2><p>{{ operation.status|operation_status }}</p>{% if operation.error %}<p class="error">{{ operation.error }}</p>{% endif %}<p class="hint">Операция {{ operation.id }}. Повтор не создаёт другой аккаунт или медиатеку.</p><form method="post" action="/operations/{{ operation.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Повторить безопасно</button></form></section>
+{% macro connect_device(label) %}
+{% if invitations_error %}
+<p class="warning">Invitation status is unconfirmed. Existing QR codes may still grant access; refresh before creating another.</p>
+{% elif invitations|selectattr('status', 'equalto', 'pending')|list %}
+<p class="warning">An existing QR code is still active. Cancel it under Invitations when it should no longer grant access.</p>
 {% endif %}
-<div class="layout"><div>
-  <section class="card"><h2>Аккаунт</h2><div class="row"><span>Имя</span><strong>{{ user.displayName }}</strong></div><div class="row"><span>Доступ к системе</span><span class="pill {{ '' if user.enabled else 'off' }}">{{ 'Включён' if user.enabled else 'Отключён' }}</span></div><div class="row"><span>Обмен медиа</span><span>{{ 'Видим другим пользователям' if user.discoverable else 'Скрыт из каталога' }}</span></div><div class="actions"><a class="button" href="/users/{{ user.subject }}/edit">Изменить профиль</a><a class="button {{ 'danger' if user.enabled else 'primary' }}" href="/users/{{ user.subject }}/access">{{ 'Отключить доступ' if user.enabled else 'Включить доступ' }}</a></div></section>
-  <section class="card"><h2>Устройства</h2>
-    {% if devices_error %}<p class="error" role="alert">{{ devices_error }}</p><a class="button" href="/users/{{ user.subject }}">Обновить состояние</a>
+<form method="post" action="/users/{{ user.subject }}/invitations/new" data-pending-label="Creating QR...">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <input type="hidden" name="command" value="{{ device_command }}">
+  <button id="connect-device" class="primary {{ 'wide' if label == 'Connect another device' }}">{{ label }}</button>
+</form>
+{% endmacro %}
+<div class="user-content">
+  <h1>{{ user.displayName or user.login }}</h1>
+  <p class="muted">@{{ user.login }}</p>
+  <a class="back" href="/users">← All users</a>
+  {% if operation and operation.status != 'completed' %}
+  <section class="card"><h2>Account creation</h2><p>{{ operation.status|operation_status }}</p>{% if operation.error %}<p class="error">{{ operation.error }}</p>{% endif %}<p class="hint">Operation {{ operation.id }}. Retrying does not create another account or library.</p><form method="post" action="/operations/{{ operation.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Retry safely</button></form></section>
+  {% endif %}
+  <section class="card">
+    <h2>Account</h2>
+    <div class="row"><span>Name</span><strong>{{ user.displayName }}</strong></div>
+    <div class="row"><span>Username</span><strong>@{{ user.login }}</strong></div>
+    <div class="row"><span>System access</span><span class="pill {{ '' if user.enabled else 'off' }}">{{ 'Enabled' if user.enabled else 'Disabled' }}</span></div>
+    <div class="row"><span>Media sharing</span><span>{{ 'Visible to other users' if user.discoverable else 'Hidden from directory' }}</span></div>
+    {% if user.enabled and not devices and not devices_error %}<div class="card-action">{{ connect_device('Connect device') }}</div>{% endif %}
+    <div class="actions actions-start"><a class="button" href="/users/{{ user.subject }}/edit">Edit profile</a><a class="button {{ 'danger' if user.enabled else 'primary' }}" href="/users/{{ user.subject }}/access">{{ 'Disable access' if user.enabled else 'Enable access' }}</a></div>
+  </section>
+  <section class="card" aria-labelledby="devices-heading">
+    <h2 id="devices-heading">Connected devices</h2>
+    <p class="muted">Each device has its own revocable session.</p>
+    {% if devices_error %}<p class="error" role="alert">{{ devices_error }}</p><a class="button" href="/users/{{ user.subject }}">Refresh status</a>
     {% else %}{% for device in devices %}
-      <div class="row"><div><strong>{{ device.name }}</strong><p class="hint">Последняя активность: <time datetime="{{ device.lastAccess }}">{{ device.lastAccess|datetime_ru }}</time></p></div><a class="button danger" href="/users/{{ user.subject }}/devices/{{ device.id }}/revoke">Отозвать</a></div>
-    {% else %}<div class="empty"><h3>Устройства не подключены</h3><p class="muted">Выдайте пользователю QR для первого входа.</p></div>{% endfor %}{% endif %}
-    {% if not user.enabled %}<p class="warning">Аккаунт отключён. Подключение новых устройств недоступно.</p>{% endif %}
+    <div class="device-row">
+      <div><strong>{{ device.name }}</strong><p class="hint">Last active: <time datetime="{{ device.lastAccess }}">{{ device.lastAccess|datetime_utc }}</time></p><span class="device-status">Active</span></div>
+      <a id="device-{{ device.id }}" class="button danger" href="/users/{{ user.subject }}/devices/{{ device.id }}/revoke">Revoke device<span class="visually-hidden"> {{ device.name }}</span></a>
+    </div>
+    {% else %}<div class="empty compact"><h3>No devices connected</h3><p class="muted">Issue a QR code for the first sign-in.</p></div>{% endfor %}{% endif %}
+    <p class="hint">Revoking a device signs out only that device. Other sessions and stored media are unaffected.</p>
+    {% if user.enabled and (devices or devices_error) %}<div class="card-action">{{ connect_device('Connect another device') }}</div>{% endif %}
+    {% if not user.enabled %}<p class="warning">The account is disabled. New devices cannot connect.</p>{% endif %}
   </section>
-  <section class="card"><h2>Приглашения</h2>
+  <section class="card">
+    <h2>Invitations</h2>
     {% if invitations_error %}<p class="error" role="alert">{{ invitations_error }}</p>
-    {% else %}{% for invitation in invitations %}<div class="row"><div><strong>{{ invitation.status|invitation_status }}</strong><p class="hint">Действует до <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_ru }}</time></p></div>{% if invitation.status == 'pending' %}<form method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="danger">Отменить QR</button></form>{% endif %}</div>{% else %}<p class="muted">Приглашений пока нет.</p>{% endfor %}{% endif %}
-    <p class="hint">Использованные, отменённые и истёкшие QR не предоставляют доступ.</p>
+    {% else %}{% for invitation in invitations %}<div class="row"><div><strong>{{ invitation.status|invitation_status }}</strong><p class="hint">Expires <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_utc }}</time></p></div>{% if invitation.status == 'pending' %}<form method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel" data-pending-label="Cancelling..."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="danger">Cancel QR code</button></form>{% endif %}</div>{% else %}<p class="muted">No invitations yet.</p>{% endfor %}{% endif %}
+    <p class="hint">Used, cancelled and expired QR codes cannot grant access.</p>
   </section>
-</div><div>
-  <section class="card"><h2>Медиатеки</h2>{% for library in libraries %}<div class="row"><a href="/libraries/{{ library.id }}">{{ library.name }}</a><span class="hint">{{ 'Личная' if library.id == user.personalLibraryId else 'Участник' }}</span></div>{% else %}<p class="muted">Медиатеки ещё не созданы.</p>{% endfor %}<p class="hint">Медиа сохраняется при отключении аккаунта или отзыве устройства.</p></section>
-  {% if memberships %}<section class="card"><h2>Основания доступа</h2>{% for membership in memberships %}<div class="row"><a href="/libraries/{{ membership.libraryId }}">{{ membership.name }}</a><span>{{ ('member' if membership.scope == 'member' else ('all' if membership.allAssets else 'subset'))|member_access }}{% if membership.scope == 'share' and not membership.allAssets %} · {{ membership.sharedAssetCount }} медиа{% endif %}</span></div>{% endfor %}</section>{% endif %}
-  <section class="card"><h2>Подключение по QR</h2><p class="muted">Пользователь сканирует код в Nephos и сразу получает доступ. Email и PIN не нужны.</p><p class="hint">Каждое устройство получает отдельную сессию.</p>{% if user.enabled %}<a class="button primary" href="/users/{{ user.subject }}/invitations/new">Создать QR</a>{% endif %}</section>
-</div></div>
+  <section class="card"><h2>Libraries</h2>{% for library in libraries %}<div class="row"><a href="/libraries/{{ library.id }}">{{ library.name }}</a><span class="hint">{{ 'Personal' if library.id == user.personalLibraryId else 'Member' }}</span></div>{% else %}<p class="muted">No libraries yet.</p>{% endfor %}<p class="hint">Media is retained when an account is disabled or a device is revoked.</p></section>
+  {% if memberships %}<section class="card"><h2>Access details</h2>{% for membership in memberships %}<div class="row"><a href="/libraries/{{ membership.libraryId }}">{{ membership.name }}</a><span>{{ ('member' if membership.scope == 'member' else ('all' if membership.allAssets else 'subset'))|member_access }}{% if membership.scope == 'share' and not membership.allAssets %} · {{ membership.sharedAssetCount }} items{% endif %}</span></div>{% endfor %}</section>{% endif %}
+</div>
+{% block user_overlay %}{% endblock %}
 {% endblock %}

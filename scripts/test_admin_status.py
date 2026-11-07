@@ -12,15 +12,15 @@ class AdminStatusTests(unittest.TestCase):
     def test_absent_optional_service_is_not_probed(self):
         with patch.object(admin_status.requests, "get") as get:
             status = admin_status.probe(("Faces", "optional", None))
-        self.assertEqual(status["state"], "Не установлен")
+        self.assertEqual(status["state"], "Not installed")
         get.assert_not_called()
 
     def test_service_ready_unready_timeout_unavailable(self):
         for response, state in (
-            (Mock(status_code=200), "Готов"),
-            (Mock(status_code=503), "Не готов"),
-            (requests.Timeout(), "Время ожидания истекло"),
-            (requests.ConnectionError(), "Недоступен"),
+            (Mock(status_code=200), "Ready"),
+            (Mock(status_code=503), "Not ready"),
+            (requests.Timeout(), "Timed out"),
+            (requests.ConnectionError(), "Unavailable"),
         ):
             with (
                 self.subTest(state=state),
@@ -37,10 +37,10 @@ class AdminStatusTests(unittest.TestCase):
 
     def test_zero_is_distinct_from_missing_stale_and_error(self):
         for value, timestamp, state, expected in (
-            ("0", time.time(), "Нет данных", 0),
-            (None, time.time(), "Нет данных", None),
-            ("5", time.time() - 120, "Данные устарели", None),
-            ("NaN", time.time(), "Ошибка сбора", None),
+            ("0", time.time(), "No data", 0),
+            (None, time.time(), "No data", None),
+            ("5", time.time() - 120, "Data is stale", None),
+            ("NaN", time.time(), "Collection error", None),
         ):
 
             def get(_url, params, **_kwargs):
@@ -54,4 +54,4 @@ class AdminStatusTests(unittest.TestCase):
 
     def test_failed_collection_reports_error(self):
         with patch.object(admin_status.requests, "get", side_effect=requests.ConnectionError):
-            self.assertTrue(all(item["state"] == "Ошибка сбора" for item in admin_status.broker_metrics()))
+            self.assertTrue(all(item["state"] == "Collection error" for item in admin_status.broker_metrics()))

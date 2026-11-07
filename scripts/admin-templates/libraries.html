@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Медиатеки — Nephos{% endblock %}
+{% block title %}Libraries — Nephos{% endblock %}
 {% block content %}
-<div class="top"><div><h1>Медиатеки</h1><p class="muted">Личные коллекции, владельцы и действующие права доступа.</p></div><a class="button primary" href="/libraries/new">Создать медиатеку</a></div>
+<div class="top"><div><h1>Libraries</h1><p class="muted">Personal collections, owners and current access.</p></div><a class="button primary" href="/libraries/new">Create library</a></div>
 <section class="card">
-  <form class="toolbar"><label>Поиск<input name="search" value="{{ search }}" maxlength="200"></label><button>Найти</button><a class="button" href="/libraries">Сбросить</a></form>
-  <p class="hint">Найдено: {{ data.total }}</p>
-  <div class="table-wrap"><table><thead><tr><th scope="col">Медиатека</th><th scope="col">Владелец</th><th scope="col"></th></tr></thead><tbody>{% for library in data["items"] %}<tr><td>{{ library.name }}</td><td>{{ library.ownerName or 'Владелец не назначен' }}</td><td><a href="/libraries/{{ library.id }}">Открыть {{ library.name }}</a></td></tr>{% else %}<tr><td colspan="3"><div class="empty"><h2>{{ 'Совпадений нет' if search else 'Пока нет медиатек' }}</h2><p class="muted">Личная медиатека появляется при создании пользователя.</p></div></td></tr>{% endfor %}</tbody></table></div>
-  <div class="pagination"><a href="{{ first_url }}">Первая страница</a>{% if next_url %}<a class="button" href="{{ next_url }}">Следующая страница</a>{% endif %}</div>
+  <form class="toolbar"><label>Search<input name="search" value="{{ search }}" maxlength="200"></label><button>Search</button><a class="button" href="/libraries">Reset</a></form>
+  <p class="hint">Found: {{ data.total }}</p>
+  <div class="table-wrap"><table><thead><tr><th scope="col">Library</th><th scope="col">Owner</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>{% for library in data["items"] %}<tr><td>{{ library.name }}</td><td>{{ library.ownerName or 'Owner not assigned' }}</td><td><a href="/libraries/{{ library.id }}">Open {{ library.name }}</a></td></tr>{% else %}<tr><td colspan="3"><div class="empty"><h2>{{ 'No matches' if search else 'No libraries yet' }}</h2><p class="muted">A personal library is created with each user.</p></div></td></tr>{% endfor %}</tbody></table></div>
+  <div class="pagination"><a href="{{ first_url }}">First page</a>{% if next_url %}<a class="button" href="{{ next_url }}">Next page</a>{% endif %}</div>
 </section>
 {% endblock %}

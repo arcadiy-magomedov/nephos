@@ -87,7 +87,7 @@ class AdminAuthTests(unittest.TestCase):
         response = self.get()
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("WWW-Authenticate", response.headers)
-        self.assertIn("Войти", response.get_data(as_text=True))
+        self.assertIn("Sign in", response.get_data(as_text=True))
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(self.client.post("/", base_url=self.origin).status_code, 403)
         self.assertEqual(self.client.post("/", base_url=self.origin, headers={"Origin": self.origin}).status_code, 403)
@@ -181,7 +181,7 @@ class AdminAuthTests(unittest.TestCase):
             "user-form.html": {"user": user, "values": {}},
             "libraries.html": {"data": {"items": [library], "total": 1}, "search": ""},
             "library.html": {"library": library},
-            "library-form.html": {"library": library, "values": {}, "owners": [], "heading": "Изменить название"},
+            "library-form.html": {"library": library, "values": {}, "owners": [], "heading": "Rename library"},
             "overview.html": {
                 "counts": {"users": 1, "enabledUsers": 1, "libraries": 1},
                 "operations": [],
@@ -189,14 +189,14 @@ class AdminAuthTests(unittest.TestCase):
             },
             "services.html": {"services": []},
             "operation.html": {"operation": {"id": "operation", "status": "pending", "kind": "create"}},
-            "confirm.html": {"fields": {}, "heading": "Подтверждение", "button": "Отозвать"},
+            "confirm.html": {"fields": {}, "heading": "Confirmation", "button": "Revoke"},
             "invitation.html": {"user": user, "invitation": None},
         }
         with self.web.app.test_request_context(base_url=self.origin):
             for template, context in contexts.items():
                 with self.subTest(template=template):
                     html = render_template(template, **context)
-                    self.assertIn('lang="ru"', html)
+                    self.assertIn('lang="en"', html)
                     self.assertNotIn("<script>untrusted</script>", html)
                     if template in ("user.html", "users.html", "invitation.html"):
                         self.assertIn("&lt;script&gt;untrusted&lt;/script&gt;", html)
@@ -250,6 +250,149 @@ class AdminAuthTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 400)
             backend.assert_not_called()
+
+    def test_create_user_opens_completed_user_or_pending_operation(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        operation = "00000000-0000-0000-0000-000000000002"
+        page = self.get("/users/new").get_data(as_text=True)
+        csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+        command = re.search(r'name="command" value="([^"]+)"', page)[1]
+        for result, location in (
+            ({"id": operation, "status": "completed", "subject": subject}, "/users/" + subject),
+            ({"id": operation, "status": "pending"}, "/operations/" + operation),
+        ):
+            with (
+                self.subTest(status=result["status"]),
+                patch.object(self.web, "library_call", return_value={"id": operation}) as backend,
+                patch.object(self.web, "wait_operation", return_value=result),
+            ):
+                response = self.client.post(
+                    "/users/new",
+                    base_url=self.origin,
+                    headers={"Origin": self.origin},
+                    data={"csrf": csrf, "command": command, "login": "known", "displayName": "Known"},
+                )
+                self.assertEqual(response.status_code, 303)
+                self.assertEqual(response.headers["Location"], location)
+                self.assertEqual(backend.call_args.args[1]["libraryName"], "Personal library")
+                self.assertEqual(backend.call_args.args[1]["id"], command)
+
+    def test_qr_issue_timeout_reuses_command_and_does_not_redisplay_secret(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        invite = "00000000-0000-0000-0000-000000000002"
+        user = {"subject": subject, "login": "known", "displayName": "Known", "enabled": True}
+        pending = {"inviteId": invite, "status": "active", "expiresAt": "2026-11-01T15:30:00Z"}
+        commands = []
+
+        def identity(path, data=None, method=None):
+            if data:
+                commands.append(data["commandId"])
+                if len(commands) == 1:
+                    raise urllib.error.URLError("response lost")
+                return pending
+            if path.endswith("/devices"):
+                return {"devices": []}
+            return {"invitations": [pending]}
+
+        with (
+            patch.object(self.web, "library_call", return_value={"user": user, "libraries": [], "memberships": []}),
+            patch.object(self.web, "identity_call", side_effect=identity),
+        ):
+            path = f"/users/{subject}/invitations/new"
+            page = self.get(path).get_data(as_text=True)
+            csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+            command = re.findall(r'name="command" value="([^"]+)"', page)[-1]
+            values = {"csrf": csrf, "command": command}
+            failed = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data=values)
+            self.assertEqual(failed.status_code, 503)
+            self.assertIn('value="' + command + '"', failed.get_data(as_text=True))
+            self.assertIn("Retry safely", failed.get_data(as_text=True))
+            replay = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data=values)
+            self.assertEqual(replay.status_code, 200)
+            self.assertEqual(commands, [command, command])
+            self.assertIn("code was not retained", replay.get_data(as_text=True))
+            self.assertIn("Cancel QR code", replay.get_data(as_text=True))
+            self.assertNotIn('<img class="qr"', replay.get_data(as_text=True))
+
+    def test_terminal_qr_replay_does_not_offer_an_active_code_without_javascript(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        invite = "00000000-0000-0000-0000-000000000002"
+        user = {"subject": subject, "login": "known", "displayName": "Known", "enabled": True}
+        expired = {"inviteId": invite, "status": "expired", "expiresAt": "2026-11-01T15:30:00Z"}
+
+        def identity(path, data=None, method=None):
+            if data:
+                return expired
+            if path.endswith("/devices"):
+                return {"devices": []}
+            return {"invitations": [expired]}
+
+        with (
+            patch.object(self.web, "library_call", return_value={"user": user, "libraries": [], "memberships": []}),
+            patch.object(self.web, "identity_call", side_effect=identity),
+        ):
+            path = f"/users/{subject}/invitations/new"
+            page = self.get(path).get_data(as_text=True)
+            csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+            command = re.findall(r'name="command" value="([^"]+)"', page)[-1]
+            response = self.client.post(
+                path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf, "command": command}
+            )
+            html = response.get_data(as_text=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertRegex(html, r'<form id="cancel-invitation"[^>]+hidden>')
+            self.assertRegex(html, r'id="invitation-finished-actions"\s*><a[^>]+>Close</a>')
+            self.assertNotIn("code was not retained", html)
+            self.assertNotIn('<img class="qr"', html)
+
+    def test_device_revoke_targets_selected_device_and_retries_unconfirmed_response(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        selected = "00000000-0000-0000-0000-000000000002"
+        other = "00000000-0000-0000-0000-000000000003"
+        user = {"subject": subject, "login": "known", "displayName": "Known", "enabled": True}
+        devices = [
+            {"id": selected, "name": "Selected phone", "lastAccess": "2026-11-01T15:30:00Z"},
+            {"id": other, "name": "Other phone", "lastAccess": "2026-11-01T15:30:00Z"},
+        ]
+        attempts = []
+
+        def identity(path, data=None, method=None):
+            if method == "DELETE":
+                attempts.append(path)
+                if len(attempts) == 1:
+                    raise urllib.error.URLError("response lost")
+                devices[:] = [device for device in devices if device["id"] != selected]
+                return None
+            if path.endswith("/devices"):
+                return {"devices": devices}
+            return {"invitations": []}
+
+        with (
+            patch.object(self.web, "library_call", return_value={"user": user, "libraries": [], "memberships": []}),
+            patch.object(self.web, "identity_call", side_effect=identity),
+        ):
+            path = f"/users/{subject}/devices/{selected}/revoke"
+            page = self.get(path).get_data(as_text=True)
+            self.assertIn("Selected phone", page)
+            csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+            failed = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf})
+            self.assertEqual(failed.status_code, 503)
+            self.assertIn("Revocation not confirmed", failed.get_data(as_text=True))
+            self.assertIn("Do not assume the device is signed out", failed.get_data(as_text=True))
+            success = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf})
+            self.assertEqual(success.status_code, 303)
+            self.assertEqual(success.headers["Location"], "/users/" + subject)
+            self.assertEqual(attempts, [f"/users/{subject}/devices/{selected}"] * 2)
+            self.assertEqual([device["id"] for device in devices], [other])
+            self.assertIn("Device access revoked", self.get(success.headers["Location"]).get_data(as_text=True))
+            retry = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf})
+            self.assertEqual(retry.status_code, 303)
+            self.assertEqual(len(attempts), 2)
+            self.assertIn("no longer connected", self.get(retry.headers["Location"]).get_data(as_text=True))
 
     def test_missing_invitation_is_not_success(self):
         self.seed()

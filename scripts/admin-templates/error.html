@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Ошибка — Nephos{% endblock %}
+{% block title %}Error — Nephos{% endblock %}
 {% block content %}
 <section class="card">
-  <h1>Не удалось выполнить действие</h1>
+  <h1>Could not complete the action</h1>
   <p class="error" role="alert">{{ message }}</p>
-  <div class="actions"><a class="button" href="/">Открыть актуальное состояние</a><a class="button primary" href="/login">Войти заново</a></div>
+  <div class="actions"><a class="button" href="/">View current state</a><a class="button primary" href="/login">Sign in again</a></div>
 </section>
 {% endblock %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Состояние сервисов — Nephos{% endblock %}
+{% block title %}Service status — Nephos{% endblock %}
 {% block content %}
-<div class="top"><div><h1>Состояние сервисов</h1><p class="muted">Доступность сервисов и их зависимостей. Доступный HTTP-сервис не означает, что обработка медиа завершена.</p></div><a class="button" href="/services">Проверить снова</a></div>
-<section class="card">{% for service in services %}<div class="row"><div><h2>{{ service.name }}</h2><p class="hint">{{ service.description }}</p><p class="hint">Проверено: {{ service.checkedAt|datetime_ru }}</p></div><span class="pill {{ '' if service.state == 'Готов' else 'unknown' }}">{{ service.state }}</span></div>{% endfor %}</section>
+<div class="top"><div><h1>Service status</h1><p class="muted">Service and dependency availability. HTTP readiness does not mean media processing is complete.</p></div><a class="button" href="/services">Check again</a></div>
+<section class="card">{% for service in services %}<div class="row"><div><h2>{{ service.name }}</h2><p class="hint">{{ service.description }}</p><p class="hint">Checked: {{ service.checkedAt|datetime_utc }}</p></div><span class="pill {{ '' if service.state == 'Ready' else 'unknown' }}">{{ service.state }}</span></div>{% endfor %}</section>
 {% endblock %}

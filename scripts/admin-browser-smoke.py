@@ -61,7 +61,7 @@ def main():
                 response = page.goto(base + "/")
                 assert response.status == 200
                 assert "www-authenticate" not in response.headers
-                page.get_by_role("link", name="Войти", exact=True).click()
+                page.get_by_role("link", name="Sign in", exact=True).click()
                 expect(page.locator("#username")).to_be_visible()
                 assert page.url.startswith(smoke.IDENTITY + "/realms/master/")
 
@@ -78,7 +78,7 @@ def main():
             page.locator("#password").fill(outsider_password)
             page.locator("#kc-login").click()
             page.wait_for_url(base + "/users")
-            expect(page.get_by_role("heading", name="Пользователи", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name="Users", exact=True)).to_be_visible()
             cookies = [cookie for cookie in context.cookies(base) if cookie["name"] == "nephos_admin"]
             assert len(cookies) == 1 and cookies[0]["httpOnly"] and cookies[0]["sameSite"] == "Lax"
             assert smoke.ENV["KEYCLOAK_ADMIN_PASSWORD"] not in cookies[0]["value"]
@@ -114,20 +114,20 @@ with app.test_request_context():
                 with os.fdopen(descriptor, "w") as output:
                     json.dump(claims, output)
             page.reload()
-            expect(page.get_by_role("button", name="Выйти")).to_be_visible()
+            expect(page.get_by_role("button", name="Sign out")).to_be_visible()
             if args.screenshots:
                 page.screenshot(path=str(args.screenshots / "operator-console.png"), full_page=True)
             denied = context.request.post(base + "/logout", form={}, headers={"Origin": base})
             assert denied.status == 403
             page.reload()
-            expect(page.get_by_role("button", name="Выйти")).to_be_visible()
-            page.get_by_role("button", name="Выйти").click()
-            expect(page.get_by_role("link", name="Войти", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Sign out")).to_be_visible()
+            page.get_by_role("button", name="Sign out").click()
+            expect(page.get_by_role("link", name="Sign in", exact=True)).to_be_visible()
             replay = browser.new_context()
             replay.add_cookies(old_cookies)
             replay_page = replay.new_page()
             replay_page.goto(base + "/")
-            expect(replay_page.get_by_role("link", name="Войти", exact=True)).to_be_visible()
+            expect(replay_page.get_by_role("link", name="Sign in", exact=True)).to_be_visible()
             replay.close()
 
             smoke.request(
@@ -141,8 +141,8 @@ with app.test_request_context():
             page.locator("#username").fill(outsider)
             page.locator("#password").fill(outsider_password)
             page.locator("#kc-login").click()
-            expect(page.get_by_text("Учётная запись не является администратором.", exact=False)).to_be_visible()
-            assert not page.locator('nav[aria-label="Основные разделы"]').is_visible()
+            expect(page.get_by_text("This account is not an administrator.", exact=False)).to_be_visible()
+            assert not page.locator('nav[aria-label="Main navigation"]').is_visible()
             context.close()
             browser.close()
         print("PASS: real OIDC browser login, incorrect password, reload, CSRF, logout/replay and operator-role denial")

@@ -63,7 +63,7 @@ jobs:
       - run: pip-audit -r scripts/admin-requirements.txt
       - run: pip-audit -r scripts/qr-identity-requirements.txt
       - run: ruff check . && ruff format --check .
-      - run: node --check scripts/admin-static/invitation.js
+      - run: node --check scripts/admin-static/invitation.js && node --check scripts/admin-static/dialog.js
       - run: yamllint -s .github compose*.yaml deploy tests/alert-rules.test.yaml .yamllint.yaml
       - run: actionlint -color
       - run: shellcheck .githooks/pre-commit .githooks/pre-push
@@ -171,7 +171,9 @@ jobs:
       - run: python3 scripts/operations-smoke.py
       - run: python3 scripts/edge-smoke.py
       - run: python3 scripts/identity-production-smoke.py
-      - run: python3 scripts/qr-identity-qualification.py
+      - run: >-
+          python3 scripts/qr-identity-qualification.py --image nephos-keycloak:26.8.1
+          --postgres-image postgres:18-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
       - run: python3 scripts/low-storage-smoke.py
       - run: python3 scripts/restore-smoke.py
       - name: Failure diagnostics

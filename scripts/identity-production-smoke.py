@@ -298,6 +298,7 @@ try:
         encoded = token_response[token_type].split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
         assert claims["sub"] == subject, f"{token_type} must identify the known library account"
+        assert claims.get("iss") == discovery["issuer"], f"{token_type} must use the canonical issuer"
     assert smoke.request(pin_base + "/pin-requests", headers=service_headers) == {"requests": []}
     # Consumed PINs cannot be recovered or reissued through the pending-request path.
     assert request_pin(username + "@example.test", 429)["error"] == "rate_limited"
@@ -333,6 +334,23 @@ try:
         data=urllib.parse.urlencode(second_grant).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
+    refreshed = smoke.request(
+        token_url,
+        data=urllib.parse.urlencode(
+            {
+                "grant_type": "refresh_token",
+                "client_id": "nephos-ios",
+                "refresh_token": second_token_response["refresh_token"],
+            }
+        ).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    for token_type in ("access_token", "id_token"):
+        encoded = refreshed[token_type].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        assert claims["sub"] == subject and claims.get("iss") == discovery["issuer"], (
+            f"refreshed {token_type} must retain the canonical issuer and subject"
+        )
     admin = admin_token()
     disabled_user = smoke.request(admin_base + "/users?exact=true&username=" + disabled_username, token=admin)[0]
     smoke.request(

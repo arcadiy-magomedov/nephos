@@ -67,10 +67,10 @@ app.config.update(
 
 def session_unavailable():
     return Response(
-        '<!doctype html><html lang="ru"><meta charset="utf-8"><title>Администрирование недоступно</title>'
-        "<h1>Администрирование недоступно</h1>"
-        "<p>Хранилище сессий недоступно. Вход и действия администратора временно заблокированы.</p>"
-        '<a href="/">Повторить</a></html>',
+        '<!doctype html><html lang="en"><meta charset="utf-8"><title>Administration unavailable</title>'
+        "<h1>Administration unavailable</h1>"
+        "<p>The session store is unavailable. Administrator sign-in and actions are temporarily blocked.</p>"
+        '<a href="/">Try again</a></html>',
         status=503,
         content_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store"},
@@ -132,59 +132,59 @@ def operator_context():
     }
 
 
-@app.template_filter("datetime_ru")
-def datetime_ru(value):
+@app.template_filter("datetime_utc")
+def datetime_utc(value):
     if not value:
-        return "Нет данных"
+        return "No data"
     return (
         datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         .astimezone(timezone.utc)
-        .strftime("%d.%m.%Y %H:%M UTC")
+        .strftime("%d %b %Y, %H:%M UTC")
     )
 
 
 @app.template_filter("operation_status")
 def operation_status(value):
     return {
-        "completed": "Готово",
-        "pending": "Выполняется",
-        "running": "Выполняется",
-        "failed": "Требуется повтор",
-        "blocked": "Заблокировано",
-        "abandoned": "Отменена после ошибки",
-    }.get(value, "Состояние не подтверждено")
+        "completed": "Completed",
+        "pending": "Pending",
+        "running": "In progress",
+        "failed": "Retry required",
+        "blocked": "Blocked",
+        "abandoned": "Abandoned after failure",
+    }.get(value, "Status unconfirmed")
 
 
 @app.template_filter("invitation_status")
 def invitation_status(value):
     return {
-        "pending": "Ожидает сканирования",
-        "used": "Устройство подключено",
-        "consumed": "Устройство подключено",
-        "expired": "Срок действия истёк",
-        "cancelled": "Отменено",
-    }.get(value, "Состояние не подтверждено")
+        "pending": "Waiting for scan",
+        "used": "Device connected",
+        "consumed": "Device connected",
+        "expired": "Expired",
+        "cancelled": "Cancelled",
+    }.get(value, "Status unconfirmed")
 
 
 @app.template_filter("member_access")
 def member_access(value):
     return {
-        "owner": "Владелец · прямой участник",
-        "member": "Прямой участник",
-        "shared": "Предоставленный доступ к медиа",
-        "all": "Обмен всеми медиа",
-        "subset": "Обмен выбранными медиа",
-    }.get(value, "Основание не подтверждено")
+        "owner": "Owner · direct member",
+        "member": "Direct member",
+        "shared": "Shared media access",
+        "all": "All shared media",
+        "subset": "Selected shared media",
+    }.get(value, "Access unconfirmed")
 
 
 @app.template_filter("command_kind")
 def command_kind(value):
     return {
-        "create": "Создание пользователя",
-        "provision": "Создание пользователя",
-        "access": "Изменение доступа",
-        "profile": "Изменение профиля",
-    }.get(value, "Административная операция")
+        "create": "Create user",
+        "provision": "Create user",
+        "access": "Change access",
+        "profile": "Update profile",
+    }.get(value, "Administration operation")
 
 
 def error_page(message, status):
@@ -196,7 +196,7 @@ def private_origin():
     if g.get("session_store_unavailable"):
         return session_unavailable()
     if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.headers.get("Origin") != PUBLIC_URL:
-        abort(403, description="Действие должно быть отправлено из консоли администратора.")
+        abort(403, description="The action must be submitted from the administrator console.")
     if request.host != urllib.parse.urlsplit(PUBLIC_URL).netloc:
         if request.method == "GET":
             return redirect(PUBLIC_URL, code=303)
@@ -208,7 +208,7 @@ def serialize_session():
     if request.cookies.get(app.config["SESSION_COOKIE_NAME"]):
         lock = store.lock("nephos:admin-request:" + session.sid, timeout=180, blocking_timeout=5)
         if not lock.acquire():
-            abort(503, description="Другой запрос администратора ещё выполняется. Повторите позже.")
+            abort(503, description="Another administrator request is still in progress. Try again later.")
         g.admin_session_lock = lock
         current = app.session_interface.load_current()
         session.clear()
@@ -248,7 +248,7 @@ def check_operator(userinfo):
     if not isinstance(roles, list) or "admin" not in roles:
         abort(
             403,
-            description="Учётная запись не является администратором. Аккаунт медиатеки не предоставляет административные права.",
+            description="This account is not an administrator. A media account does not grant administrator access.",
         )
 
 
@@ -274,7 +274,7 @@ def login():
 @app.get("/oauth/callback")
 def callback():
     if time.time() - session.get("login_started", 0) > 600:
-        abort(400, description="Попытка входа истекла. Начните вход заново.")
+        abort(400, description="The sign-in attempt expired. Start again.")
     validate_metadata()
     token = provider.authorize_access_token(claims_options=CLAIMS, leeway=30)
     userinfo = token.get("userinfo")
@@ -291,10 +291,10 @@ def operator_token():
     token = session.get("token")
     if not token or time.time() >= session.get("deadline", 0):
         session.clear()
-        abort(401, description="Сессия администратора завершена. Войдите заново.")
+        abort(401, description="Your administrator session has ended. Sign in again.")
     if token.get("userinfo", {}).get("iss") != ISSUER:
         session.clear()
-        abort(401, description="Настройки авторизации изменились. Войдите заново.")
+        abort(401, description="The authentication settings changed. Sign in again.")
     check_operator(token.get("userinfo"))
     if token.get("expires_at", 0) <= time.time() + 30:
         previous_userinfo = token["userinfo"]
@@ -382,7 +382,7 @@ def identity_call(path, data=None, method=None):
 
 def form_values():
     if any(len(request.form.getlist(key)) != 1 for key in request.form):
-        abort(400, description="Повторяющиеся поля формы не допускаются.")
+        abort(400, description="Duplicate form fields are not allowed.")
     return request.form
 
 
@@ -393,7 +393,7 @@ def identifier(value):
 def revision(value):
     result = int(value)
     if result < 0:
-        abort(400, description="Некорректная версия записи.")
+        abort(400, description="Invalid record revision.")
     return result
 
 
@@ -425,7 +425,7 @@ def page_parameters():
     search = request.args.get("search", "").strip()
     cursor = request.args.get("cursor", "")
     if len(search) > 200 or len(cursor) > 200:
-        abort(400, description="Слишком длинный поисковый запрос или указатель страницы.")
+        abort(400, description="The search query or page cursor is too long.")
     return search, cursor
 
 
@@ -441,7 +441,7 @@ def users_page():
     search, cursor = page_parameters()
     access = request.args.get("access", "")
     if access not in ("", "enabled", "disabled"):
-        abort(400, description="Некорректный фильтр доступа.")
+        abort(400, description="Invalid access filter.")
     parameters = {"search": search, "limit": 50, "cursor": cursor}
     if access:
         parameters["enabled"] = str(access == "enabled").lower()
@@ -477,9 +477,9 @@ def create_user():
             "user-form.html",
             section="users",
             user=None,
-            values=values,
+            values={**values, "discoverable": values.get("discoverable") == "yes"},
             command=command,
-            error="Введите имя и логин: до 64 латинских букв, цифр, точек, дефисов и подчёркиваний.",
+            error="Enter a name and a username of up to 64 letters, numbers, dots, hyphens or underscores.",
         ), 400
     operation = library_call(
         "/operations",
@@ -488,10 +488,13 @@ def create_user():
             "login": login_value,
             "displayName": name,
             "discoverable": values.get("discoverable") == "yes",
-            "libraryName": "Личная медиатека",
+            "libraryName": "Personal library",
         },
     )
     operation = wait_operation(operation)
+    if operation["status"] == "completed" and operation.get("subject"):
+        flash("User and personal library created.")
+        return redirect("/users/" + operation["subject"], code=303)
     return redirect("/operations/" + operation["id"], code=303)
 
 
@@ -500,36 +503,39 @@ def dependency_state(load, description):
         return load(), None
     except (urllib.error.URLError, TimeoutError):
         logger.warning("Administration detail dependency unavailable", extra={"dependency": description})
-        return [], "Не удалось получить " + description + ". Состояние не подтверждено; обновите страницу."
+        return [], "Could not load " + description + ". The state is unconfirmed; refresh the page."
 
 
 def invitation_record(value):
     return {**value, "id": value["inviteId"], "status": "pending" if value["status"] == "active" else value["status"]}
 
 
+def user_context(subject, data=None):
+    data = data or user_record(subject)
+    devices, devices_error = dependency_state(
+        lambda: identity_call("/users/" + subject + "/devices")["devices"], "devices"
+    )
+    invites, invitations_error = dependency_state(
+        lambda: identity_call("/users/" + subject + "/invitations")["invitations"], "invitations"
+    )
+    return {
+        "section": "users",
+        "user": data["user"],
+        "libraries": data["libraries"],
+        "memberships": data["memberships"],
+        "operation": None,
+        "devices": devices,
+        "devices_error": devices_error,
+        "invitations": [invitation_record(item) for item in invites],
+        "invitations_error": invitations_error,
+        "device_command": str(uuid.uuid4()),
+    }
+
+
 @app.get("/users/<uuid:subject>")
 def user_page(subject):
     operator_token()
-    subject = str(subject)
-    data = user_record(subject)
-    devices, devices_error = dependency_state(
-        lambda: identity_call("/users/" + subject + "/devices")["devices"], "устройства"
-    )
-    invites, invitations_error = dependency_state(
-        lambda: identity_call("/users/" + subject + "/invitations")["invitations"], "приглашения"
-    )
-    return render_template(
-        "user.html",
-        section="users",
-        user=data["user"],
-        libraries=data["libraries"],
-        memberships=data["memberships"],
-        operation=None,
-        devices=devices,
-        devices_error=devices_error,
-        invitations=[invitation_record(item) for item in invites],
-        invitations_error=invitations_error,
-    )
+    return render_template("user.html", **user_context(str(subject)))
 
 
 @app.route("/users/<uuid:subject>/edit", methods=["GET", "POST"])
@@ -546,9 +552,9 @@ def edit_user(subject):
             "user-form.html",
             section="users",
             user=user,
-            values=values,
+            values={**values, "discoverable": values.get("discoverable") == "yes"},
             command=identifier(values["command"]),
-            error="Имя не может быть пустым или длиннее 100 символов.",
+            error="The name must contain between 1 and 100 characters.",
         ), 400
     operation = library_call(
         "/users/" + subject + "/profile",
@@ -570,7 +576,7 @@ def user_access(subject):
     if request.method == "POST":
         values = form_values()
         if values["enabled"] not in ("true", "false"):
-            abort(400, description="Некорректное состояние доступа.")
+            abort(400, description="Invalid access state.")
         operation = library_call(
             "/users/" + subject + "/access",
             {
@@ -583,16 +589,16 @@ def user_access(subject):
     return render_template(
         "confirm.html",
         section="users",
-        heading=("Отключить" if user["enabled"] else "Включить") + " доступ " + user["displayName"] + "?",
-        explanation="Все пользовательские сессии и QR будут отозваны. Медиа сохраняется."
+        heading=("Disable" if user["enabled"] else "Enable") + " access for " + user["displayName"] + "?",
+        explanation="All user sessions and QR codes will be revoked. Media is retained."
         if user["enabled"]
-        else "Подключение будет доступно после проверки сервера. Отозванные сессии не восстанавливаются.",
+        else "The account can connect after the server confirms the change. Revoked sessions are not restored.",
         fields={
             "revision": user["revision"],
             "enabled": str(not user["enabled"]).lower(),
             "command": str(uuid.uuid4()),
         },
-        button="Отключить доступ" if user["enabled"] else "Включить доступ",
+        button="Disable access" if user["enabled"] else "Enable access",
         destructive=user["enabled"],
         return_url="/users/" + subject,
     )
@@ -607,36 +613,47 @@ def revoke_device(subject, device):
     if request.method == "POST":
         form_values()
         if record:
-            identity_call("/users/" + subject + "/devices/" + device, method="DELETE")
-        flash("Устройство отозвано. Остальные устройства продолжают работать.")
+            try:
+                identity_call("/users/" + subject + "/devices/" + device, method="DELETE")
+            except (urllib.error.URLError, TimeoutError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code < 500:
+                    raise
+                logger.warning("Device revocation could not be confirmed", extra={"error_type": type(error).__name__})
+                return render_template(
+                    "device-revoke.html", **user_context(subject), device=record, revoke_failed=True
+                ), 503
+            flash("Device access revoked. Other sessions and stored media were not changed.")
+        else:
+            flash("This device is no longer connected. Other sessions and stored media were not changed.")
         return redirect("/users/" + subject, code=303)
     if not record:
-        abort(404, description="Устройство уже отозвано или не найдено.")
-    return render_template(
-        "confirm.html",
-        section="users",
-        heading="Отозвать " + record["name"] + "?",
-        explanation="Устройство потеряет доступ. Медиа и доступ других устройств сохраняются.",
-        fields={},
-        button="Отозвать доступ",
-        destructive=True,
-        return_url="/users/" + subject,
-    )
+        abort(404, description="The device is no longer connected or could not be found.")
+    return render_template("device-revoke.html", **user_context(subject), device=record, revoke_failed=False)
 
 
 @app.route("/users/<uuid:subject>/invitations/new", methods=["GET", "POST"])
 def create_invitation(subject):
     operator_token()
     subject = str(subject)
-    user = user_record(subject)["user"]
+    data = user_record(subject)
+    user = data["user"]
     if not user["enabled"]:
-        abort(409, description="Аккаунт отключён. Подключение устройств недоступно.")
+        abort(409, description="The account is disabled. New devices cannot connect.")
     if request.method == "GET":
         return render_template(
-            "invitation.html", section="users", user=user, invitation=None, command=str(uuid.uuid4())
+            "invitation.html", **user_context(subject, data), invitation=None, command=str(uuid.uuid4())
         )
     values = form_values()
-    invitation = identity_call("/users/" + subject + "/invitations", {"commandId": identifier(values["command"])})
+    command = identifier(values["command"])
+    try:
+        invitation = identity_call("/users/" + subject + "/invitations", {"commandId": command})
+    except (urllib.error.URLError, TimeoutError) as error:
+        if isinstance(error, urllib.error.HTTPError) and error.code < 500:
+            raise
+        logger.warning("QR issuance could not be confirmed", extra={"error_type": type(error).__name__})
+        return render_template(
+            "invitation.html", **user_context(subject, data), invitation=None, command=command, issue_error=True
+        ), 503
     svg_data = None
     if "qr" in invitation:
         output = io.BytesIO()
@@ -645,7 +662,7 @@ def create_invitation(subject):
         )
         svg_data = base64.b64encode(output.getvalue()).decode("ascii")
     return render_template(
-        "invitation.html", section="users", user=user, invitation=invitation_record(invitation), qr_data=svg_data
+        "invitation.html", **user_context(subject, data), invitation=invitation_record(invitation), qr_data=svg_data
     )
 
 
@@ -655,7 +672,7 @@ def invitation_state(subject, invite):
     items = identity_call("/users/" + str(subject) + "/invitations")["invitations"]
     record = next((item for item in items if item["inviteId"] == str(invite)), None)
     if not record:
-        abort(404, description="Приглашение не найдено.")
+        abort(404, description="The invitation could not be found.")
     return invitation_record(record)
 
 
@@ -664,7 +681,7 @@ def cancel_invitation(subject, invite):
     operator_token()
     form_values()
     identity_call("/users/" + str(subject) + "/invitations/" + str(invite), method="DELETE")
-    flash("Приглашение отменено. Этот QR больше не предоставляет доступ.")
+    flash("Invitation cancelled. This QR code no longer grants access.")
     return redirect("/users/" + str(subject), code=303)
 
 
@@ -679,11 +696,11 @@ def operation_page(operation_id):
 def operation_error(value):
     return (
         {
-            "identity_conflict": "Учётная запись или её версия конфликтует с операцией. Проверьте данные.",
-            "identity_unavailable": "Сервер авторизации недоступен. Сервер повторит операцию.",
-            "identity_rejected": "Сервер авторизации отклонил операцию. Проверьте состояние аккаунта.",
-            "persistence_unavailable": "Хранилище состояния недоступно. Операция будет повторена.",
-        }.get(value, "Операция не завершена; проверьте актуальное состояние.")
+            "identity_conflict": "The account or its revision conflicts with this operation. Check the details.",
+            "identity_unavailable": "The identity server is unavailable. The server will retry the operation.",
+            "identity_rejected": "The identity server rejected the operation. Check the account state.",
+            "persistence_unavailable": "The state store is unavailable. The operation will be retried.",
+        }.get(value, "The operation is incomplete; check its current state.")
         if value
         else None
     )
@@ -695,7 +712,7 @@ def operations_page():
     _search, cursor = page_parameters()
     status = request.args.get("status", "")
     if status not in ("", "pending", "running", "failed", "completed", "abandoned"):
-        abort(400, description="Некорректное состояние операции.")
+        abort(400, description="Invalid operation status.")
     parameters = {"cursor": cursor, "limit": 50}
     if status:
         parameters["status"] = status
@@ -725,7 +742,7 @@ def abandon_operation(operation_id):
     operation_id = str(operation_id)
     operation = library_call("/operations/" + operation_id)
     if operation["kind"] == "provision" or operation["status"] not in ("failed", "abandoned"):
-        abort(409, description="Можно отменить только завершившееся ошибкой изменение профиля или доступа.")
+        abort(409, description="Only a failed profile or access change can be abandoned.")
     if request.method == "POST":
         form_values()
         library_call("/operations/" + operation_id + "/abandon", method="POST")
@@ -733,10 +750,10 @@ def abandon_operation(operation_id):
     return render_template(
         "confirm.html",
         section="users",
-        heading="Отменить незавершённое изменение?",
-        explanation="Существующий доступ не восстанавливается. После отмены откройте карточку пользователя и отправьте новое исправленное действие.",
+        heading="Abandon this incomplete change?",
+        explanation="Existing access is not restored. After abandoning, open the user and submit a corrected action.",
         fields={},
-        button="Отменить изменение",
+        button="Abandon change",
         destructive=True,
         return_url="/operations/" + operation_id,
     )
@@ -773,7 +790,7 @@ def library_form(library_id=None):
         values = form_values()
         name = values["name"].strip()
         if not name or len(name) > 200 or any(ord(c) < 32 for c in name):
-            abort(400, description="Введите название медиатеки до 200 символов.")
+            abort(400, description="Enter a library name of up to 200 characters.")
         if library:
             library_call(
                 "/libraries/" + str(library_id) + "/rename",
@@ -782,7 +799,7 @@ def library_form(library_id=None):
         else:
             library_id = identifier(values["command"])
             library_call("/libraries", {"id": library_id, "name": name, "subject": identifier(values["subject"])})
-        flash("Медиатека сохранена.")
+        flash("Library saved.")
         return redirect("/libraries/" + str(library_id), code=303)
     owners = library_call(
         "/users?" + urllib.parse.urlencode({"cursor": request.args.get("ownersCursor", ""), "limit": 100})
@@ -796,7 +813,7 @@ def library_form(library_id=None):
         "library-form.html",
         section="libraries",
         library=library,
-        heading="Изменить название" if library else "Создать медиатеку",
+        heading="Rename library" if library else "Create library",
         command=str(uuid.uuid4()),
         values={},
         owners=owners["items"],
@@ -809,7 +826,7 @@ def library_owner(library_id):
     operator_token()
     library = library_record(library_id)
     if library["ownerSubject"]:
-        abort(409, description="Владелец уже назначен. Перенос владения недоступен.")
+        abort(409, description="An owner is already assigned. Ownership transfer is not available.")
     if request.method == "POST":
         values = form_values()
         library_call(
@@ -819,7 +836,7 @@ def library_owner(library_id):
                 "expectedRevision": revision(values["revision"]),
             },
         )
-        flash("Владелец назначен. Права на файлы не изменены.")
+        flash("Owner assigned. File permissions were not changed.")
         return redirect("/libraries/" + str(library_id), code=303)
     owners = [item for item in library["members"] if item["scope"] in ("member", "direct")]
     return render_template(
@@ -827,7 +844,7 @@ def library_owner(library_id):
         section="libraries",
         library=library,
         owner_assignment=True,
-        heading="Назначить владельца",
+        heading="Assign owner",
         command=str(uuid.uuid4()),
         values={},
         owners=owners,
@@ -855,10 +872,10 @@ def overview_page():
         (
             os.environ.get("ADMIN_STORAGE_URL", "http://storage-api:8080"),
             [
-                ("Объём медиатома", "capacityBytes", "GiB"),
-                ("Доступное место", "freeBytes", "GiB"),
-                ("Проверка загрузок", "verifying", "Файлы"),
-                ("Публикация загрузок", "outboxPending", "Сообщения"),
+                ("Media volume capacity", "capacityBytes", "GiB"),
+                ("Available space", "freeBytes", "GiB"),
+                ("Uploads being verified", "verifying", "Files"),
+                ("Upload publications", "outboxPending", "Messages"),
             ],
         )
     ]
@@ -868,9 +885,9 @@ def overview_page():
             (
                 faces,
                 [
-                    ("Лица: очередь", "queued", "Файлы"),
-                    ("Лица: выполняются", "running", "Файлы"),
-                    ("Лица: ошибки", "error", "Файлы"),
+                    ("Faces: queued", "queued", "Files"),
+                    ("Faces: processing", "running", "Files"),
+                    ("Faces: errors", "error", "Files"),
                 ],
             )
         )
@@ -886,14 +903,14 @@ def overview_page():
                     "unit": unit,
                     "value": round(data[key] / (1024**3), 2) if unit == "GiB" else data[key],
                     "observedAt": observed,
-                    "state": "Нет данных",
+                    "state": "No data",
                 }
                 for label, key, unit in definitions
             ]
         except (urllib.error.URLError, KeyError, TimeoutError):
             logger.warning("Administration summary unavailable")
             return [
-                {"label": label, "unit": unit, "value": None, "observedAt": None, "state": "Недоступно"}
+                {"label": label, "unit": unit, "value": None, "observedAt": None, "state": "Unavailable"}
                 for label, _key, unit in definitions
             ]
 
@@ -901,11 +918,11 @@ def overview_page():
         metrics = [metric for group in executor.map(read_metrics, targets) for metric in group]
     metrics.append(
         {
-            "label": "Публикация анализа",
-            "unit": "Задания",
+            "label": "Analysis publication",
+            "unit": "Jobs",
             "value": summary["publicationPending"],
             "observedAt": summary["checkedAt"],
-            "state": "Нет данных",
+            "state": "No data",
         }
     )
     metrics.extend(admin_status.broker_metrics())
@@ -958,7 +975,7 @@ def action():
                 token=token,
                 method="PUT",
             )
-        flash("Пользователь и личная медиатека созданы.")
+        flash("User and personal library created.")
         return redirect("/users/" + operation["subject"], code=303)
     if action in ("access", "directory"):
         subject = identifier(form["subject"])
@@ -980,7 +997,7 @@ def action():
         )
         return redirect("/libraries/" + library_id, code=303)
     else:
-        abort(400, description="Неизвестное административное действие.")
+        abort(400, description="Unknown administration action.")
 
 
 def wait_operation(operation):
@@ -993,7 +1010,7 @@ def wait_operation(operation):
 
 @app.errorhandler(CSRFError)
 def csrf_error(error):
-    return error_page("Форма истекла или не прошла проверку. Обновите страницу перед повтором.", 403)
+    return error_page("The form expired or could not be verified. Refresh the page before trying again.", 403)
 
 
 @app.errorhandler(HTTPException)
@@ -1007,15 +1024,15 @@ def provider_error(error):
     if error.code in (400, 404, 409, 429):
         return error_page(
             {
-                400: "Проверьте введённые значения. Действие отклонено сервером.",
-                404: "Запись не найдена. Откройте актуальное состояние.",
-                409: "Данные изменились или логин уже занят. Откройте актуальное состояние перед повтором.",
-                429: "Слишком много запросов. Подождите и повторите действие.",
+                400: "Check the entered values. The server rejected the action.",
+                404: "The record was not found. Check the current state.",
+                409: "The data changed or the username is already taken. Check the current state before retrying.",
+                429: "Too many requests. Wait before trying again.",
             }[error.code],
             error.code,
         )
     return error_page(
-        f"Сервер отклонил запрос ({error.code}). Проверьте актуальное состояние перед повтором.",
+        f"The server rejected the request ({error.code}). Check the current state before retrying.",
         502,
     )
 
@@ -1025,7 +1042,7 @@ def provider_error(error):
 def authentication_error(error):
     logger.warning("Operator authentication failed", extra={"error_type": type(error).__name__})
     session.clear()
-    return error_page("Не удалось проверить вход или сессия авторизации завершена. Войдите заново.", 401)
+    return error_page("Sign-in could not be verified or the authorization session ended. Sign in again.", 401)
 
 
 @app.errorhandler(RequestException)
@@ -1035,8 +1052,8 @@ def authentication_error(error):
 def dependency_error(error):
     logger.error("Administration dependency unavailable", extra={"error_type": type(error).__name__})
     return error_page(
-        "Зависимость администрирования недоступна. Результат действия не подтверждён. "
-        "Проверьте состояние сервисов и операции перед повтором.",
+        "An administration dependency is unavailable. The result of the action is unconfirmed. "
+        "Check the service and operation status before retrying.",
         503,
     )
 
@@ -1044,4 +1061,4 @@ def dependency_error(error):
 @app.errorhandler(ValueError)
 def invalid_input(error):
     logger.warning("Invalid administration input", extra={"error_type": type(error).__name__})
-    return error_page("Введённые значения некорректны. Проверьте форму и повторите.", 400)
+    return error_page("The entered values are invalid. Check the form and try again.", 400)

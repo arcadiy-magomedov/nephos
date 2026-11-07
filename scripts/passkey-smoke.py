@@ -262,7 +262,7 @@ def main():
                 identity_projected,
             )
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=403)
-            assert "Готово" in submit({"action": "access", "subject": subject}), "Durable disable did not complete."
+            assert "Completed" in submit({"action": "access", "subject": subject}), "Durable disable did not complete."
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
             browser.close()
             print(

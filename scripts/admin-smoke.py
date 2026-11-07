@@ -11,7 +11,7 @@ import smoke
 base = os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082")
 admin_url = smoke.IDENTITY + "/admin/realms/nephos"
 smoke.wait("private administration ready", lambda: smoke.request(base + "/"))
-assert "Войти" in smoke.request(base + "/")
+assert "Sign in" in smoke.request(base + "/")
 smoke.request(smoke.API + "/internal/admin/state", expected=404)
 username = "admin-smoke-" + uuid.uuid4().hex
 subject = None
@@ -31,9 +31,13 @@ def submit(admin, path, values, expected=200):
 
 
 def completed(admin, page):
-    operation = re.search(r"Номер операции: ([0-9a-f-]{36})", page)[1]
+    match = re.search(r"Operation ID: ([0-9a-f-]{36})", page)
+    if not match:
+        assert "User and personal library created." in page
+        return
+    operation = match[1]
     smoke.wait(
-        "durable administration operation completed", lambda: "Готово" in admin.request("/operations/" + operation)
+        "durable administration operation completed", lambda: "Completed" in admin.request("/operations/" + operation)
     )
 
 
@@ -56,8 +60,8 @@ with smoke.AdminSession(base) as admin:
         completed(admin, submit(admin, "/users/new", values))
         assert len(smoke.request(admin_url + "/users?exact=true&username=" + username, token=smoke.admin_token())) == 1
         page = admin.request("/users/" + subject)
-        assert "Личная медиатека" in page and "Qualification user" in page
-        assert "Устройства не подключены" in page
+        assert "Personal library" in page and "Qualification user" in page
+        assert "No devices connected" in page
         page = admin.request("/users/" + subject + "/edit")
         completed(
             admin,
@@ -75,13 +79,14 @@ with smoke.AdminSession(base) as admin:
         assert "Renamed &lt;user&gt;" in admin.request("/users/" + subject)
         assert "Renamed &lt;user&gt;" in admin.request("/users?search=" + urllib.parse.quote("Renamed"))
         page = admin.request("/users/" + subject + "/invitations/new")
-        issued = submit(admin, "/users/" + subject + "/invitations/new", {"command": field(page, "command")})
+        command = re.findall(r'name="command" value="([^"]+)"', page)[-1]
+        issued = submit(admin, "/users/" + subject + "/invitations/new", {"command": command})
         assert 'src="data:image/svg+xml;base64,' in issued, "A real QR must be rendered."
         monitor = re.search(r'data-url="([^"]+)"', issued)[1]
         state = admin.request(monitor)
         assert state["status"] == "pending" and "secret" not in state
         invite = state["id"]
-        replay = submit(admin, "/users/" + subject + "/invitations/new", {"command": field(page, "command")})
+        replay = submit(admin, "/users/" + subject + "/invitations/new", {"command": command})
         assert 'src="data:image/svg+xml;base64,' not in replay, "A repeated issuance must not reveal the secret again."
         submit(admin, "/users/" + subject + "/invitations/" + invite + "/cancel", {})
         assert admin.request(monitor)["status"] == "cancelled"
@@ -105,7 +110,7 @@ with smoke.AdminSession(base) as admin:
         )
         assert "Renamed library" in renamed
         assert "Renamed library" in admin.request("/libraries?search=Renamed")
-        for path, heading in (("/overview", "Обзор"), ("/services", "Состояние сервисов")):
+        for path, heading in (("/overview", "Overview"), ("/services", "Service status")):
             assert heading in admin.request(path)
         page = admin.request("/users/" + subject + "/access")
         completed(
@@ -121,7 +126,7 @@ with smoke.AdminSession(base) as admin:
             ),
         )
         assert not smoke.request(admin_url + "/users/" + subject, token=smoke.admin_token())["enabled"]
-        assert "Аккаунт отключён" in admin.request("/users/" + subject)
+        assert "The account is disabled" in admin.request("/users/" + subject)
         print(
             "PASS: persistent create/replay/profile/search, real QR issuance/cancel, library create/rename, overview/services and disable"
         )

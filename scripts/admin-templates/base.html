@@ -1,28 +1,29 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Nephos{% endblock %}</title>
   <link rel="stylesheet" href="/admin-static/admin.css">
+  <script src="/admin-static/dialog.js" defer></script>
 </head>
 <body class="{{ '' if operator_authenticated else 'signed-out' }}">
-  <a class="skip" href="#content">К содержимому</a>
+  <a class="skip" href="#content">Skip to content</a>
   <aside>
     <a class="brand" href="/">Nephos</a>
-    <nav aria-label="Основные разделы">
-      {% for href, label, key in [('/overview','Обзор','overview'),('/users','Пользователи','users'),('/libraries','Медиатеки','libraries'),('/services','Состояние сервисов','services')] %}
+    <nav aria-label="Main navigation">
+      {% for href, label, key in [('/overview','Overview','overview'),('/users','Users','users'),('/libraries','Libraries','libraries'),('/services','Service status','services')] %}
       <a href="{{ href }}" {% if section == key %}aria-current="page"{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>
     {% if operator_authenticated %}
     <form class="logout" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-      <button>Выйти</button>
+      <button>Sign out</button>
     </form>
     {% endif %}
   </aside>
-  <main id="content">
+  <main id="content" tabindex="-1">
     {% for message in get_flashed_messages() %}
     <div class="notice" role="status">{{ message }}</div>
     {% endfor %}

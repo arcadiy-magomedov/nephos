@@ -55,7 +55,15 @@ final class JpaEnrollmentSession {
         user.getAuthenticatedClientSessions().put(client.getId(), adapter);
         return adapter;
     }
-    void persistClientChanges() { persister.createClientSession(onlineClient, false); }
+    void persistClientChanges() {
+        persister.createClientSession(onlineClient, false);
+        // Token creation can load the offline session before the JPA context is synchronized.
+        var offline = session.sessions().getOfflineUserSession(online.getRealm(), online.getId());
+        if (offline == null) throw new IllegalStateException("Offline enrollment session missing");
+        var cachedClient = offline.getAuthenticatedClientSessionByClient(onlineClient.getClient().getId());
+        if (cachedClient == null) throw new IllegalStateException("Offline enrollment client missing");
+        onlineClient.getNotes().forEach(cachedClient::setNote);
+    }
     void synchronizeOfflineContext() {
         onlineClient.getNotes().forEach(offlineClient::setNote);
         offlineClient.setRedirectUri(onlineClient.getRedirectUri());

@@ -1,21 +1,32 @@
-{% extends "base.html" %}
-{% block title %}Подключить устройство — Nephos{% endblock %}
-{% block content %}
-<section class="card form-card"><h1>Подключить устройство</h1><p class="muted">Пользователь: {{ user.displayName or user.login }}</p>
-{% if invitation %}
-  {% if qr_data %}<img class="qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Одноразовый QR для входа в аккаунт">
-  {% else %}<p class="warning">Приглашение уже выдано, но код не сохранён. Если получение кода не подтверждено, отмените приглашение и создайте новое.</p>{% endif %}
-  <p class="center" id="invitation-state" role="status">{{ invitation.status|invitation_status }}</p>
-  <p class="center muted">Действует до <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_ru }}</time>. <span id="countdown"></span></p>
-  <div id="invitation-monitor" data-url="/users/{{ user.subject }}/invitations/{{ invitation.id }}/status" data-expires="{{ invitation.expiresAt }}"></div>
-  <p class="warning">Код предоставляет доступ к аккаунту. Показывайте его только владельцу устройства. Код используется один раз.</p>
-  <form method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><div class="actions"><button class="danger">Отменить QR</button><a class="button" href="/users/{{ user.subject }}">Открыть устройства</a></div></form>
-  <noscript><p class="hint">Для автоматического отслеживания сканирования нужен JavaScript. Актуальное состояние доступно в карточке пользователя.</p></noscript>
-  <script src="/admin-static/invitation.js" defer></script>
-{% else %}
-  <p class="muted">Пользователь сканирует QR камерой в Nephos или выбирает изображение с кодом. Адрес сервера и учётная запись подключаются автоматически.</p>
-  <p class="warning">Одноразовый код действует 10 минут. Выдавайте код только владельцу аккаунта.</p>
-  <form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions"><a class="button" href="/users/{{ user.subject }}">Отмена</a><button class="primary">Создать QR</button></div></form>
-{% endif %}
-</section>
+{% extends "user.html" %}
+{% block title %}Connect device — Nephos{% endblock %}
+{% block user_overlay %}
+<div class="modal-scrim" aria-hidden="true"></div>
+<dialog class="modal" open aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" data-return-url="/users/{{ user.subject }}#connect-device">
+  <header class="modal-header"><h2 id="dialog-title">Connect device</h2><a class="icon-button" href="/users/{{ user.subject }}#connect-device" aria-label="Close dialog" data-initial-focus>×</a></header>
+  {% if invitation %}
+    {% set terminal = invitation.status in ('used', 'consumed', 'expired', 'cancelled') %}
+    <p id="dialog-description" class="muted">{{ 'The invitation can no longer be used.' if terminal else 'Show the code to the account owner.' }}</p>
+    {% if qr_data and not terminal %}<img class="qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Single-use QR code for signing in">
+    {% elif not terminal %}<p class="warning">This invitation was already issued, but the code was not retained. Cancel it before creating another code.</p>{% endif %}
+    <p class="center status-text {{ 'status-warning' if invitation.status not in ('pending', 'used', 'consumed') }}" id="invitation-state" role="status">{{ invitation.status|invitation_status }}</p>
+    <p class="center hint">Expires <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_utc }}</time>. <span id="countdown"></span></p>
+    <div id="invitation-monitor" data-url="/users/{{ user.subject }}/invitations/{{ invitation.id }}/status" data-expires="{{ invitation.expiresAt }}" data-status="{{ invitation.status }}"></div>
+    {% if not terminal %}<p class="warning" id="qr-warning">This code grants account access. Show it only to the device owner. It can be used once.</p>{% endif %}
+    <form id="cancel-invitation" method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel" data-pending-label="Cancelling..." {% if terminal %}hidden{% endif %}>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="actions single-action"><button class="danger">Cancel QR code</button></div>
+    </form>
+    <div class="actions single-action" id="invitation-finished-actions" {% if not terminal %}hidden{% endif %}><a id="invitation-finished" class="button primary" href="/users/{{ user.subject }}#devices-heading">{{ 'View devices' if invitation.status in ('used', 'consumed') else 'Close' if terminal else 'View devices' }}</a></div>
+    <noscript><p class="hint">Open the user page to check the latest invitation and device status.</p></noscript>
+    <script src="/admin-static/invitation.js" defer></script>
+  {% elif issue_error %}
+    <p id="dialog-description" class="error" role="alert">Unable to get the QR code. If the server response was lost, retry safely and cancel any existing invitation before creating another.</p>
+    <form method="post" data-pending-label="Retrying..."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions single-action"><button class="primary">Retry safely</button></div></form>
+  {% else %}
+    <p id="dialog-description" class="muted">The account owner can scan a single-use QR code in Nephos to connect a device.</p>
+    <p class="warning">The code expires after 10 minutes. Show it only to the account owner.</p>
+    <form method="post" data-pending-label="Creating QR..."><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions single-action"><button class="primary">Create QR code</button></div></form>
+  {% endif %}
+</dialog>
 {% endblock %}

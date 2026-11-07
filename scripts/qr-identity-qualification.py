@@ -153,10 +153,11 @@ def qualify(base, service_key, restart, sql, rotate):
         {"Content-Type": "application/x-www-form-urlencoded"},
     )
     assert refreshed["refresh_token"]
-    refreshed_id = json.loads(base64.urlsafe_b64decode(refreshed["id_token"].split(".")[1] + "=="))
-    assert refreshed_id["iss"] == config["issuer"]
-    assert refreshed_id.get("nonce", first["nonce"]) == first["nonce"]
-    assert refreshed_id["sub"] == subject
+    for token_type in ("access_token", "id_token"):
+        claims = json.loads(base64.urlsafe_b64decode(refreshed[token_type].split(".")[1] + "=="))
+        assert claims.get("iss") == config["issuer"] and claims["sub"] == subject
+        if token_type == "id_token":
+            assert claims.get("nonce", first["nonce"]) == first["nonce"]
     assert exchange(first, 400)["error_description"] in ("session_revoked", "recovery_expired")
 
     second = device(issue())

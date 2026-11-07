@@ -91,7 +91,7 @@ class AdminSession:
             data=urllib.parse.urlencode({"username": "admin", "password": ENV["KEYCLOAK_ADMIN_PASSWORD"]}).encode(),
             headers={"Content-Type": "application/x-www-form-urlencoded", "Origin": IDENTITY},
         )
-        assert "<button>Выйти</button>" in page, "Operator browser-form authentication did not complete."
+        assert "<button>Sign out</button>" in page, "Operator browser-form authentication did not complete."
         self.csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
 
     def request(self, path="/", **kwargs):
