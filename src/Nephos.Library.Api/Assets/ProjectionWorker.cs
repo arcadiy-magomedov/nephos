@@ -1,18 +1,34 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Nephos.ServiceDefaults;
+using RabbitMQ.Client;
 
 namespace Nephos.Library.Api.Assets;
 
-public sealed class ProjectionWorker(IAssetRepository repository, IConfiguration configuration, ILogger<ProjectionWorker> logger) : BackgroundService
+public sealed class ProjectionWorker : BackgroundService
 {
+    private readonly IAssetRepository repository;
+    private readonly ILogger<ProjectionWorker> logger;
+    private readonly Func<CancellationToken, Task<IConnection>> connectBroker;
+
+    public ProjectionWorker(IAssetRepository repository, IConfiguration configuration, ILogger<ProjectionWorker> logger)
+        : this(repository, logger, token => MediaProtocol.ConnectBrokerAsync(configuration, token)) { }
+
+    internal ProjectionWorker(
+        IAssetRepository repository, ILogger<ProjectionWorker> logger, Func<CancellationToken, Task<IConnection>> connectBroker)
+    {
+        this.repository = repository;
+        this.logger = logger;
+        this.connectBroker = connectBroker;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await using var connection = await MediaProtocol.ConnectBrokerAsync(configuration, stoppingToken);
+                await using var connection = await connectBroker(stoppingToken);
                 await using var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
                 while (!stoppingToken.IsCancellationRequested)
                 {
@@ -46,7 +62,8 @@ public sealed class ProjectionWorker(IAssetRepository repository, IConfiguration
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is Npgsql.NpgsqlException or IOException or
-                RabbitMQ.Client.Exceptions.BrokerUnreachableException or RabbitMQ.Client.Exceptions.AlreadyClosedException or TimeoutException)
+                RabbitMQ.Client.Exceptions.BrokerUnreachableException or RabbitMQ.Client.Exceptions.AlreadyClosedException or TimeoutException ||
+                MediaProtocol.IsForcedBrokerShutdown(exception))
             {
                 logger.LogError("Projection worker will reconnect after {ErrorType}", exception.GetType().Name);
             }

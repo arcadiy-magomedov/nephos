@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Exceptions;
 
 namespace Nephos.ServiceDefaults;
 
@@ -23,6 +24,9 @@ public static class MediaProtocol
     public const int ChunkSize = 4 * 1024 * 1024;
     public const long MaxUploadBytes = 8L * 1024 * 1024 * 1024;
     public static readonly ActivitySource Activities = new("Nephos.Media");
+
+    public static bool IsForcedBrokerShutdown(Exception exception) =>
+        exception is OperationInterruptedException { ShutdownReason.ReplyCode: 320 };
 
     public static bool IsInternal(HttpContext context, IConfiguration configuration, string keyName = "Services:Key")
     {
