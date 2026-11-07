@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Подключить устройство — Nephos{% endblock %}
+{% block content %}
+<section class="card form-card"><h1>Подключить устройство</h1><p class="muted">Пользователь: {{ user.displayName or user.login }}</p>
+{% if invitation %}
+  {% if qr_data %}<img class="qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Одноразовый QR для входа в аккаунт">
+  {% else %}<p class="warning">Приглашение уже выдано, но код не сохранён. Если получение кода не подтверждено, отмените приглашение и создайте новое.</p>{% endif %}
+  <p class="center" id="invitation-state" role="status">{{ invitation.status|invitation_status }}</p>
+  <p class="center muted">Действует до <time datetime="{{ invitation.expiresAt }}">{{ invitation.expiresAt|datetime_ru }}</time>. <span id="countdown"></span></p>
+  <div id="invitation-monitor" data-url="/users/{{ user.subject }}/invitations/{{ invitation.id }}/status" data-expires="{{ invitation.expiresAt }}"></div>
+  <p class="warning">Код предоставляет доступ к аккаунту. Показывайте его только владельцу устройства. Код используется один раз.</p>
+  <form method="post" action="/users/{{ user.subject }}/invitations/{{ invitation.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><div class="actions"><button class="danger">Отменить QR</button><a class="button" href="/users/{{ user.subject }}">Открыть устройства</a></div></form>
+  <noscript><p class="hint">Для автоматического отслеживания сканирования нужен JavaScript. Актуальное состояние доступно в карточке пользователя.</p></noscript>
+  <script src="/admin-static/invitation.js" defer></script>
+{% else %}
+  <p class="muted">Пользователь сканирует QR камерой в Nephos или выбирает изображение с кодом. Адрес сервера и учётная запись подключаются автоматически.</p>
+  <p class="warning">Одноразовый код действует 10 минут. Выдавайте код только владельцу аккаунта.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="command" value="{{ command }}"><div class="actions"><a class="button" href="/users/{{ user.subject }}">Отмена</a><button class="primary">Создать QR</button></div></form>
+{% endif %}
+</section>
+{% endblock %}

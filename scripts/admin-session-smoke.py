@@ -40,7 +40,7 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
         )
 
     def signed_in():
-        return "Nephos local administration" in admin.request()
+        return "<button>Выйти</button>" in admin.request()
 
     try:
         alter("refresh")
@@ -51,19 +51,19 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
                     range(4),
                 )
             )
-        assert all("Nephos local administration" in page for page in results), "Concurrent token refresh failed."
+        assert all("<button>Выйти</button>" in page for page in results), "Concurrent token refresh failed."
         subprocess.run(["docker", "restart", args.console_container], check=True, capture_output=True)
         smoke.wait("administration session survives console restart", signed_in)
         if not args.skip_store_outage:
             subprocess.run(["docker", "pause", args.session_container], check=True, capture_output=True)
             try:
                 page = admin.request(expected=503)
-                assert "session service is unavailable" in page
+                assert "Хранилище сессий недоступно" in page
             finally:
                 subprocess.run(["docker", "unpause", args.session_container], check=True, capture_output=True)
             smoke.wait("session service recovers without accepting an unauthenticated request", signed_in)
         alter("expire")
-        assert "session has expired" in admin.request(expected=401)
+        assert "Сессия администратора завершена" in admin.request(expected=401)
         assert "Вход в Nephos" in admin.request()
         print("PASS: concurrent real token refresh, console restart and absolute session expiry")
     finally:
@@ -77,7 +77,9 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
     try:
         alter("refresh")
         with ThreadPoolExecutor(max_workers=4) as pool:
-            reads = [pool.submit(smoke.request, args.base_url + "/", headers=headers) for _ in range(3)]
+            reads = [
+                pool.submit(smoke.request, args.base_url + "/", headers=headers, expected=(200, 401)) for _ in range(3)
+            ]
             logout = pool.submit(
                 smoke.request,
                 args.base_url + "/logout",

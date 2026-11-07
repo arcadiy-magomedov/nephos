@@ -5,6 +5,7 @@ services:
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HOSTNAME: https://${PUBLIC_HOST:?Set PUBLIC_HOST to your canonical DNS hostname}
+      NEPHOS_PUBLIC_ORIGIN: https://${PUBLIC_HOST}
       KC_HOSTNAME_ADMIN: ${PRIVATE_KEYCLOAK_URL:-http://localhost:18081}
   library-api:
     environment:

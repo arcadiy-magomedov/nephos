@@ -22,6 +22,7 @@
   </section>
 </div><div>
   <section class="card"><h2>Медиатеки</h2>{% for library in libraries %}<div class="row"><a href="/libraries/{{ library.id }}">{{ library.name }}</a><span class="hint">{{ 'Личная' if library.id == user.personalLibraryId else 'Участник' }}</span></div>{% else %}<p class="muted">Медиатеки ещё не созданы.</p>{% endfor %}<p class="hint">Медиа сохраняется при отключении аккаунта или отзыве устройства.</p></section>
+  {% if memberships %}<section class="card"><h2>Основания доступа</h2>{% for membership in memberships %}<div class="row"><a href="/libraries/{{ membership.libraryId }}">{{ membership.name }}</a><span>{{ ('member' if membership.scope == 'member' else ('all' if membership.allAssets else 'subset'))|member_access }}{% if membership.scope == 'share' and not membership.allAssets %} · {{ membership.sharedAssetCount }} медиа{% endif %}</span></div>{% endfor %}</section>{% endif %}
   <section class="card"><h2>Подключение по QR</h2><p class="muted">Пользователь сканирует код в Nephos и сразу получает доступ. Email и PIN не нужны.</p><p class="hint">Каждое устройство получает отдельную сессию.</p>{% if user.enabled %}<a class="button primary" href="/users/{{ user.subject }}/invitations/new">Создать QR</a>{% endif %}</section>
 </div></div>
 {% endblock %}

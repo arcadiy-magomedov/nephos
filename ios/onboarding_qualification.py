@@ -7,8 +7,6 @@ import plistlib
 import subprocess
 import sys
 import tempfile
-import threading
-import urllib.parse
 
 from generate_project import oid
 
@@ -16,48 +14,7 @@ IOS = Path(__file__).resolve().parent
 BUNDLE = "app.nephos.ui-qualification"
 
 
-def reauthentication_fixture(workspace, email, stop):
-    """Private host-side bridge; no service key is sent to the app or XCTest."""
-    import smoke
-
-    bridge = workspace / "reauth"
-    try:
-        while not stop.wait(1):
-            if not bridge.with_suffix(".revoke").exists():
-                continue
-            users = smoke.request(
-                smoke.IDENTITY + "/admin/realms/nephos/users?exact=true&email=" + urllib.parse.quote(email),
-                token=smoke.admin_token(),
-            )
-            assert len(users) == 1
-            private = smoke.IDENTITY + "/realms/nephos/nephos-admin"
-            headers = {"X-Nephos-Identity-Service-Key": smoke.ENV["IDENTITY_ADMIN_SERVICE_KEY"]}
-            devices = smoke.request(private + f"/users/{users[0]['id']}/devices", headers=headers)["devices"]
-            assert devices, "The first native login did not establish a device session."
-            for device in devices:
-                smoke.request(
-                    private + f"/users/{users[0]['id']}/devices/{device['id']}",
-                    method="DELETE",
-                    headers=headers,
-                    expected=204,
-                )
-            assert not smoke.request(private + f"/users/{users[0]['id']}/devices", headers=headers)["devices"]
-            bridge.with_suffix(".revoked").touch()
-            break
-        while not stop.wait(1):
-            pending = smoke.request(private + "/pin-requests", headers=headers)["requests"]
-            pin = next((item["pin"] for item in pending if item["email"] == email), None)
-            if pin:
-                path = bridge.with_suffix(".next")
-                path.touch(mode=0o600)
-                path.write_text(pin)
-                path.replace(bridge.with_suffix(".pin"))
-                return
-    except Exception:
-        bridge.with_suffix(".error").write_text("Private reauthentication fixture failed.")
-
-
-def project(workspace):
+def project(workspace, test_sources=None, app_sources=None):
     objects = {}
 
     def add(identifier, isa, **values):
@@ -83,10 +40,11 @@ def project(workspace):
     targets, products, files = [], [], []
     for name, is_test in [("NephosUIQualification", False), ("OnboardingUITests", True)]:
         sources = (
-            [IOS / "Qualification/OnboardingUITests.swift"]
+            (test_sources or [IOS / "Qualification/OnboardingUITests.swift"])
             if is_test
             else sorted(path for path in (IOS / "Nephos").rglob("*.swift") if path.name != "NephosApp.swift")
             + [IOS / "Qualification/UIQualification.swift"]
+            + (app_sources or [])
         )
         builds = []
         for path in sources:
@@ -218,6 +176,7 @@ def project(workspace):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulator", required=True)
+    parser.add_argument("--qr-image", type=Path, help="Fresh real QR invitation image for native exchange/recovery.")
     parser.add_argument("--base-url", default="")
     parser.add_argument("--certificate-error-url", default="")
     parser.add_argument(
@@ -233,32 +192,28 @@ def main():
     )
     parser.add_argument("--discovery", action="store_true", help="Also require the base URL's real LAN announcement.")
     args = parser.parse_args()
-    signin_pin = ""
-    if args.complete_signin:
-        if args.backup or not args.signin_email:
-            parser.error("--complete-signin requires a disposable --signin-email and onboarding mode.")
-        sys.path.insert(0, str(IOS.parent / "scripts"))
-        import smoke
-
-        smoke.request(
-            smoke.IDENTITY + "/realms/nephos/nephos-admin/request-pin",
-            method="POST",
-            data={"email": args.signin_email, "clientId": "nephos-ios"},
+    if args.qr_image:
+        if args.backup:
+            parser.error("--qr-image is an enrollment qualification, not backup mode.")
+        subprocess.run(
+            [
+                sys.executable,
+                str(IOS / "qr_qualification.py"),
+                "--simulator",
+                args.simulator,
+                "--qr-image",
+                str(args.qr_image),
+            ],
+            check=True,
         )
-        pending = smoke.request(
-            smoke.IDENTITY + "/realms/nephos/nephos-admin/pin-requests",
-            headers={"X-Nephos-Identity-Service-Key": smoke.ENV["IDENTITY_ADMIN_SERVICE_KEY"]},
-        )["requests"]
-        signin_pin = next(item["pin"] for item in pending if item["email"] == args.signin_email)
-    if not args.backup and (not args.base_url or not args.certificate_error_url or not args.signin_email):
-        parser.error("Onboarding checks require --base-url, --certificate-error-url and --signin-email.")
+        return
+    if args.complete_signin or args.discovery:
+        parser.error("Primary login now uses QR. Use --qr-image for real sign-in and recovery qualification.")
     scratch = IOS / ".test-work"
     scratch.mkdir(exist_ok=True)
     (IOS / ".logs").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="onboarding-ui-", dir=scratch) as directory:
         workspace = Path(directory)
-        stop_fixture = threading.Event()
-        fixture = None
         destination = project(workspace)
         common = [
             "xcodebuild",
@@ -303,19 +258,10 @@ def main():
                         "NEPHOS_UI_BASE_URL": args.base_url.rstrip("/"),
                         "NEPHOS_UI_BAD_CERT_URL": args.certificate_error_url.rstrip("/"),
                         "NEPHOS_UI_SIGNIN_EMAIL": args.signin_email,
-                        "NEPHOS_UI_SIGNIN_PIN": signin_pin,
                         "NEPHOS_UI_DISCOVERY": "1" if args.discovery else "0",
-                        "NEPHOS_UI_REAUTH_BRIDGE": str(workspace / "reauth") if args.complete_signin else "",
                     }
                 )
             runfile.write_bytes(plistlib.dumps(run))
-            if args.complete_signin:
-                fixture = threading.Thread(
-                    target=reauthentication_fixture,
-                    args=(workspace, args.signin_email, stop_fixture),
-                    daemon=True,
-                )
-                fixture.start()
             subprocess.run(
                 [
                     "xcodebuild",
@@ -334,9 +280,6 @@ def main():
                 check=True,
             )
         finally:
-            stop_fixture.set()
-            if fixture:
-                fixture.join(timeout=15)
             subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE], check=False)
             subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE + ".uitests.xctrunner"], check=False)
 

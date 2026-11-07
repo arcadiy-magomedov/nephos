@@ -57,6 +57,7 @@ public final class LoginPinGrant extends OAuth2GrantTypeBase {
         }
 
         try {
+            new EnrollmentStore(session).lock();
             user = session.users().getUserById(realm, user.getId());
             if (user == null || !user.isEnabled()) return invalidGrant();
             String attemptsKey = PinSupport.attemptsKey(realm.getName(), user.getId());
@@ -105,23 +106,23 @@ public final class LoginPinGrant extends OAuth2GrantTypeBase {
             authSession.setAuthenticatedUser(user);
             AuthenticationManager.setClientScopesInSession(session, authSession);
 
-            AuthenticationProcessor processor = new AuthenticationProcessor();
-            processor.setAuthenticationSession(authSession)
-                    .setFlowPath("token")
-                    .setConnection(clientConnection)
-                    .setEventBuilder(event)
-                    .setRealm(realm)
-                    .setSession(session)
-                    .setUriInfo(session.getContext().getUri())
-                    .setRequest(request);
-            ClientSessionContext clientSessionCtx = processor.attachSession();
-            UserSessionModel userSession = processor.getUserSession();
+            JpaEnrollmentSession enrollment = new JpaEnrollmentSession(session, user, client,
+                    java.util.UUID.randomUUID().toString(), deviceName.trim(),
+                    new EnrollmentStore(session).epoch(user.getId()));
+            UserSessionModel userSession = enrollment.online;
+            ClientSessionContext clientSessionCtx = AuthenticationProcessor.attachSession(authSession,
+                    userSession, session, realm, clientConnection, event);
             userSession.setNote(PinSupport.DEVICE_ID_NOTE, deviceId.toLowerCase());
             userSession.setNote(PinSupport.DEVICE_NAME_NOTE, deviceName.trim());
             clientSessionCtx.setAttribute(OIDCLoginProtocol.NONCE_PARAM, nonce);
+            enrollment.onlineClient.setNote(OIDCLoginProtocol.NONCE_PARAM, nonce);
+            enrollment.synchronizeOfflineContext();
             updateUserSessionFromClientAuth(userSession);
             event.user(user).session(userSession).detail("auth_method", "nephos_login_pin");
-            return createTokenResponse(user, userSession, clientSessionCtx, scope, false, null);
+            Response result = createTokenResponse(user, userSession, clientSessionCtx, scope, false, null);
+            enrollment.persistClientChanges();
+            QrGrant.prepare(session);
+            return result;
         } finally {
             singleUse.remove(lockKey);
         }

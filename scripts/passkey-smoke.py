@@ -32,6 +32,7 @@ class Callback(BaseHTTPRequestHandler):
 
 def main():
     issuer = smoke.request(smoke.API + "/v1/config")["issuer"]
+    mail_url = os.environ.get("NEPHOS_TEST_MAIL_URL", "http://localhost:18083")
     admin_url = smoke.IDENTITY + "/admin/realms/nephos"
     admin = smoke.AdminSession()
     username = "passkey-smoke-" + uuid.uuid4().hex
@@ -66,14 +67,14 @@ def main():
             return next(
                 (
                     message
-                    for message in smoke.request("http://localhost:18083/api/v1/messages")["messages"]
+                    for message in smoke.request(mail_url + "/api/v1/messages")["messages"]
                     if any(r["Address"] == username + "@example.test" for r in message["To"])
                 ),
                 None,
             )
 
         message = smoke.wait("enrollment email delivered", delivered)
-        mail = smoke.request("http://localhost:18083/api/v1/message/" + message["ID"])
+        mail = smoke.request(mail_url + "/api/v1/message/" + message["ID"])
         links = re.findall(r'href="([^"]+)"', mail["HTML"])
         invitation = next(html.unescape(link) for link in links if "/login-actions/action-token?" in link)
         smoke.request(
@@ -211,7 +212,7 @@ def main():
                 return candidate if candidate and candidate["ID"] != message["ID"] else None
 
             replacement = smoke.wait("operator recovery invitation delivered", replacement_delivered)
-            recovery = smoke.request("http://localhost:18083/api/v1/message/" + replacement["ID"])
+            recovery = smoke.request(mail_url + "/api/v1/message/" + replacement["ID"])
             recovery_link = next(
                 html.unescape(link)
                 for link in re.findall(r'href="([^"]+)"', recovery["HTML"])
@@ -242,6 +243,8 @@ def main():
             smoke.sql(
                 """
                 CREATE TEMP TABLE fixture_libraries AS SELECT library_id FROM library_members WHERE subject=:'subject';
+                DELETE FROM administration_events WHERE operation_id IN(SELECT id FROM administration_operations WHERE subject=:'subject');
+                DELETE FROM administration_operations WHERE subject=:'subject';
                 DELETE FROM library_members WHERE subject=:'subject';
                 DELETE FROM principals WHERE subject=:'subject';
                 DELETE FROM libraries WHERE id IN (SELECT library_id FROM fixture_libraries);

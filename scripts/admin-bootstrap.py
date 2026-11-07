@@ -127,6 +127,14 @@ def main():
         "serviceAccountsEnabled": False,
     }
     api_path = "/admin/realms/nephos/clients"
+    media_realm = call("/admin/realms/nephos", token=token)
+    listeners = list(dict.fromkeys([*media_realm.get("eventsListeners", []), "nephos-enrollment"]))
+    call(
+        "/admin/realms/nephos",
+        {"eventsListeners": listeners, "adminEventsEnabled": True, "adminEventsDetailsEnabled": False},
+        token,
+        "PUT",
+    )
     api_clients = call(api_path + "?clientId=" + api_client_id, token=token)
     if api_clients:
         call(api_path + "/" + api_clients[0]["id"], api_definition, token, "PUT")

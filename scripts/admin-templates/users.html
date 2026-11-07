@@ -13,7 +13,7 @@
   </form>
   <p class="hint">Найдено: {{ data.total }}. {% if data.observedAt %}Состояние обновлено: <time datetime="{{ data.observedAt }}">{{ data.observedAt|datetime_ru }}</time>.{% endif %}</p>
   <div class="table-wrap"><table><thead><tr><th scope="col">Пользователь</th><th scope="col">Доступ</th><th scope="col">Создание аккаунта</th><th scope="col"></th></tr></thead><tbody>
-  {% for user in data.items %}
+  {% for user in data["items"] %}
     <tr><td><div class="name"><span class="avatar" aria-hidden="true">{{ (user.displayName or user.login)[:1] }}</span><div><strong>{{ user.displayName or user.login }}</strong><small>@{{ user.login }}</small></div></div></td><td><span class="pill {{ '' if user.enabled else 'off' }}">{{ 'Включён' if user.enabled else 'Отключён' }}</span></td><td>{{ user.provisioningStatus|operation_status }}</td><td><a href="/users/{{ user.subject }}">Открыть<span class="hint"> {{ user.displayName or user.login }}</span></a></td></tr>
   {% else %}<tr><td colspan="4"><div class="empty"><h2>Совпадений нет</h2><p class="muted">Измените запрос или фильтр доступа.</p></div></td></tr>{% endfor %}
   </tbody></table></div>

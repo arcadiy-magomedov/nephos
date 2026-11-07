@@ -6,7 +6,7 @@
   <title>{% block title %}Nephos{% endblock %}</title>
   <link rel="stylesheet" href="/admin-static/admin.css">
 </head>
-<body class="{{ '' if session.get('token') else 'signed-out' }}">
+<body class="{{ '' if operator_authenticated else 'signed-out' }}">
   <a class="skip" href="#content">К содержимому</a>
   <aside>
     <a class="brand" href="/">Nephos</a>
@@ -15,7 +15,7 @@
       <a href="{{ href }}" {% if section == key %}aria-current="page"{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>
-    {% if session.get("token") %}
+    {% if operator_authenticated %}
     <form class="logout" method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
       <button>Выйти</button>
