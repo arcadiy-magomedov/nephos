@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} — Nephos{% endblock %}
+{% block content %}
+<section class="card form-card"><h1>{{ heading }}</h1><p class="warning">{{ explanation }}</p><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}">{% for name,value in fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<div class="actions"><a class="button" href="{{ return_url }}">Отмена</a><button class="{{ 'danger' if destructive else 'primary' }}">{{ button }}</button></div></form></section>
+{% endblock %}

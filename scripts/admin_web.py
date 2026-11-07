@@ -1,6 +1,6 @@
 """Private operator UI: Keycloak OIDC, server-side sessions, and CSRF-protected actions."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import time
@@ -39,7 +39,7 @@ store = Redis(
     retry=Retry(NoBackoff(), 0),
     max_connections=16,
 )
-app = Flask(__name__, template_folder="admin-templates")
+app = Flask(__name__, template_folder="admin-templates", static_folder="admin-static")
 app.config.update(
     SECRET_KEY=os.environ["ADMIN_SESSION_SECRET"],
     TRUSTED_HOSTS=[urllib.parse.urlsplit(PUBLIC_URL).hostname, "localhost", "127.0.0.1", "[::1]"],
@@ -114,6 +114,50 @@ CLAIMS = {
 }
 
 
+@app.template_filter("datetime_ru")
+def datetime_ru(value):
+    if not value:
+        return "Нет данных"
+    return (
+        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        .astimezone(timezone.utc)
+        .strftime("%d.%m.%Y %H:%M UTC")
+    )
+
+
+@app.template_filter("operation_status")
+def operation_status(value):
+    return {
+        "completed": "Готово",
+        "pending": "Выполняется",
+        "running": "Выполняется",
+        "failed": "Требуется повтор",
+        "blocked": "Заблокировано",
+    }.get(value, "Состояние не подтверждено")
+
+
+@app.template_filter("invitation_status")
+def invitation_status(value):
+    return {
+        "pending": "Ожидает сканирования",
+        "used": "Устройство подключено",
+        "consumed": "Устройство подключено",
+        "expired": "Срок действия истёк",
+        "cancelled": "Отменено",
+    }.get(value, "Состояние не подтверждено")
+
+
+@app.template_filter("member_access")
+def member_access(value):
+    return {
+        "owner": "Владелец · прямой участник",
+        "member": "Прямой участник",
+        "shared": "Предоставленный доступ к медиа",
+        "all": "Обмен всеми медиа",
+        "subset": "Обмен выбранными медиа",
+    }.get(value, "Основание не подтверждено")
+
+
 def error_page(message, status):
     return render_template("error.html", message=message), status
 
@@ -164,7 +208,7 @@ def security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'none'; style-src 'unsafe-inline'; "
+        "default-src 'none'; style-src 'self'; img-src 'self' data:; "
         f"form-action 'self' {IDENTITY_PUBLIC_URL}; frame-ancestors 'none'; base-uri 'none'"
     )
     return response

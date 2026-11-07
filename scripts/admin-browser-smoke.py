@@ -61,7 +61,7 @@ def main():
                 response = page.goto(base + "/")
                 assert response.status == 200
                 assert "www-authenticate" not in response.headers
-                page.get_by_role("link", name="Sign in", exact=True).click()
+                page.get_by_role("link", name="Войти", exact=True).click()
                 expect(page.locator("#username")).to_be_visible()
                 assert page.url.startswith("http://localhost:18081/realms/master/")
 
@@ -114,20 +114,20 @@ with app.test_request_context():
                 with os.fdopen(descriptor, "w") as output:
                     json.dump(claims, output)
             page.reload()
-            expect(page.get_by_role("button", name="Sign out")).to_be_visible()
+            expect(page.get_by_role("button", name="Выйти")).to_be_visible()
             if args.screenshots:
                 page.screenshot(path=str(args.screenshots / "operator-console.png"), full_page=True)
             denied = context.request.post(base + "/logout", form={}, headers={"Origin": base})
             assert denied.status == 403
             page.reload()
-            expect(page.get_by_role("button", name="Sign out")).to_be_visible()
-            page.get_by_role("button", name="Sign out").click()
-            expect(page.get_by_role("link", name="Sign in", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Выйти")).to_be_visible()
+            page.get_by_role("button", name="Выйти").click()
+            expect(page.get_by_role("link", name="Войти", exact=True)).to_be_visible()
             replay = browser.new_context()
             replay.add_cookies(old_cookies)
             replay_page = replay.new_page()
             replay_page.goto(base + "/")
-            expect(replay_page.get_by_role("link", name="Sign in", exact=True)).to_be_visible()
+            expect(replay_page.get_by_role("link", name="Войти", exact=True)).to_be_visible()
             replay.close()
 
             smoke.request(

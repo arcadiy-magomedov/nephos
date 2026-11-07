@@ -12,7 +12,7 @@ import smoke
 base = os.environ.get("NEPHOS_ADMIN_BASE_URL", "http://localhost:18082")
 admin_url = smoke.IDENTITY + "/admin/realms/nephos"
 smoke.wait("private administration ready", lambda: smoke.request(base + "/"))
-assert "Sign in" in smoke.request(base + "/")
+assert "Войти" in smoke.request(base + "/")
 smoke.request(smoke.API + "/internal/admin/state", expected=404)
 realm = smoke.request(admin_url, token=smoke.admin_token())
 if not realm.get("smtpServer"):

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Медиатеки — Nephos{% endblock %}
+{% block content %}
+<div class="top"><div><h1>Медиатеки</h1><p class="muted">Личные коллекции, владельцы и действующие права доступа.</p></div><a class="button primary" href="/libraries/new">Создать медиатеку</a></div>
+<section class="card">
+  <form class="toolbar"><label>Поиск<input name="search" value="{{ search }}" maxlength="200"></label><button>Найти</button><a class="button" href="/libraries">Сбросить</a></form>
+  <p class="hint">Найдено: {{ data.total }}</p>
+  <div class="table-wrap"><table><thead><tr><th scope="col">Медиатека</th><th scope="col">Владелец</th><th scope="col"></th></tr></thead><tbody>{% for library in data.items %}<tr><td>{{ library.name }}</td><td>{{ library.ownerName or 'Владелец не назначен' }}</td><td><a href="/libraries/{{ library.id }}">Открыть {{ library.name }}</a></td></tr>{% else %}<tr><td colspan="3"><div class="empty"><h2>{{ 'Совпадений нет' if search else 'Пока нет медиатек' }}</h2><p class="muted">Личная медиатека появляется при создании пользователя.</p></div></td></tr>{% endfor %}</tbody></table></div>
+  <div class="pagination"><a href="{{ first_url }}">Первая страница</a>{% if next_url %}<a class="button" href="{{ next_url }}">Следующая страница</a>{% endif %}</div>
+</section>
+{% endblock %}

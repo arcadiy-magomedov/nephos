@@ -13,6 +13,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  required:
+    name: Required CI
+    needs: [quality, backend, integration, faces, ios]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every qualification to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+
   quality:
     name: Lint and secret checks
     runs-on: ubuntu-latest

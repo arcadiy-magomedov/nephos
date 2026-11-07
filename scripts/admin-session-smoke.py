@@ -64,7 +64,7 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
             smoke.wait("session service recovers without accepting an unauthenticated request", signed_in)
         alter("expire")
         assert "session has expired" in admin.request(expected=401)
-        assert "Welcome to Nephos" in admin.request()
+        assert "Вход в Nephos" in admin.request()
         print("PASS: concurrent real token refresh, console restart and absolute session expiry")
     finally:
         if signed_in():
@@ -87,7 +87,7 @@ store.set(key, app.session_interface.serializer.encode(data), ex=store.ttl(key))
             logout.result()
             for result in reads:
                 result.result()
-        assert "Welcome to Nephos" in smoke.request(args.base_url + "/", headers=headers)
+        assert "Вход в Nephos" in smoke.request(args.base_url + "/", headers=headers)
         print("PASS: in-flight refresh/read requests cannot resurrect a logged-out session")
     finally:
         if signed_in():

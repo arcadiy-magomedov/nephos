@@ -86,7 +86,7 @@ class AdminAuthTests(unittest.TestCase):
         response = self.get()
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("WWW-Authenticate", response.headers)
-        self.assertIn(b"Sign in", response.data)
+        self.assertIn("Войти", response.get_data(as_text=True))
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(self.client.post("/", base_url=self.origin).status_code, 403)
         self.assertEqual(self.client.post("/", base_url=self.origin, headers={"Origin": self.origin}).status_code, 403)
