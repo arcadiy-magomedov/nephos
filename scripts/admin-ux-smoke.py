@@ -107,7 +107,9 @@ def main():
             page.locator("#kc-login").click()
             page.wait_for_url(base + "/users")
             page.get_by_role("link", name="Create user", exact=True).click()
+            page.wait_for_url(base + "/users/new")
             page.set_viewport_size({"width": 375, "height": 812})
+            expect(page.get_by_role("button", name="Create", exact=True)).to_have_css("flex-basis", "100%")
             cancel, create = (
                 page.get_by_role("link", name="Cancel", exact=True).bounding_box(),
                 page.get_by_role("button", name="Create", exact=True).bounding_box(),

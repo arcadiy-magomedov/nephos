@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />
+    <InternalsVisibleTo Include="Nephos.Tests" />
   </ItemGroup>
 
   <PropertyGroup>

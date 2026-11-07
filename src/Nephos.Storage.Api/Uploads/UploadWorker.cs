@@ -29,7 +29,8 @@ public sealed class UploadWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is Npgsql.NpgsqlException or IOException or
-                RabbitMQ.Client.Exceptions.BrokerUnreachableException or RabbitMQ.Client.Exceptions.AlreadyClosedException or TimeoutException)
+                RabbitMQ.Client.Exceptions.BrokerUnreachableException or RabbitMQ.Client.Exceptions.AlreadyClosedException or TimeoutException ||
+                MediaProtocol.IsForcedBrokerShutdown(exception))
             {
                 logger.LogError("Durable upload worker will retry after {ErrorType}", exception.GetType().Name);
             }
