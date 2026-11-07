@@ -8,6 +8,9 @@
   "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
   "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
   "mobilePageId": "e827db53-5187-4b5b-9a4a-14097bc19764",
+  "userFoundationsPageId": "c3b4bb7d-05de-803c-8008-e93747c75115",
+  "userComponentsPageId": "c3b4bb7d-05de-803c-8008-e937481380d4",
+  "userPreviewsPageId": "c3b4bb7d-05de-803c-8008-e93748606044",
   "boards": [
     {
       "id": "acd17e70-ca48-433e-afd9-e0b225e2c73f",
@@ -87,7 +90,7 @@
   "arrows": 20,
   "adminArrows": 12,
   "mobileArrows": 8,
-  "components": 9,
+  "components": 15,
   "componentAssets": [
     "Button",
     "Text field",
@@ -97,9 +100,15 @@
     "QR icon",
     "QR placeholder",
     "Icon button",
-    "Device row"
+    "Device row",
+    "Filter chip",
+    "User text field",
+    "User tab item",
+    "Media tile",
+    "Status badge",
+    "User icon button"
   ],
-  "variantComponents": 52,
+  "variantComponents": 135,
   "buttonVariantProperties": [
     "Type",
     "State",

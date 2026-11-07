@@ -14,6 +14,18 @@
       "mobilePageId": "e827db53-5187-4b5b-9a4a-14097bc19764",
       "export": "exports/nephos-admin-user-qr.penpot",
       "notes": "Draft only. Native token foundations and reusable component variants support separate admin and light/dark mobile flow canvases. Changes require explicit user approval."
+    },
+    {
+      "id": "nephos-user-system",
+      "title": "User-facing foundations and components",
+      "status": "draft",
+      "approval": null,
+      "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+      "foundationsPageId": "c3b4bb7d-05de-803c-8008-e93747c75115",
+      "componentsPageId": "c3b4bb7d-05de-803c-8008-e937481380d4",
+      "previewsPageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+      "export": "exports/nephos-user-system.penpot",
+      "notes": "Draft only. Neutral light and dark roles, reusable variants and gallery examples are not yet adopted by the shipped iOS app."
     }
   ]
 }
