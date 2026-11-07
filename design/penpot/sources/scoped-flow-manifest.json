@@ -1,0 +1,57 @@
+{
+  "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+  "projectId": "2a4e1ac4-5a73-80ac-8008-e8cd57443e12",
+  "teamId": "2a4e1ac4-5a73-80ac-8008-e8cce365ad2f",
+  "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+  "status": "draft",
+  "approval": null,
+  "boards": [
+    {
+      "id": "785ed2f1-e8fc-40bc-a389-cda85bf9aa64",
+      "name": "Системный выбор изображения"
+    },
+    {
+      "id": "6b663c76-b355-44d0-8e66-406ea6c327ca",
+      "name": "05 · QR выдан"
+    },
+    {
+      "id": "acd17e70-ca48-433e-afd9-e0b225e2c73f",
+      "name": "01 · Пользователи"
+    },
+    {
+      "id": "eb3737c0-080d-4c85-bf31-85096778bfca",
+      "name": "02 · Создание пользователя"
+    },
+    {
+      "id": "74182c00-31a1-48c0-9a23-e8b2d956e53a",
+      "name": "04 · Создать QR"
+    },
+    {
+      "id": "258f936e-5174-47d1-be8d-94b13e207e26",
+      "name": "03 · Пользователь создан"
+    },
+    {
+      "id": "676e580f-ec48-4f82-8944-b6aceb56dd13",
+      "name": "08 · Вход выполняется"
+    },
+    {
+      "id": "a0fadb9e-10ba-4fad-90af-f8c12fed8d46",
+      "name": "07 · Камера · автоматическое распознавание"
+    },
+    {
+      "id": "5c0323f6-e9f0-441f-88bf-6bde355824c1",
+      "name": "06 · iOS — вход"
+    },
+    {
+      "id": "2e42163a-8de5-4809-8883-23d69fd84f1f",
+      "name": "Ошибка · QR не получен"
+    },
+    {
+      "id": "15dcd862-60ec-42b3-b539-7b51dc33b25e",
+      "name": "Ошибка QR"
+    }
+  ],
+  "arrows": 11,
+  "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
+  "components": 9
+}

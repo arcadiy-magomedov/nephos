@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "sourceOfTruth": "Penpot",
+  "designs": [
+    {
+      "id": "nephos-admin-user-qr",
+      "title": "Создание пользователя и вход по QR",
+      "status": "draft",
+      "approval": null,
+      "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+      "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+      "export": "exports/nephos-admin-user-qr.penpot",
+      "notes": "Draft only. Changes require explicit user approval; preserve approved versions before replacing them."
+    }
+  ]
+}
