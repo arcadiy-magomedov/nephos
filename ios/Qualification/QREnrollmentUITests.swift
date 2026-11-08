@@ -79,13 +79,15 @@ final class QREnrollmentUITests: XCTestCase {
     }
 
     func testLightAndDarkLandingSupportLargestDynamicTypeAndLandscape() throws {
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
         for theme in ["light", "dark"] {
             let app = app(screen: "onboarding-flow")
             app.launchEnvironment["NEPHOS_UI_THEME"] = theme
             app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
             app.launch()
             XCTAssertTrue(app.staticTexts["Nephos"].waitForExistence(timeout: 20))
-            app.swipeUp()
+            scrollToPhotoPicker(in: app)
             XCTAssertTrue(app.buttons["onboarding.scanQR"].isHittable)
             XCTAssertTrue(app.buttons["onboarding.importQR"].isHittable)
             let portrait = XCTAttachment(screenshot: app.screenshot())
@@ -93,11 +95,25 @@ final class QREnrollmentUITests: XCTestCase {
             portrait.lifetime = .keepAlways
             add(portrait)
             XCUIDevice.shared.orientation = .landscapeLeft
-            app.swipeUp()
-            XCTAssertTrue(app.buttons["onboarding.importQR"].isHittable)
+            let landscape = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: app)
+            wait(for: [landscape], timeout: 10)
+            scrollToPhotoPicker(in: app)
+            let rotated = XCTAttachment(screenshot: app.screenshot())
+            rotated.name = "sign-in-\(theme)-large-text-landscape"
+            rotated.lifetime = .keepAlways
+            add(rotated)
             XCUIDevice.shared.orientation = .portrait
             app.terminate()
         }
+    }
+    private func scrollToPhotoPicker(in app: XCUIApplication) {
+        let picker = app.buttons["onboarding.importQR"]
+        for _ in 0..<5 {
+            if picker.isHittable { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(picker.isHittable, app.debugDescription)
     }
     private func require(_ element: XCUIElement, in app: XCUIApplication, stage: String, timeout: TimeInterval) {
         guard element.waitForExistence(timeout: timeout) else {
