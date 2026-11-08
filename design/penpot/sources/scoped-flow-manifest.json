@@ -7,9 +7,21 @@
   "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
   "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
   "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+  "adminPageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
   "userFoundationsPageId": "c3b4bb7d-05de-803c-8008-e93747c75115",
   "userComponentsPageId": "c3b4bb7d-05de-803c-8008-e937481380d4",
   "userPreviewsPageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+  "mobilePageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+  "galleryBoard": {
+    "id": "f6ab4ffa-9212-809d-8008-e938a09902e2",
+    "name": "User app previews",
+    "screens": [
+      "Light · Library",
+      "Dark · Library",
+      "Dark · Selection",
+      "Light · Small phone"
+    ]
+  },
   "boards": [
     {
       "id": "acd17e70-ca48-433e-afd9-e0b225e2c73f",
@@ -54,35 +66,35 @@
   ],
   "mobileBoards": [
     {
-      "id": "03631c44-246c-4676-84be-6158e7376ff9",
+      "id": "48c9ca24-bf06-448b-a017-a83d09e30f1b",
       "name": "Light · 01 · Sign in"
     },
     {
-      "id": "3d52d667-49f1-4300-b61e-e22379818c4e",
+      "id": "29e9c4af-200e-40fe-9749-2b46b7037b28",
       "name": "Light · 02 · Scan"
     },
     {
-      "id": "04cf657a-abb8-41f8-9242-4e8ed7b9f491",
+      "id": "2b705607-a281-4464-8cbc-c16531f4ec56",
       "name": "Light · 03 · Signing in"
     },
     {
-      "id": "9dc92cc1-4106-449f-acae-7a284e1ea9eb",
+      "id": "9bfedd63-2b37-45b3-ac2e-fb8f1615184d",
       "name": "Light · QR error"
     },
     {
-      "id": "82703856-4b1f-4968-9fa0-2b1865b1bb37",
+      "id": "48324ed5-c592-4543-83d7-0406411d7c47",
       "name": "Dark · 01 · Sign in"
     },
     {
-      "id": "23c47065-eb25-4137-a96d-a20835e63cf4",
+      "id": "442b18de-fdc9-4dce-b22a-de2ae8738479",
       "name": "Dark · 02 · Scan"
     },
     {
-      "id": "bd258ccd-159b-439d-9412-87bad5a8d7dc",
+      "id": "3b8bfee0-d674-4592-963d-1957e6cfcfce",
       "name": "Dark · 03 · Signing in"
     },
     {
-      "id": "251f5113-abcf-4af8-b7fc-e779c33507f0",
+      "id": "5c03644e-f3b4-44f7-aeb0-d04e33912805",
       "name": "Dark · QR error"
     }
   ],
@@ -118,19 +130,10 @@
     "admin": 23,
     "mobile": 10
   },
-  "combinedFlowsPageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
-  "flows": [
+  "adminFlows": [
     {
       "name": "Flow 2",
       "startingBoard": "05 · Connected devices"
-    },
-    {
-      "name": "Mobile · dark QR sign-in",
-      "startingBoard": "Dark · 01 · Sign in"
-    },
-    {
-      "name": "Mobile · light QR error",
-      "startingBoard": "Light · QR error"
     },
     {
       "name": "Admin · QR issuance error",
@@ -145,10 +148,6 @@
       "startingBoard": "07 · Revoking device"
     },
     {
-      "name": "Mobile · dark QR error",
-      "startingBoard": "Dark · QR error"
-    },
-    {
       "name": "Flow 1",
       "startingBoard": "04 · QR modal"
     },
@@ -161,12 +160,26 @@
       "startingBoard": "01 · Users"
     },
     {
+      "name": "Flow 5",
+      "startingBoard": "08 · Device revoked"
+    }
+  ],
+  "mobileFlows": [
+    {
       "name": "Mobile · light QR sign-in",
       "startingBoard": "Light · 01 · Sign in"
     },
     {
-      "name": "Flow 5",
-      "startingBoard": "08 · Device revoked"
+      "name": "Mobile · light QR error",
+      "startingBoard": "Light · QR error"
+    },
+    {
+      "name": "Mobile · dark QR sign-in",
+      "startingBoard": "Dark · 01 · Sign in"
+    },
+    {
+      "name": "Mobile · dark QR error",
+      "startingBoard": "Dark · QR error"
     }
   ]
 }
