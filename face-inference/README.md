@@ -4,6 +4,10 @@ This is an independently deployable ASP.NET Core/.NET 10 API/worker with explici
 Npgsql repositories, its own PostgreSQL database, and a private CPU inference
 container. It does **not** make the entire platform complete.
 
+For a reproducible, offline comparison of SFace, InsightFace ArcFace and CVLFace
+AdaFace IR101 on public fixtures, see [the experiment report](BENCHMARK.md).
+Candidate licensing and the small sample prevent an automatic production switch.
+
 ## What runs
 
 * Actual YuNet detection, five-landmark alignment and SFace 128-dimensional,
