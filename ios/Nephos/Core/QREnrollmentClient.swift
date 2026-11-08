@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 enum QREnrollmentClient {
     static let grant = "urn:nephos:params:oauth:grant-type:qr"
@@ -9,6 +8,7 @@ enum QREnrollmentClient {
         let issuer: String
         let clientId: String
         let grantType: String
+        let persistentLogin: PersistentLoginConfiguration?
     }
     private struct Challenge: Decodable, Sendable {
         let challengeId: String
@@ -27,14 +27,13 @@ enum QREnrollmentClient {
         let origin = try URLPolicy.validate(qr.origin)
         let config = try await HTTP.json(
             ServerConfig.self, HTTP.request(origin.appendingPathComponent("v1/config")))
-        guard !config.serverId.isEmpty, config.clientId == "nephos-ios",
-            config.chunkSize == 4_194_304, (1...8_589_934_592).contains(config.maxUploadBytes)
+        guard !config.serverId.isEmpty, config.clientId == "nephos-ios"
         else { throw ClientError.invalid("The server advertised an unsupported authentication contract.") }
         let issuer = try URLPolicy.validate(config.issuer)
         guard URLPolicy.sameOrigin(origin, issuer), issuer.absoluteString == config.issuer else {
             throw ClientError.invalid("The sign-in issuer is outside the QR's trusted HTTPS origin.")
         }
-        let connection = Connection(baseURL: origin, config: config, allowDevelopmentHTTP: false)
+        var connection = Connection(baseURL: origin, config: config, allowDevelopmentHTTP: false)
         _ = try await AuthSession.discovery(connection)
         let enrollment = try await HTTP.json(
             Configuration.self, HTTP.request(issuer.appendingPathComponent("nephos-admin/enrollment/config")))
@@ -42,11 +41,14 @@ enum QREnrollmentClient {
             enrollment.issuer == config.issuer, enrollment.clientId == config.clientId,
             enrollment.grantType == grant
         else { throw ClientError.invalid("The server's QR enrollment configuration does not match this code.") }
+        guard enrollment.persistentLogin?.supportsDPoP == true else {
+            throw ClientError.invalid("This server has not enabled device-bound sign-in. Contact your administrator.")
+        }
+        connection.persistentLogin = enrollment.persistentLogin
         try Task.checkCancellation()
         return connection
     }
 
-    @MainActor
     static func exchange(_ pending: PendingEnrollment) async throws -> Credentials {
         let discovery = try await AuthSession.discovery(pending.connection)
         let requestID = pending.requestID.uuidString.lowercased()
@@ -72,16 +74,12 @@ enum QREnrollmentClient {
             "device_name": pending.deviceName,
             "nonce": pending.nonce, "scope": "openid offline_access",
         ]
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
-        let body = fields.sorted { $0.key < $1.key }.map {
-            "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
-        }.joined(separator: "&")
-        let tokens = try JSONDecoder().decode(
-            TokenResponse.self,
-            from: await response(
-                HTTP.request(
-                    discovery.token_endpoint, method: "POST", body: Data(body.utf8),
-                    contentType: "application/x-www-form-urlencoded")))
+        let key: DPoPKey? =
+            pending.connection.persistentLogin?.supportsDPoP == true
+            ? DPoPKey(signingKey: DeviceSigningKey(persisted: pending.privateKey)) : nil
+        let (data, http) = try await OAuthTransport.post(discovery.token_endpoint, fields: fields, key: key)
+        try check(data, response: http)
+        let tokens = try OAuthResponse.tokens(data, status: http.statusCode)
         guard tokens.token_type.lowercased() == "bearer", tokens.expires_in.isFinite,
             tokens.expires_in > 0, !tokens.access_token.isEmpty,
             let idToken = tokens.id_token, let refresh = tokens.refresh_token, !refresh.isEmpty
@@ -92,23 +90,26 @@ enum QREnrollmentClient {
         try await JWTVerifier.verifyAccess(
             tokens.access_token, discovery: discovery, clientID: pending.connection.config.clientId,
             subject: subject)
+        let thumbprint = try key?.thumbprint
+        if let thumbprint {
+            try RefreshTokenClaims.validateResponseCredential(
+                refresh, issuer: discovery.issuer, clientID: pending.connection.config.clientId,
+                subject: subject, thumbprint: thumbprint)
+        }
         try Task.checkCancellation()
         return Credentials(
             connection: pending.connection, subject: subject, nonce: pending.nonce,
             accessToken: tokens.access_token, refreshToken: refresh,
-            expiresAt: Date().addingTimeInterval(tokens.expires_in))
+            expiresAt: Date().addingTimeInterval(tokens.expires_in), dpopKeyThumbprint: thumbprint)
     }
 
     private static func response(_ request: URLRequest) async throws -> Data {
-        let (stream, response) = try await HTTP.session.bytes(for: request)
-        var data = Data()
-        guard response.expectedContentLength <= 128 * 1024 else {
-            throw ClientError.invalid("The enrollment response is too large.")
-        }
-        for try await byte in stream {
-            guard data.count < 128 * 1024 else { throw ClientError.invalid("The enrollment response is too large.") }
-            data.append(byte)
-        }
+        let (data, response) = try await HTTP.response(request, maximum: 128 * 1024)
+        try check(data, response: response)
+        return data
+    }
+
+    private static func check(_ data: Data, response: URLResponse) throws {
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             if let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 for field in ["error_description", "error"] {
@@ -121,6 +122,5 @@ enum QREnrollmentClient {
             if http.statusCode == 429 { throw QREnrollmentError.rateLimited }
         }
         try HTTP.check(response)
-        return data
     }
 }

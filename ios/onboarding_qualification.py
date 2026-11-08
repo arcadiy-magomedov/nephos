@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Drive production onboarding controls in an isolated XCTest app against real HTTPS."""
+"""Generate the isolated native sign-in XCTest project used by qr_qualification.py."""
 
-import argparse
 from pathlib import Path
 import plistlib
-import subprocess
-import sys
-import tempfile
 
 from generate_project import oid
 
@@ -40,7 +36,7 @@ def project(workspace, test_sources=None, app_sources=None):
     targets, products, files = [], [], []
     for name, is_test in [("NephosUIQualification", False), ("OnboardingUITests", True)]:
         sources = (
-            (test_sources or [IOS / "Qualification/OnboardingUITests.swift"])
+            (test_sources or [IOS / "Qualification/QREnrollmentUITests.swift"])
             if is_test
             else sorted(path for path in (IOS / "Nephos").rglob("*.swift") if path.name != "NephosApp.swift")
             + [IOS / "Qualification/UIQualification.swift"]
@@ -171,118 +167,3 @@ def project(workspace, test_sources=None, app_sources=None):
         + "</TestableReference></Testables></TestAction></Scheme>"
     )
     return destination
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--simulator", required=True)
-    parser.add_argument("--qr-image", type=Path, help="Fresh real QR invitation image for native exchange/recovery.")
-    parser.add_argument("--base-url", default="")
-    parser.add_argument("--certificate-error-url", default="")
-    parser.add_argument(
-        "--signin-email", default="", help="Enabled known fixture account for the email-first PIN check."
-    )
-    parser.add_argument(
-        "--complete-signin",
-        action="store_true",
-        help="Sign in a disposable account, revoke its device sessions, and verify PIN reauthentication.",
-    )
-    parser.add_argument(
-        "--backup", action="store_true", help="Exercise foreground retries and backup UI with controlled responses."
-    )
-    parser.add_argument("--discovery", action="store_true", help="Also require the base URL's real LAN announcement.")
-    args = parser.parse_args()
-    if args.qr_image:
-        if args.backup:
-            parser.error("--qr-image is an enrollment qualification, not backup mode.")
-        subprocess.run(
-            [
-                sys.executable,
-                str(IOS / "qr_qualification.py"),
-                "--simulator",
-                args.simulator,
-                "--qr-image",
-                str(args.qr_image),
-            ],
-            check=True,
-        )
-        return
-    if args.complete_signin or args.discovery:
-        parser.error("Primary login now uses QR. Use --qr-image for real sign-in and recovery qualification.")
-    scratch = IOS / ".test-work"
-    scratch.mkdir(exist_ok=True)
-    (IOS / ".logs").mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="onboarding-ui-", dir=scratch) as directory:
-        workspace = Path(directory)
-        destination = project(workspace)
-        common = [
-            "xcodebuild",
-            "-quiet",
-            "-project",
-            str(destination),
-            "-scheme",
-            "Onboarding",
-            "-sdk",
-            "iphonesimulator",
-            "-destination",
-            "id=" + args.simulator,
-            "-derivedDataPath",
-            str(workspace / "DerivedData"),
-        ]
-        try:
-            subprocess.run(common + ["build-for-testing"], check=True)
-            subprocess.run(
-                [
-                    "codesign",
-                    "--force",
-                    "--sign",
-                    "-",
-                    "--identifier",
-                    BUNDLE,
-                    str(workspace / "DerivedData/Build/Products/Debug-iphonesimulator/NephosUIQualification.app"),
-                ],
-                check=True,
-            )
-            runfile = next((workspace / "DerivedData/Build/Products").glob("*.xctestrun"))
-            run = plistlib.loads(runfile.read_bytes())
-            targets = (
-                [target for configuration in run["TestConfigurations"] for target in configuration["TestTargets"]]
-                if "TestConfigurations" in run
-                else [target for target in run.values() if isinstance(target, dict) and "TestBundlePath" in target]
-            )
-            if not targets:
-                raise RuntimeError("Xcode did not generate any executable UI test targets.")
-            for target in targets:
-                target.setdefault("EnvironmentVariables", {}).update(
-                    {
-                        "NEPHOS_UI_BASE_URL": args.base_url.rstrip("/"),
-                        "NEPHOS_UI_BAD_CERT_URL": args.certificate_error_url.rstrip("/"),
-                        "NEPHOS_UI_SIGNIN_EMAIL": args.signin_email,
-                        "NEPHOS_UI_DISCOVERY": "1" if args.discovery else "0",
-                    }
-                )
-            runfile.write_bytes(plistlib.dumps(run))
-            subprocess.run(
-                [
-                    "xcodebuild",
-                    "-quiet",
-                    "test-without-building",
-                    "-only-testing:OnboardingUITests/" + ("BackupUITests" if args.backup else "OnboardingUITests"),
-                    "-xctestrun",
-                    str(runfile),
-                    "-destination",
-                    "id=" + args.simulator,
-                    "-parallel-testing-enabled",
-                    "NO",
-                    "-resultBundlePath",
-                    str(IOS / ".logs" / (workspace.name + ".xcresult")),
-                ],
-                check=True,
-            )
-        finally:
-            subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE], check=False)
-            subprocess.run(["xcrun", "simctl", "uninstall", args.simulator, BUNDLE + ".uitests.xctrunner"], check=False)
-
-
-if __name__ == "__main__":
-    main()

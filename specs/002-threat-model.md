@@ -127,18 +127,38 @@ remain release gates under R31.
 
 - **Preconditions/impact:** Incorrect OIDC/WebAuthn validation or disabled-user
   enforcement admits the wrong identity or preserves access.
-- **Established:** Keycloak OIDC tokens, a PIN extension grant, short-lived
+- **Established:** Keycloak OIDC tokens, QR enrollment and legacy PIN grants, short-lived
   access tokens, offline device sessions, API-side token introspection, and
   enabled application membership.
 - **Implemented controls:** Validate issuer, audience, signature and expiry;
   validate the ID-token nonce on initial login; keep refresh tokens in Keychain;
   introspect each API request; fail closed with 503 on identity-service outage.
+- **Implemented for new QR enrollments:** Sender-constrained renewable credentials
+  whose theft alone does not permit renewal elsewhere, with crash/lost-response
+  recovery that does not cause routine interactive login. DPoP-bound refresh
+  tokens are implemented on server/iOS for bounded recovery; see R08 and C03. Require fresh proofs,
+  key binding at issuance and recovery, replay rejection across replicas, and
+  no silent bearer-only fallback. A strict one-use rotation toggle without a
+  durable recovery path does not satisfy the persistent-login requirement.
 - **Open/residual:** The 8-digit PIN is a short-lived bearer credential. A
   shoulder-surfer or compromised device can use it before consumption; a stolen
   valid device credential remains usable until that device session is revoked.
+  Server and native Simulator DPoP qualification binds new QR refresh requests to the enrollment
+  key. The shipped realm and existing-realm bootstrap require it for new QR
+  enrollments; physical-device and live-deployment acceptance remain separate.
+  The checked-in realm uses a finite 180-day inactivity timeout.
+  Legacy sessions stay explicitly
+  unbound rather than being silently reauthenticated or rebound. Refresh-only
+  DPoP leaves short-lived access tokens as bearer credentials; full API
+  proof validation is a separate scope decision. DPoP cannot protect against
+  malicious code able to invoke the legitimate private key, and is not hardware
+  attestation. Do not claim indefinite bearer tokens are protected merely because
+  they are stored in Keychain.
 - **E2E:** Reject wrong issuer/audience, invalid/expired/replayed PINs, disabled
   accounts and revoked sessions, including already-issued access and refresh
-  tokens. Verify identity-service outages return retryable failures.
+  tokens. Verify identity-service outages return retryable failures. Qualify
+  stolen-token/wrong-key/replayed-proof rejection and delayed lost-refresh
+  recovery against the real provider before claiming sender-constrained renewal.
 
 ### T03 - PIN login as account takeover (F01)
 

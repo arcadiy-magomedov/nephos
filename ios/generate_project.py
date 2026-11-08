@@ -123,14 +123,8 @@ def generate():
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "LSRequiresIPhoneOS": True,
-        "CFBundleURLTypes": [{"CFBundleURLName": "app.nephos.oidc", "CFBundleURLSchemes": ["nephos"]}],
-        "NSPhotoLibraryUsageDescription": "Back up original photos and videos, verify unchanged sources, and remove only explicitly confirmed retained copies.",
         "NSCameraUsageDescription": "Scan your administrator's single-use Nephos sign-in QR code.",
-        "NSPhotoLibraryAddUsageDescription": "Restore SHA-256 verified originals and supported unedited resource pairs to your Photos library.",
-        "NSLocalNetworkUsageDescription": "Find and connect to the Nephos server you choose on your local network.",
-        "NSBonjourServices": ["_nephos._tcp"],
-        "BGTaskSchedulerPermittedIdentifiers": ["app.nephos.ios.backup"],
-        "UIBackgroundModes": ["processing"],
+        "NSLocalNetworkUsageDescription": "Connect to the Nephos server in your administrator's QR code.",
         "UILaunchScreen": {},
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
         "UISupportedInterfaceOrientations": [
@@ -147,9 +141,6 @@ def generate():
     }
     for config in ("Debug", "Release"):
         info = dict(base)
-        if config == "Debug":
-            # URLPolicy additionally gates HTTP to explicitly approved local hosts in DEBUG.
-            info["NSAppTransportSecurity"] = {"NSAllowsArbitraryLoads": True}
         with (ROOT / f"Nephos/Info-{config}.plist").open("wb") as file:
             plistlib.dump(info, file, sort_keys=True)
 

@@ -58,6 +58,13 @@ final class EnrollmentCrypto {
             return encode(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (java.security.GeneralSecurityException exception) { throw new IllegalArgumentException(exception); }
     }
+    static String jwkThumbprint(String key) {
+        fingerprint(key);
+        byte[] point = decode(key);
+        return digest("{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\""
+                + encode(Arrays.copyOfRange(point, 1, 33)) + "\",\"y\":\""
+                + encode(Arrays.copyOfRange(point, 33, 65)) + "\"}");
+    }
     private static java.security.PublicKey publicKey(byte[] bytes) throws java.security.GeneralSecurityException {
         AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
         parameters.init(new ECGenParameterSpec("secp256r1"));

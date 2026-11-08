@@ -45,13 +45,16 @@
                 throw ClientError.invalid("Cancellation destroyed the existing account.")
             }
             let fresh = try Keychain.prepare(qr: qr, connection: connection)
+            let proofKey = DPoPKey(signingKey: DeviceSigningKey(persisted: fresh.privateKey))
             let credentials = Credentials(
                 connection: connection, subject: "new-account", nonce: fresh.nonce,
-                accessToken: "qualification-only", refreshToken: "qualification-only", expiresAt: .distantFuture)
+                accessToken: "qualification-only", refreshToken: "qualification-only", expiresAt: .distantFuture,
+                dpopKeyThumbprint: try proofKey.thumbprint)
             try Keychain.commit(credentials, requestID: fresh.requestID)
             let vault = try Keychain.vault()
             guard vault.sessions.count == 2, vault.current?.subject == "new-account", vault.pending == nil,
-                let account = vault.activeAccount, vault.deviceKeys[account] == fresh.privateKey
+                let account = vault.activeAccount, vault.deviceKeys[account] == fresh.privateKey,
+                vault.current?.dpopKeyThumbprint == credentials.dpopKeyThumbprint
             else { throw ClientError.invalid("The token and account-bound device key commit was not atomic.") }
             do {
                 try Keychain.refresh(legacy, previous: legacy)

@@ -54,7 +54,7 @@ Supporting specifications:
 |---|---|
 | C01 | Support native OS integrations, with Swift/SwiftUI/UIKit selected for the iOS MVP and Android implementation/code sharing left open. |
 | C02 | Allow manual backend URL setup and permission-aware local server discovery, with explicit server trust and safe endpoint changes. |
-| C03 | Authenticate only administrator-provisioned users with a one-time bootstrap PIN, then maintain a revocable OIDC device session. |
+| C03 | Authenticate only administrator-provisioned users through the approved single-use QR bootstrap, then maintain a revocable, securely renewable device session without routine re-login. |
 | C04 | Access device photos/videos through supported OS APIs, honoring denied, limited, changed, and revoked permissions. |
 | C05 | Preserve complete supported original media resources and establish verifiable backup completion before allowing local removal. |
 | C06 | Persist resumable upload state and recover from interruption, duplicate callbacks, process death, and network changes. |
@@ -124,16 +124,13 @@ need an explicit supported trust-installation/rotation path.
 
 ### 3.3 C03 - Authentication
 
-Initially ask only for email and validate its format. Submit normalized email
-and `clientId` to public `POST {issuer}/nephos-admin/request-pin`. Only known
-enabled users can request a PIN; the response contains only `expiresIn`, never
-the PIN. Handle 400 (invalid input), 404 (account unavailable), 429 (wait) and
-service failures explicitly. Then present the 8-digit PIN form. The generated
-PIN appears only in the private administrator console, expires after 30 minutes,
-works once, and is delivered manually by the administrator; it is not emailed.
-Repeat requests cannot replace an active pending PIN. Submit the PIN to the Keycloak OIDC token endpoint
-using the backend's extension grant. No browser, public registration or password
-form is part of the client flow.
+Use the approved mobile QR flow: Sign in, Scan or Choose QR from Photos,
+Connecting, and a recoverable QR error. Only an administrator can provision the
+user and issue the single-use invitation. Follow the strict HTTPS origin,
+device-proof, immutable request journal, and bounded initial-delivery recovery
+contract in [QR enrollment](../deploy/keycloak/QR-ENROLLMENT.md). There is no
+email/PIN, browser, public registration, or password form in the rebuilt client.
+Legacy backend PIN compatibility does not change this mobile flow.
 
 The identity provider owns users, sessions, and token issuance. Validate the
 issuer, audience, signature, lifetime and ID-token nonce before saving
@@ -143,15 +140,46 @@ identity service must not clear a still-valid local session. Device revocation
 and disabled-account status are enforced through server-side introspection on
 every protected API request. HTTP 503 means retry; it is not a sign-out.
 
-The offline session remains valid until an administrator disables the account
-or revokes that device. Face ID/Touch ID may later protect local credential use,
-but biometrics are not sent to the server and do not replace OIDC. WebAuthn,
-Associated Domains, and cross-platform biometric unlock are deferred.
+The persistent-login requirements in [R08](000-media-platform.md#38-r08---bootstrap-and-persistent-oidc-device-sessions)
+are normative. The device session must survive token expiry, normal app/OS
+updates, restarts, suspension, reboot, network changes, and offline periods up
+to the configured 180-day inactivity timeout without another QR code. A device
+that has not successfully renewed for 180 days must be enrolled again. On
+launch, use a neutral restoration state; offline recovery must preserve the
+account without pretending protected APIs are available. Access tokens can be
+reused during their short lifetime; silent renewal and the long-lived device
+session are separate concepts. Background refresh may be attempted
+opportunistically but cannot guarantee the session stays active.
 
-Refresh through a serialized secure session coordinator. On confirmed revocation,
-stop unauthorized work and require a new administrator-issued PIN; never
-reinterpret an authorization error as an empty library. Preserve the session
-and retry after service-unavailable responses.
+Keep account/server-scoped credentials and proof keys in device-local secure
+storage, preserving their identity across upgrades. Prefer hardware-backed,
+non-exportable keys on supported physical devices; clearly distinguish simulator
+or approved software-backed test storage. Ordinary renewal must not require a
+Face ID/Touch ID prompt for each signature. An optional local app lock is a
+separate UX choice; biometrics are not sent to the server or substituted for OIDC.
+
+Refresh through one serialized coordinator. Persist replacements before exposing
+them, prevent stale completion after sign-out, and recover a lost successful
+response on later launch without depending on a short grace period, within the
+configured inactivity window. DPoP is the default sender-constrained renewal
+design for new QR sign-ins. Server and native Simulator integration cover
+bounded loss/restart, revocation, and the 180-day session policy; separate
+real-service tests cover existing-realm upgrade and cross-replica replay rejection.
+Physical-device acceptance and live-deployment qualification remain separate. See the
+[server qualification status and wire contract](../deploy/keycloak/QR-ENROLLMENT.md#persistent-login-and-dpop-feasibility).
+Persist its key before requesting bound credentials. A fresh proof is required
+for every retry; never replay a previously signed proof. If nonces are requested,
+handle bounded retry with the correct server nonce and preserve the session.
+
+On confirmed revocation or permanent credential loss, stop unauthorized work and
+require a new administrator-issued QR. Do not treat every HTTP 400/401 or
+`invalid_grant` as proof of revocation: DPoP proof/key-binding failures can use
+the same OAuth error. Distinguish recoverable nonce, locked-key, configuration,
+and transport failures from terminal rejection. Never reinterpret an
+authorization error as an empty library or silently fall back to unbound renewal.
+
+WebAuthn, Associated Domains, and cross-platform biometric unlock remain
+separate, deferred alternatives. DPoP does not require adding these login methods.
 
 ### 3.4 C04 - Device-library access
 
@@ -596,8 +624,10 @@ to weaken data safety or sync correctness.
 1. **C02, C03, C19:** Configure a backend manually and through permitted discovery; deny local
    discovery permission, encounter two servers/spoofed advertisements, change
    networks, and reject wrong TLS/issuer identity without leaking credentials.
-2. **C03, C19:** Provision and log in through the real identity provider; exercise passkey
-   cancellation, token expiry, account disablement, and server/account switch.
+2. **C03, C19:** Provision and sign in through the approved QR flow against the real
+   identity provider. Exercise invalid/expired QR, interrupted delivery, device
+   revocation, account disablement, and server/account switch. Apply the
+   persistent-login qualification below; token expiry is not a new sign-in.
 3. **C04, C05:** Import with denied/limited/full OS permissions, expand/revoke access, and
    handle cloud-only or unsupported compound resources without false completion.
 4. **C05, C10, C13:** Back up supported photos/videos, Live Photo/resource sets, and edits; verify
@@ -635,6 +665,37 @@ to weaken data safety or sync correctness.
     background restrictions, and poisoned native-bridge inputs on each supported
     profile. Record real-device scheduling/permission evidence separately from
     simulator-only success.
+
+### Persistent-login qualification (C03, C19, C21)
+
+The sender-constrained design is not accepted on unit tests or configuration
+inspection alone. Exercise the pinned real identity provider and native secure
+storage, including:
+
+- Cold launch, upgrade, process kill, reboot, access expiry, and offline periods
+  under 180 days restore the same account without a QR/sign-in flash. A session
+  idle beyond 180 days expires and requires new enrollment. Simulated time must
+  use an isolated fixture, not change the host clock.
+- Concurrent API calls cause one coordinated renewal. Network/429/5xx,
+  TLS/discovery/configuration failure, and storage unavailable before first
+  unlock retain credentials and recover without sign-in.
+- Drop the successful refresh response and kill the client before the
+  replacement is saved. Relaunch both immediately and after any configured
+  rotation/recovery grace period; the legitimate device still renews. Repeat
+  across identity-service restart using persistent session storage.
+- For the DPoP candidate, renewal with a copied token but no proof or a different
+  key fails. Reject reused proofs, wrong method/target, stale proofs, and invalid
+  nonces, including requests to different replicas. Fresh same-key proof and
+  valid nonce retry succeed; no fallback to bearer-only renewal occurs.
+- Confirm actual bound refresh credentials at initial QR issuance, receipt
+  recovery, subsequent renewal, and logout/revocation. Swapping the DPoP key in
+  a recovered enrollment must not change the session's binding.
+- Sign-out/revocation during renewal cannot resurrect the session. Device
+  revocation leaves another device working; account disablement stops all of
+  them. Permanent key loss explains the need for a new QR.
+- Verify physical-device key protection and available background signing
+  separately from simulator tests. Exercise migration of existing sessions;
+  document any exceptional re-enrollment before enforcement, not after rollout.
 
 ## 6. Platform references
 

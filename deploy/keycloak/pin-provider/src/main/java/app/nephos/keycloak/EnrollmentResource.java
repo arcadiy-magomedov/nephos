@@ -52,7 +52,13 @@ public class EnrollmentResource {
     public Response config() {
         String origin = EnrollmentCrypto.origin();
         return response(200, Map.of("v", 1, "origin", origin, "issuer", origin + "/realms/nephos",
-                "clientId", "nephos-ios", "grantType", QrGrantFactory.ID));
+                "clientId", "nephos-ios", "grantType", QrGrantFactory.ID,
+                "persistentLogin", Map.of("version", 1,
+                        "refreshBinding", PersistentLoginPolicy.required(
+                                session.clients().getClientByClientId(session.getContext().getRealm(), "nephos-ios")) ? "dpop" : "legacy-bearer",
+                        "dpopAlgorithm", "ES256", "dpopKey", "enrollment",
+                        "accessTokenType", "Bearer", "refreshReuse", "session-lifetime",
+                        "legacySessions", "unbound-no-rebind")));
     }
     @POST @Path("enrollment/challenge") @Consumes(MediaType.APPLICATION_JSON)
     public Response challenge(InputStream body) {

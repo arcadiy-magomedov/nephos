@@ -5,6 +5,14 @@ enum QREnrollmentError: String, LocalizedError {
     case invalidQR, inviteExpired, inviteUsed, inviteCancelled, userDisabled
     case recoveryExpired, sessionRevoked, invalidProof, unavailable, invalidChallenge
     case inviteUnavailable, invalidRequest, invalidScope, rateLimited
+    var invalidatesEnrollment: Bool {
+        switch self {
+        case .inviteExpired, .inviteUsed, .inviteCancelled, .userDisabled, .recoveryExpired, .sessionRevoked,
+            .inviteUnavailable:
+            true
+        default: false
+        }
+    }
     var errorDescription: String? {
         switch self {
         case .invalidQR: "This is not a supported Nephos sign-in QR code."
@@ -96,6 +104,7 @@ struct Credentials: Codable, Sendable {
     var accessToken: String
     var refreshToken: String?
     var expiresAt: Date
+    var dpopKeyThumbprint: String? = nil
 }
 
 struct PendingEnrollment: Codable, Sendable {
@@ -108,7 +117,7 @@ struct PendingEnrollment: Codable, Sendable {
     let privateKey: Data
     let createdAt: Date
     var publicKey: Data {
-        get throws { try P256.Signing.PrivateKey(rawRepresentation: privateKey).publicKey.x963Representation }
+        get throws { try DeviceSigningKey(persisted: privateKey).publicKey.x963Representation }
     }
 
     init(qr: EnrollmentQR, connection: Connection, installationID: UUID, deviceName: String = "Nephos iPhone") throws {
@@ -119,7 +128,7 @@ struct PendingEnrollment: Codable, Sendable {
         requestID = UUID()
         nonce = UUID().uuidString.lowercased()
         self.deviceName = String(deviceName.prefix(100))
-        privateKey = P256.Signing.PrivateKey().rawRepresentation
+        privateKey = try DeviceSigningKey.generate().persisted
         createdAt = Date()
     }
 
@@ -135,7 +144,7 @@ struct PendingEnrollment: Codable, Sendable {
         guard lines.count == 8, Array(lines.prefix(7)) == expected,
             let random = EnrollmentQR.decode(lines[7]), random.count == 32
         else { throw QREnrollmentError.invalidChallenge }
-        let key = try P256.Signing.PrivateKey(rawRepresentation: privateKey)
+        let key = DeviceSigningKey(persisted: privateKey)
         return Hashing.base64URL(try key.signature(for: bytes).derRepresentation)
     }
 }
@@ -150,7 +159,7 @@ struct EnrollmentVault: Codable, Sendable {
 
     var current: Credentials? { activeAccount.flatMap { sessions[$0] } }
     mutating func save(_ credentials: Credentials) {
-        let account = LedgerStore.accountKey(connection: credentials.connection, subject: credentials.subject)
+        let account = AccountIdentity.key(connection: credentials.connection, subject: credentials.subject)
         sessions[account] = credentials
         activeAccount = account
     }
@@ -158,7 +167,7 @@ struct EnrollmentVault: Codable, Sendable {
         guard let pending, pending.installationID == installationID, pending.requestID == requestID,
             pending.connection == credentials.connection, pending.nonce == credentials.nonce
         else { throw QREnrollmentError.invalidProof }
-        let account = LedgerStore.accountKey(connection: credentials.connection, subject: credentials.subject)
+        let account = AccountIdentity.key(connection: credentials.connection, subject: credentials.subject)
         deviceKeys[account] = pending.privateKey
         save(credentials)
         self.pending = nil

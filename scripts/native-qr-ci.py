@@ -85,6 +85,7 @@ class Fixture:
         finally:
             log.close()
         self.children.append(child)
+        return child
 
     def wait(self, description, probe, timeout=180):
         deadline = time.monotonic() + timeout
@@ -139,7 +140,11 @@ class Fixture:
             raise FixtureError(f"Only Keycloak {KEYCLOAK_VERSION} is qualified.")
         try:
             with zipfile.ZipFile(self.args.provider_jar) as jar:
-                required = ["app/nephos/keycloak/QrGrant.class", "app/nephos/keycloak/EnrollmentResource.class"]
+                required = [
+                    "app/nephos/keycloak/QrGrant.class",
+                    "app/nephos/keycloak/EnrollmentResource.class",
+                    "app/nephos/keycloak/PersistentLoginPolicy.class",
+                ]
                 if not all(name in jar.namelist() for name in required):
                     raise FixtureError("Provider artifact does not include the actual QR implementation.")
         except (OSError, zipfile.BadZipFile):
@@ -305,6 +310,8 @@ class Fixture:
             ]
         )
         # Do not touch any host keychain or disable TLS validation.
+        if self.args.simulator is None:
+            return
         devices = json.loads(self.command(["xcrun", "simctl", "list", "devices", "--json"]))
         selected = next(
             item for group in devices["devices"].values() for item in group if item["udid"] == self.args.simulator
@@ -314,6 +321,12 @@ class Fixture:
         self.command(["xcrun", "simctl", "bootstatus", self.args.simulator, "-b"], timeout=300)
         self.command(["xcrun", "simctl", "keychain", self.args.simulator, "add-root-cert", self.work / "ca.pem"])
 
+    def configure_realm(self, realm):
+        client = next(item for item in realm["clients"] if item["clientId"] == "nephos-ios")
+        if client.get("attributes", {}).get("nephos.qr.dpop.required") != "true":
+            raise FixtureError("The checked-in mobile realm must require DPoP for new QR sign-ins.")
+        return realm
+
     def services(self):
         self.stage = "Keycloak production-mode startup"
         kc = self.work / "keycloak"
@@ -321,7 +334,7 @@ class Fixture:
         shutil.copy2(self.args.provider_jar, kc / "providers/nephos-keycloak-pin-provider.jar")
         imports = kc / "data/import"
         imports.mkdir(parents=True, exist_ok=True)
-        realm = json.loads((ROOT / "deploy/keycloak/nephos-realm.json").read_text())
+        realm = self.configure_realm(json.loads((ROOT / "deploy/keycloak/nephos-realm.json").read_text()))
         realm["clients"].append(
             {
                 "clientId": "nephos-api-introspection",
@@ -357,7 +370,9 @@ class Fixture:
             "JAVA_OPTS_KC_HEAP": "-Xms128m -Xmx768m",
         }
         self.command([kc / "bin/kc.sh", "build", "--db=postgres"], env=kc_env, timeout=300)
-        self.start([kc / "bin/kc.sh", "start", "--optimized", "--import-realm"], env=kc_env)
+        self.kc_command = [kc / "bin/kc.sh", "start", "--optimized", "--import-realm"]
+        self.kc_env = kc_env
+        self.kc_process = self.start(self.kc_command, env=kc_env)
         discovery_url = self.identity + "/realms/nephos/.well-known/openid-configuration"
         self.wait("real Keycloak imported realm", lambda: self.request(discovery_url), timeout=240)
         discovery = self.request(discovery_url)
@@ -429,6 +444,8 @@ class Fixture:
         enrollment = self.request(self.origin + "/realms/nephos/nephos-admin/enrollment/config")
         if enrollment["origin"] != self.origin or enrollment["issuer"] != config_data["issuer"]:
             raise FixtureError("Provider enrollment configuration disagrees with the real Library API.")
+        if enrollment.get("persistentLogin", {}).get("refreshBinding") != "dpop":
+            raise FixtureError("Disposable provider did not advertise required DPoP enrollment.")
 
     def invitation(self):
         self.stage = "real provider user provisioning"

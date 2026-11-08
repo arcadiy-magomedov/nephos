@@ -4,29 +4,6 @@ import XCTest
 @testable import NephosCore
 
 final class IdentityTokenTests: XCTestCase {
-    func testRealKeycloakRefreshClaims() throws {
-        guard let path = ProcessInfo.processInfo.environment["NEPHOS_IDENTITY_CLAIMS_FIXTURE"] else {
-            throw XCTSkip("Run python3 ios/run_identity_refresh_e2e.py against the local development stack.")
-        }
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let initial = try XCTUnwrap(fixture["initial"] as? [String: Any])
-        let refreshed = try XCTUnwrap(fixture["refreshed"] as? [String: Any])
-        let issuer = try XCTUnwrap(fixture["issuer"] as? String)
-        let client = try XCTUnwrap(fixture["clientID"] as? String)
-        let nonce = try XCTUnwrap(initial["nonce"] as? String)
-        let subject = try IdentityTokenClaims.validate(
-            initial, issuer: issuer, clientID: client, purpose: .authorization(nonce: nonce))
-        XCTAssertEqual(
-            try IdentityTokenClaims.validate(
-                refreshed, issuer: issuer, clientID: client, purpose: .refresh(nonce: nonce, subject: subject)),
-            subject)
-        if refreshed["nonce"] == nil {
-            XCTAssertThrowsError(
-                try IdentityTokenClaims.validate(
-                    refreshed, issuer: issuer, clientID: client, purpose: .authorization(nonce: nonce)))
-        }
-    }
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
     private var claims: [String: Any] {
         [

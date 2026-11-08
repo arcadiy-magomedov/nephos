@@ -110,7 +110,7 @@ Supporting documents:
 | R05 | Abstract media storage behind provider-independent contracts supporting mounted volumes, S3-compatible object storage, and Azure Blob Storage; physical storage topology must not affect application logic. |
 | R06 | Keep application logic database-engine agnostic through repository interfaces that hide persistence and retrieval details. |
 | R07 | Implement vector search as a dedicated microservice; other components must not depend on its vector database or indexing implementation. |
-| R08 | Use an OIDC identity provider for admin-provisioned, PIN-bootstrapped device sessions with renewable credentials and explicit server-side revocation. |
+| R08 | Use an OIDC identity provider for admin-provisioned device sessions that renew silently without routine re-login, protect renewal credentials against off-device replay, and support explicit server-side revocation. |
 | R09 | Admit only known, administrator-provisioned users; do not allow public registration. |
 | R10 | Provide a dedicated admin web console for managing users, libraries, and system operations. |
 | R11 | Make administration accessible only through an authorized private network, never through the public internet, independently of hosting environment or networking product. |
@@ -371,7 +371,13 @@ silently truncating the result set.
 The vector engine remains **open**. Replacing it changes search-service adapters
 and deployment configuration, not application contracts.
 
-### 3.8 R08 - PIN-bootstrap OIDC device sessions
+### 3.8 R08 - Bootstrap and persistent OIDC device sessions
+
+The approved mobile bootstrap is the administrator-issued, single-use QR flow
+specified in [QR enrollment](../deploy/keycloak/QR-ENROLLMENT.md). It establishes
+a device session; the QR is not required again for normal renewal. The PIN
+contract below remains backend compatibility behavior, not an additional
+sign-in screen in the rebuilt iOS app.
 
 Keycloak owns users, session state, and all OIDC token issuance. Only an
 administrator can create users. The first login on a device initially asks only
@@ -394,17 +400,101 @@ normal Keycloak device session and returns OIDC access, ID and offline refresh
 tokens. The PIN is a direct bootstrap login credential; it is not only an
 enrollment authorization and is not retained by the client.
 
-Access tokens are short-lived. Offline refresh sessions have no idle or absolute
-lifetime and remain valid until explicitly revoked or the account is disabled.
-Every protected API request checks Keycloak session status, so revoking one
-device invalidates its access and refresh tokens immediately without affecting
-other devices. A Keycloak outage fails closed with a retryable service error,
-not a false sign-out. Account disablement also revokes all device sessions.
+#### Persistent-login requirements
+
+The required experience is "sign in once, remain signed in during normal use",
+not "use one permanent access token". These requirements are acceptance targets,
+not a claim that the current implementation meets every security property.
+
+- **Session lifetime:** Offline device sessions expire after 180 days without a
+  successful refresh; the absolute offline-session maximum is disabled. A
+  successful refresh extends the idle window. Access tokens remain short-lived
+  (currently five minutes). Ordinary access-token expiry, app/OS updates, process
+  termination, reboot, suspension, and offline periods shorter than the idle
+  window must not require another QR code while credentials and server authority
+  remain valid. After 180 days without successful renewal, administrator-issued
+  QR enrollment is required again. Background execution is opportunistic and
+  must not be treated as a guaranteed keepalive.
+- **Outage behavior:** Network, TLS, discovery, rate-limit, temporary server,
+  configuration, and temporarily locked secure-storage failures retain the
+  saved session and offer recovery/retry. Do not flash the sign-in screen during
+  restoration or interpret unavailable authorization checks as permission.
+- **Renewal protection:** Possession of a copied refresh token alone must not
+  authorize renewal from another device. Sender-constrained renewal is required;
+  DPoP is the recommended implementation candidate described below. An
+  indefinitely reusable, unbound bearer refresh token does not meet this target.
+- **Crash-safe renewal:** Concurrent callers share a serialized renewal operation.
+  Save replacement credentials atomically and fence late responses after
+  sign-out/account changes. If a response is lost after the server processes
+  renewal, or the app dies before persisting it, the same authorized device must
+  recover on a later launch without interactive login, provided the device
+  returns within the configured 180-day inactivity window. A short rotation
+  grace window alone is insufficient: the app may remain closed beyond that
+  window. Rotating token bytes is optional; the last durable renewal authority
+  must remain usable or have a secure, device-authenticated recovery path within
+  the configured lifetime.
+- **Reauthentication exceptions:** Explicit local sign-out, administrator/device
+  or security revocation, account disablement/deletion, permanent credential/key
+  loss, 180 days without successful refresh, or an explicitly approved change
+  of server trust can require bootstrap again. Temporary device locking and
+  failed proof/nonce negotiation are not credential loss. An ordinary upgrade
+  must preserve keys and session records.
+- **Revocation and authorization:** Every protected API request checks live
+  Keycloak session status and resource permissions. Device revocation rejects
+  its subsequent access/renewal without affecting other devices; account
+  disablement revokes all device sessions. An identity outage fails closed with
+  a retryable error. Previously downloaded files and bytes already delivered
+  cannot be recalled.
+- **Sign-out:** Remove local credentials and prevent any late operation from
+  restoring them. Remote session revocation is a distinct operation: when offline,
+  local sign-out must not claim server revocation succeeded. An unavailable
+  Keychain must not be presented as a successful local sign-out.
+
+#### DPoP implementation boundary
+
+OAuth DPoP (RFC 9449) binds renewal credentials to a client-held asymmetric key
+and requires a fresh, request-specific signed proof. It is not token encryption,
+user identification, device attestation, or a substitute for TLS, session
+revocation, or media authorization. Code able to use the device's private key
+remains within the compromise boundary.
+
+Keycloak **26.8.1** supports DPoP by default, including public-client refresh-token
+binding and the `dpop-bind-enforcer` policy's refresh-token-only mode.
+The recommended first implementation is **DPoP-bound refresh credentials with
+short-lived bearer access tokens**, retaining the existing resource APIs and
+live introspection. This protects renewal, not a stolen access token during its
+remaining valid lifetime. Full access-token DPoP is a separate scope decision:
+every resource boundary must then validate proofs and prohibit bearer downgrade.
+
+Server-side refresh-only binding has a real-Keycloak-qualified
+implementation using the existing QR enrollment key for a separate DPoP JWT.
+The native client implements the same contract, including Simulator-qualified
+enrollment/refresh response-loss recovery and remote revocation. Physical-device
+Secure Enclave qualification remains outstanding.
+Resource-side DPoP validation is not implemented or required for this mode.
+New QR enrollments require DPoP by default. Existing-realm bootstrap merges the
+named profile/policy without deleting unrelated policies or rebinding legacy
+credentials. Real-service qualification covers upgrades, cross-replica replay
+rejection and renewal, and the finite session policy. The checked-in
+realm sets a 180-day inactivity timeout and disables the absolute
+offline-session maximum. Devices without a successful refresh for 180 days must
+enroll again; background execution is not guaranteed. Bounded loss/restart tests
+do not establish physical-device Secure Enclave acceptance or qualify a live deployment.
+Do not enforce strict single-use refresh rotation merely to approximate this
+design: it fails the lost-response requirement unless a qualified recovery
+mechanism also exists.
+Any required-binding rollout must define a safe migration for existing bearer
+sessions before enforcement; a stolen bearer token alone must not authorize
+rebinding to an attacker's key. Unexpected migration-driven mass logout is not
+an acceptable ordinary upgrade.
+
+The version-pinned integration findings and implementation gates are recorded
+in [QR enrollment: DPoP feasibility](../deploy/keycloak/QR-ENROLLMENT.md#persistent-login-and-dpop-feasibility).
 
 Face ID/Touch ID may later protect local access to credentials, but biometrics
 remain on-device and are not an authentication factor verified by this backend.
 WebAuthn/passkeys and associated-domain setup are deferred alternatives, not
-prerequisites for this PIN/OIDC contract. Keycloak 26.8.1 internal grant and
+prerequisites for this bootstrap/OIDC contract. Keycloak 26.8.1 internal grant and
 admin-resource SPIs are version-pinned; upgrades require rebuilding and running
 the isolated production-mode identity qualification.
 

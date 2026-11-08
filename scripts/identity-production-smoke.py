@@ -161,7 +161,7 @@ try:
     admin = admin_token()
     admin_base = f"http://localhost:{port}/admin/realms/nephos"
     realm = smoke.request(admin_base, token=admin)
-    assert realm["offlineSessionIdleTimeout"] == 0
+    assert realm["offlineSessionIdleTimeout"] == 180 * 24 * 60 * 60
     assert realm["offlineSessionMaxLifespanEnabled"] is False
     username = "pin-smoke-" + uuid.uuid4().hex
     smoke.request(
