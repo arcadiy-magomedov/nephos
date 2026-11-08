@@ -18,6 +18,23 @@ class FixtureTests(unittest.TestCase):
         args = type("Args", (), {})()
         return fixture_module.Fixture(args)
 
+    def test_qualification_requires_shipped_dpop_policy_without_silently_enabling_it(self):
+        fixture = self.fixture()
+        realm = {
+            "clients": [
+                {"clientId": "other", "attributes": {"unchanged": "true"}},
+                {"clientId": "nephos-ios", "attributes": {"pkce.code.challenge.method": "S256"}},
+            ]
+        }
+        with self.assertRaisesRegex(fixture_module.FixtureError, "must require DPoP"):
+            fixture.configure_realm(realm)
+        self.assertNotIn("nephos.qr.dpop.required", realm["clients"][1]["attributes"])
+        realm["clients"][1]["attributes"]["nephos.qr.dpop.required"] = "true"
+        configured = fixture.configure_realm(realm)
+        self.assertEqual(configured["clients"][1]["attributes"]["nephos.qr.dpop.required"], "true")
+        self.assertEqual(configured["clients"][1]["attributes"]["pkce.code.challenge.method"], "S256")
+        self.assertEqual(configured["clients"][0], {"clientId": "other", "attributes": {"unchanged": "true"}})
+
     def test_readiness_retries_expected_startup_http_errors(self):
         fixture = self.fixture()
         attempts = []

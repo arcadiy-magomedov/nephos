@@ -25,7 +25,8 @@ export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$(brew --prefix postgresql@17)/bin:$(brew --prefix openssl@3)/bin:$PATH"
 mkdir -p artifacts/native-qr-input
 python3 -m venv artifacts/native-qr-input/venv
-artifacts/native-qr-input/venv/bin/pip install -r scripts/native-qr-ci-requirements.txt
+artifacts/native-qr-input/venv/bin/pip install \
+  -r scripts/native-qr-ci-requirements.txt -r scripts/qr-identity-requirements.txt
 curl --fail --location --retry 3 \
   https://github.com/keycloak/keycloak/releases/download/26.8.1/keycloak-26.8.1.tar.gz \
   --output artifacts/native-qr-input/keycloak-26.8.1.tar.gz
@@ -46,6 +47,15 @@ artifacts/native-qr-input/venv/bin/python scripts/native-qr-ci.py \
   --keycloak-dist artifacts/native-qr-input/keycloak-26.8.1 \
   --provider-jar artifacts/native-qr-input/nephos-keycloak-pin-provider.jar
 ```
+
+The fixture requires the checked-in `nephos.qr.dpop.required=true` policy and
+advertised `persistentLogin.refreshBinding=dpop`; it never silently enables a
+test-only configuration or downgrades a new sign-in. Existing saved legacy
+credentials remain a separate compatibility case, not bearer-authorized migration.
+The native CI job first runs `scripts/dpop-identity-qualification.py
+--check-lifetime-blockers` against real services, including existing-realm upgrade,
+explicit refresh expiry, the 180-day lifetime, and 181-day persisted-session aging.
+Neither fixture changes a live deployment or qualifies physical Secure Enclave behavior.
 
 The workflow's `if: always()` cleanup must shutdown/delete this simulator (also
 removes its private CA trust) and remove `artifacts/native-qr-ci` and
@@ -87,7 +97,11 @@ and the real invitation response becomes a private QR PNG. No end-user password
 grant or test token is used. The native `ios/qr_qualification.py --qr-image` hook
 must decode the PNG, persist a P-256/request journal, exchange the invitation with
 the real Keycloak provider, recover a deliberately lost response, atomically commit
-Keychain credentials, browse the actual authorized Library gallery, and cold restore.
+Keychain credentials, verify access through the actual authorized Library API,
+show the minimal signed-in state, and cold restore with an expired access token.
+It also discards a successful bound refresh response, relaunches with the last
+durable credential, checks preserved binding, performs DPoP-authenticated RFC7009
+revocation, and verifies that the saved revoked session cannot restore.
 Its real-service test must not skip when the image argument is supplied.
 
 Child processes run in fixture-owned process groups. Every bounded failure and

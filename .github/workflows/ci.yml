@@ -265,13 +265,18 @@ jobs:
               OBJROOT="$PWD/.derivedData/Build/Intermediates.noindex" \
               SYMROOT="$PWD/.derivedData/Build/Products" build
           done
-      - name: Native backup retry and pause acceptance
+      - name: Signing-disabled physical-device build
+        run: |
+          xcodebuild -quiet -project ios/Nephos.xcodeproj -scheme Nephos \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/.derivedData-device CODE_SIGNING_ALLOWED=NO build
+      - name: Native sign-in and Keychain acceptance
         run: |
           simulator="$(xcrun simctl list devices available -j | jq -er '
             [.devices | to_entries[] | select(.key | contains("iOS"))
               | .value[] | select(.name | startswith("iPhone")) | .udid][0]')"
           xcrun simctl bootstatus "$simulator" -b
-          python3 ios/onboarding_qualification.py --backup --simulator "$simulator"
+          python3 ios/qr_qualification.py --simulator "$simulator"
 
   native-qr:
     name: Native QR real-service acceptance
@@ -303,7 +308,8 @@ jobs:
             echo "$(brew --prefix openssl@3)/bin"
           } >> "$GITHUB_PATH"
           python3 -m venv artifacts/native-qr-input/venv
-          artifacts/native-qr-input/venv/bin/pip install -r scripts/native-qr-ci-requirements.txt
+          artifacts/native-qr-input/venv/bin/pip install \
+            -r scripts/native-qr-ci-requirements.txt -r scripts/qr-identity-requirements.txt
           curl --fail --silent --show-error --location --retry 3 \
             https://github.com/keycloak/keycloak/releases/download/26.8.1/keycloak-26.8.1.tar.gz \
             --output artifacts/native-qr-input/keycloak.tar.gz
@@ -320,6 +326,10 @@ jobs:
           xcrun simctl bootstatus "$simulator" -b
       - name: Qualify actual native QR and persistent session
         run: |
+          artifacts/native-qr-input/venv/bin/python scripts/dpop-identity-qualification.py \
+            --check-lifetime-blockers \
+            --keycloak-dist artifacts/native-qr-input/keycloak-26.8.1 \
+            --provider-jar artifacts/native-qr-input/nephos-keycloak-pin-provider.jar
           artifacts/native-qr-input/venv/bin/python scripts/native-qr-ci.py \
             --simulator "$QR_SIMULATOR" \
             --keycloak-dist artifacts/native-qr-input/keycloak-26.8.1 \

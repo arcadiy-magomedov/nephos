@@ -44,11 +44,14 @@ final class QREnrollmentUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment["NEPHOS_QR_PHASE"] = "restore"
         app.launch()
-        require(app.buttons["Browse only"], in: app, stage: "recover", timeout: 60)
-        app.buttons["Browse only"].tap()
-        require(app.buttons["Open library"], in: app, stage: "setup", timeout: 15)
-        app.buttons["Open library"].tap()
-        require(app.navigationBars["Library"], in: app, stage: "gallery", timeout: 60)
+        require(app.staticTexts["You're signed in"], in: app, stage: "recover", timeout: 60)
+        XCTAssertFalse(app.buttons["Open library"].exists)
+        app.terminate()
+        app.launchEnvironment["NEPHOS_QR_PHASE"] = "discard-refresh-response"
+        app.launch()
+        require(
+            app.staticTexts["Refresh response deliberately lost"], in: app,
+            stage: "discard-refresh-response", timeout: 60)
         app.terminate()
         app.launchEnvironment["NEPHOS_QR_PHASE"] = "refresh"
         app.launch()
@@ -56,8 +59,45 @@ final class QREnrollmentUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == true"), object: app.buttons["onboarding.scanQR"])
         loginFlash.isInverted = true
         wait(for: [loginFlash], timeout: 2)
-        require(app.navigationBars["Library"], in: app, stage: "refresh-restore", timeout: 60)
+        require(app.staticTexts["You're signed in"], in: app, stage: "refresh-restore", timeout: 60)
         XCTAssertFalse(app.buttons["onboarding.scanQR"].exists)
+        app.terminate()
+        app.launchEnvironment["NEPHOS_QR_PHASE"] = "revoke"
+        app.launch()
+        require(app.staticTexts["Remote revocation confirmed"], in: app, stage: "revoke", timeout: 60)
+        app.terminate()
+        app.launchEnvironment["NEPHOS_QR_PHASE"] = "reject-revoked"
+        app.launch()
+        require(app.staticTexts["Revoked session rejected"], in: app, stage: "reject-revoked", timeout: 60)
+    }
+    func testInvalidQRCanRetryAndImport() {
+        let app = app(screen: "invalid-qr")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Couldn't sign in"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Scan again"].isHittable)
+        XCTAssertTrue(app.buttons["onboarding.importQR"].isHittable)
+    }
+
+    func testLightAndDarkLandingSupportLargestDynamicTypeAndLandscape() throws {
+        for theme in ["light", "dark"] {
+            let app = app(screen: "onboarding-flow")
+            app.launchEnvironment["NEPHOS_UI_THEME"] = theme
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Nephos"].waitForExistence(timeout: 20))
+            app.swipeUp()
+            XCTAssertTrue(app.buttons["onboarding.scanQR"].isHittable)
+            XCTAssertTrue(app.buttons["onboarding.importQR"].isHittable)
+            let portrait = XCTAttachment(screenshot: app.screenshot())
+            portrait.name = "sign-in-\(theme)-large-text"
+            portrait.lifetime = .keepAlways
+            add(portrait)
+            XCUIDevice.shared.orientation = .landscapeLeft
+            app.swipeUp()
+            XCTAssertTrue(app.buttons["onboarding.importQR"].isHittable)
+            XCUIDevice.shared.orientation = .portrait
+            app.terminate()
+        }
     }
     private func require(_ element: XCUIElement, in app: XCUIApplication, stage: String, timeout: TimeInterval) {
         guard element.waitForExistence(timeout: timeout) else {

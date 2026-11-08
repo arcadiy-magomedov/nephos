@@ -9,8 +9,23 @@
   "rememberMe": false,
   "bruteForceProtected": true,
   "accessTokenLifespan": 300,
-  "offlineSessionIdleTimeout": 0,
+  "revokeRefreshToken": false,
+  "offlineSessionIdleTimeout": 15552000,
   "offlineSessionMaxLifespanEnabled": false,
+  "clientProfiles": {
+    "profiles": [{
+      "name": "nephos-persistent-login",
+      "executors": [{"executor": "nephos-persistent-login", "configuration": {}}]
+    }]
+  },
+  "clientPolicies": {
+    "policies": [{
+      "name": "nephos-persistent-login",
+      "enabled": true,
+      "conditions": [{"condition": "client-access-type", "configuration": {"type": ["public"]}}],
+      "profiles": ["nephos-persistent-login"]
+    }]
+  },
   "smtpServer": {"host": "mailpit", "port": "1025", "from": "nephos@localhost", "fromDisplayName": "Nephos development"},
   "browserFlow": "nephos-passkeys",
   "webAuthnPolicyPasswordlessRpEntityName": "Nephos",
@@ -49,7 +64,7 @@
       "redirectUris": ["nephos://oauth/callback"],
       "defaultClientScopes": ["basic", "web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": ["offline_access"],
-      "attributes": {"pkce.code.challenge.method": "S256"},
+      "attributes": {"pkce.code.challenge.method": "S256", "nephos.qr.dpop.required": "true"},
       "protocol": "openid-connect",
       "protocolMappers": [
         {

@@ -306,20 +306,14 @@ the live realm.
 The low-storage suite uses a tiny temporary RAM-backed volume, never fills the
 host disk, and verifies that rejected admission leaves no upload state.
 The CI workflow repeats backend checks; native commands live in `ios/README.md`.
-The native CI job runs deterministic Swift tests and signing-disabled Debug/Release
-simulator builds. To exercise the real Swift client against this running backend:
-
-```sh
-python3 ios/run_native_e2e.py
-```
-
-That opt-in test uses the production Swift HTTP/upload client with an ephemeral
-signed-token fixture. It is distinct from interactive passkey/Photos-device E2E.
-The simulator Photos restoration exercise **passes** for synthetic JPEG,
-QuickTime video and Live Photo: re-exported originals match SHA-256/size, paired
-semantics survive, and cleanup eligibility remains restricted to singles.
-Physical-device background execution, camera RAW restoration, deletion,
-production signing, and a real HTTPS deployment remain release gates.
+The rebuilt iOS app currently implements only QR sign-in and persistent session
+restoration; gallery, backup, sharing, and Photos restoration are intentionally
+absent. Native CI runs Swift tests, signing-disabled Debug/Release simulator
+builds, and native sign-in/Keychain checks. The separate
+[real-service QR fixture](deploy/native-qr-ci.md) exercises enrollment,
+lost-response recovery, and cold-launch refresh against Keycloak and the Library API.
+Production signing, physical-device camera checks, and a real HTTPS deployment
+remain release gates.
 
 Append SQL migrations rather than editing applied files. Rebuild migration images
 and run both migration services after adding migrations. Runtime APIs use Npgsql

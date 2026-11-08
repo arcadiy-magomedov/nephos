@@ -7,6 +7,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -18,6 +19,8 @@ import uuid
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from dpop_proof import claims, proof, thumbprint
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,7 +48,7 @@ def request(url, data=None, method=None, headers=None, expected=200):
         return json.loads(body) if body else None
 
 
-def qualify(base, service_key, restart, sql, rotate):
+def qualify(base, replica, service_key, restart, sql, rotate):
     private = base + "/realms/nephos/nephos-admin"
     token_url = base + "/realms/nephos/protocol/openid-connect/token"
     headers = {"X-Nephos-Identity-Service-Key": service_key}
@@ -69,6 +72,8 @@ def qualify(base, service_key, restart, sql, rotate):
     )
     config = request(private + "/enrollment/config")
     assert config["origin"] == "https://photos.example.test"
+    assert config["persistentLogin"]["refreshBinding"] == "dpop"
+    public_token_url = config["issuer"] + "/protocol/openid-connect/token"
 
     def issue():
         command = str(uuid.uuid4())
@@ -88,7 +93,7 @@ def qualify(base, service_key, restart, sql, rotate):
             "code": code,
         }
 
-    def exchange(device, expected=200, mutate=None):
+    def exchange(device, expected=200, mutate=None, node=base):
         challenge = request(
             private + "/enrollment/challenge",
             {
@@ -125,10 +130,10 @@ def qualify(base, service_key, restart, sql, rotate):
         if mutate:
             form.update(mutate)
         return request(
-            token_url,
+            node + "/realms/nephos/protocol/openid-connect/token",
             urllib.parse.urlencode(form).encode(),
             "POST",
-            {"Content-Type": "application/x-www-form-urlencoded"},
+            {"Content-Type": "application/x-www-form-urlencoded", "DPoP": proof(device["key"], public_token_url)},
             expected,
         )
 
@@ -136,28 +141,39 @@ def qualify(base, service_key, restart, sql, rotate):
     first = device(first_code)
     tokens = exchange(first)
     assert {"access_token", "refresh_token", "id_token"} <= tokens.keys()
+    assert claims(tokens["refresh_token"])["cnf"]["jkt"] == thumbprint(first["key"])
     assert exchange(first)["refresh_token"] == tokens["refresh_token"]
-    assert exchange(device(first_code), 400)["error_description"] == "invite_used"
+    assert exchange(first, node=replica)["refresh_token"] == tokens["refresh_token"]
+    assert exchange(device(first_code), 400)["error_description"] == "dpop_key_mismatch"
     assert exchange(first, 400, {"nonce": str(uuid.uuid4())})["error_description"] == "invite_used"
     # Verify persisted receipt and both representations, then cold restart.
     assert sql("SELECT count(*) FROM OFFLINE_USER_SESSION WHERE USER_ID = '" + subject + "'") == "2"
     restart()
-    assert exchange(first)["refresh_token"] == tokens["refresh_token"]
+    assert exchange(first, node=replica)["refresh_token"] == tokens["refresh_token"]
     # Refresh progression always overrides receipt recovery, including rotation disabled.
+    refresh_body = urllib.parse.urlencode(
+        {"grant_type": "refresh_token", "client_id": "nephos-ios", "refresh_token": tokens["refresh_token"]}
+    ).encode()
+    refresh_headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "DPoP": proof(first["key"], public_token_url),
+    }
     refreshed = request(
         token_url,
-        urllib.parse.urlencode(
-            {"grant_type": "refresh_token", "client_id": "nephos-ios", "refresh_token": tokens["refresh_token"]}
-        ).encode(),
+        refresh_body,
         "POST",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        refresh_headers,
     )
+    replica_token_url = replica + "/realms/nephos/protocol/openid-connect/token"
+    assert request(replica_token_url, refresh_body, "POST", refresh_headers, 400)["error"] == "invalid_request"
+    refresh_headers["DPoP"] = proof(first["key"], public_token_url)
+    assert request(replica_token_url, refresh_body, "POST", refresh_headers)["refresh_token"]
     assert refreshed["refresh_token"]
     for token_type in ("access_token", "id_token"):
-        claims = json.loads(base64.urlsafe_b64decode(refreshed[token_type].split(".")[1] + "=="))
-        assert claims.get("iss") == config["issuer"] and claims["sub"] == subject
+        token_claims = claims(refreshed[token_type])
+        assert token_claims.get("iss") == config["issuer"] and token_claims["sub"] == subject
         if token_type == "id_token":
-            assert claims.get("nonce", first["nonce"]) == first["nonce"]
+            assert token_claims.get("nonce", first["nonce"]) == first["nonce"]
     assert exchange(first, 400)["error_description"] in ("session_revoked", "recovery_expired")
 
     second = device(issue())
@@ -170,12 +186,12 @@ def qualify(base, service_key, restart, sql, rotate):
     )
     assert exchange(second, 400)["error_description"] == "session_revoked"
     request(
-        token_url,
+        replica_token_url,
         urllib.parse.urlencode(
             {"grant_type": "refresh_token", "client_id": "nephos-ios", "refresh_token": second_tokens["refresh_token"]}
         ).encode(),
         "POST",
-        {"Content-Type": "application/x-www-form-urlencoded"},
+        {"Content-Type": "application/x-www-form-urlencoded", "DPoP": proof(second["key"], public_token_url)},
         400,
     )
     # Cancel, expiry and durable concurrent claim.
@@ -193,13 +209,14 @@ def qualify(base, service_key, restart, sql, rotate):
     contenders = [device(raced), device(raced)]
 
     def claim(item):
+        contender, node = item
         try:
-            return exchange(item)
+            return exchange(contender, node=node)
         except AssertionError:
             return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        winners = list(pool.map(claim, contenders))
+        winners = list(pool.map(claim, zip(contenders, (base, replica))))
     assert sum(value is not None for value in winners) == 1
     # Profile changes do not advance epoch or invalidate acquired sessions.
     identity = request(private + "/users/" + subject, headers=headers)
@@ -250,7 +267,8 @@ def qualify(base, service_key, restart, sql, rotate):
     assert sql("SELECT count(*) FROM OFFLINE_USER_SESSION WHERE USER_ID = '" + subject + "'") == before
     exchange(device(issue()))
     print(
-        "PASS: production QR claim/retry/restart/race/expiry/cancel/profile/refresh/revoke/disable/rollback/key rotation"
+        "PASS: two-node QR claim/recovery/cold restart/race; cross-node DPoP replay rejection/refresh/revocation; "
+        "expiry/cancel/profile/disable/rollback/key rotation"
     )
 
 
@@ -261,6 +279,7 @@ def main():
     args = parser.parse_args()
     prefix = "nephos-qr-qualification-" + uuid.uuid4().hex
     network, database, identity = prefix + "-net", prefix + "-db", prefix + "-id"
+    replica_identity = prefix + "-replica"
     key, password = secrets.token_hex(32), secrets.token_hex(32)
     env = {
         **os.environ,
@@ -278,29 +297,50 @@ def main():
             ["docker", *args], env=env, cwd=ROOT, check=True, capture_output=True, text=True
         ).stdout.strip()
 
-    with socket.socket() as reservation:
+    with socket.socket() as reservation, socket.socket() as replica_reservation:
         reservation.bind(("127.0.0.1", 0))
+        replica_reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
+        replica_port = replica_reservation.getsockname()[1]
     base = f"http://localhost:{port}"
+    replica = f"http://localhost:{replica_port}"
 
-    def ready():
+    def ready(origin):
         for _ in range(150):
             try:
-                request(base + "/realms/nephos/.well-known/openid-configuration")
+                request(origin + "/realms/nephos/.well-known/openid-configuration")
                 return
             except (OSError, AssertionError):
                 time.sleep(1)
         raise RuntimeError("Disposable identity did not become ready")
 
+    def clustered():
+        for _ in range(60):
+            views = [
+                re.findall(r"Received new cluster view.*\((\d+)\)", docker("logs", name))
+                for name in (identity, replica_identity)
+            ]
+            if all(view and view[-1] == "2" for view in views):
+                return
+            time.sleep(1)
+        raise RuntimeError("Disposable identity nodes did not form a two-node cluster")
+
     def restart():
-        docker("restart", identity)
-        ready()
+        docker("stop", identity, replica_identity)
+        docker("start", identity)
+        ready(base)
+        docker("start", replica_identity)
+        ready(replica)
+        clustered()
 
     def rotate():
         env["NEPHOS_QR_DELIVERY_KEY"] = base64.b64encode(secrets.token_bytes(32)).decode()
-        docker("rm", "-f", identity)
-        start_identity()
-        ready()
+        docker("rm", "-f", identity, replica_identity)
+        start_identity(identity, port)
+        ready(base)
+        start_identity(replica_identity, replica_port)
+        ready(replica)
+        clustered()
 
     def sql(statement):
         return docker("exec", database, "psql", "-U", "keycloak", "-d", "keycloak", "-tAc", statement)
@@ -383,13 +423,23 @@ def main():
             "--import-realm",
         )
 
-        def start_identity():
-            docker(*identity_args)
+        def start_identity(name, host_port):
+            options = list(identity_args)
+            options[options.index("--name") + 1] = name
+            options[options.index("-p") + 1] = f"127.0.0.1:{host_port}:8080"
+            options[options.index(f"KC_HOSTNAME_ADMIN=http://localhost:{port}")] = (
+                f"KC_HOSTNAME_ADMIN=http://localhost:{host_port}"
+            )
+            docker(*options)
+            if name not in containers:
+                containers.append(name)
 
-        start_identity()
-        containers.append(identity)
-        ready()
-        qualify(base, key, restart, sql, rotate)
+        start_identity(identity, port)
+        ready(base)
+        start_identity(replica_identity, replica_port)
+        ready(replica)
+        clustered()
+        qualify(base, replica, key, restart, sql, rotate)
     except Exception:
         if identity in containers:
             print(docker("logs", "--tail", "40", identity))

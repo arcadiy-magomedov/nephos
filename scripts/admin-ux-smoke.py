@@ -12,11 +12,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from playwright.sync_api import sync_playwright, expect
 import smoke
+from dpop_proof import proof, thumbprint
 
 
 def enroll_device(subject, name):
     private = smoke.IDENTITY + "/realms/nephos/nephos-admin"
     config = smoke.request(private + "/enrollment/config")
+    assert config["persistentLogin"]["refreshBinding"] == "dpop"
     origin = urllib.parse.urlsplit(config["origin"])
     forwarded = {
         "X-Forwarded-Proto": origin.scheme,
@@ -67,24 +69,33 @@ def enroll_device(subject, name):
                 "scope": "openid offline_access",
             }
         ).encode(),
-        headers={**forwarded, "Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            **forwarded,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "DPoP": proof(key, config["issuer"] + "/protocol/openid-connect/token"),
+        },
     )
     claims = token_claims(token["id_token"])
     assert claims.get("iss") == config["issuer"] and claims.get("sub") == subject
-    return token_url, token["refresh_token"], forwarded, config["issuer"]
+    assert token_claims(token["refresh_token"])["cnf"]["jkt"] == thumbprint(key)
+    return token_url, token["refresh_token"], forwarded, config["issuer"], key
 
 
 def token_claims(token):
     return json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))
 
 
-def refresh_device(token_url, token, headers, expected):
+def refresh_device(token_url, token, headers, expected, issuer, key):
     return smoke.request(
         token_url,
         data=urllib.parse.urlencode(
             {"grant_type": "refresh_token", "client_id": "nephos-ios", "refresh_token": token}
         ).encode(),
-        headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            **headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "DPoP": proof(key, issuer + "/protocol/openid-connect/token"),
+        },
         expected=expected,
     )
 
@@ -176,8 +187,8 @@ def main():
             page.unroute(status_url, simulated_status)
             page.get_by_role("button", name="Cancel QR code", exact=True).click()
             expect(page.get_by_text("Invitation cancelled.", exact=False)).to_be_visible()
-            token_url, other_token, forwarded, issuer = enroll_device(subject, "Other phone")
-            _, selected_token, _, _ = enroll_device(subject, "Selected phone")
+            token_url, other_token, forwarded, issuer, other_key = enroll_device(subject, "Other phone")
+            _, selected_token, _, _, selected_key = enroll_device(subject, "Selected phone")
             page.reload()
             other_row = page.locator(".device-row").filter(has_text="Other phone")
             selected_row = page.locator(".device-row").filter(has_text="Selected phone")
@@ -216,7 +227,7 @@ def main():
             expect(page.get_by_text("Device access revoked.", exact=False)).to_be_visible()
             expect(selected_row).not_to_be_visible()
             expect(other_row).to_be_visible()
-            refreshed = refresh_device(token_url, other_token, forwarded, 200)
+            refreshed = refresh_device(token_url, other_token, forwarded, 200, issuer, other_key)
             assert refreshed["refresh_token"]
             for token_type in ("access_token", "id_token"):
                 claims = token_claims(refreshed[token_type])
@@ -225,7 +236,7 @@ def main():
                     token_type,
                     sorted(claims),
                 )
-            refresh_device(token_url, selected_token, forwarded, 400)
+            refresh_device(token_url, selected_token, forwarded, 400, issuer, selected_key)
             page.get_by_role("link", name="Edit profile", exact=True).click()
             page.get_by_label("Name", exact=True).fill("Updated UX qualification")
             page.get_by_role("button", name="Save", exact=True).click()

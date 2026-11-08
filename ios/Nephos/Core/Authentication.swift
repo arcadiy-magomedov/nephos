@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 import Security
-import UIKit
 
 // Wire DTOs retain the OIDC field names.
 // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -9,6 +8,7 @@ struct OIDCDiscovery: Decodable, Sendable {
     let issuer: String
     let token_endpoint: URL
     let jwks_uri: URL
+    let revocation_endpoint: URL?
 }
 // swift-format-ignore: AlwaysUseLowerCamelCase
 struct TokenResponse: Decodable, Sendable {
@@ -21,30 +21,40 @@ struct TokenResponse: Decodable, Sendable {
 enum Keychain {
     private static let service = "app.nephos.ios.session"
     private static let lock = NSRecursiveLock()
-    private static func write(_ data: Data, account: String) throws {
-        let query: [String: Any] = [
+    private static func query(account: String? = nil) -> [String: Any] {
+        var result: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service, kSecAttrAccount as String: account,
+            kSecAttrService as String: service,
         ]
+        if let account { result[kSecAttrAccount as String] = account }
+        #if os(macOS)
+            result[kSecUseDataProtectionKeychain as String] = true
+        #endif
+        return result
+    }
+    private static func write(_ data: Data, account: String) throws {
+        let query = query(account: account)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            guard SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess else {
-                throw ClientError.invalid("Unable to securely save the session.")
+        let status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+        switch status {
+        case errSecSuccess: return
+        case errSecDuplicateItem:
+            guard SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecSuccess else {
+                throw ClientError.invalid("Unable to securely update the session. Unlock the device and retry.")
             }
-        } else if status != errSecSuccess {
-            throw ClientError.invalid("Keychain is unavailable.")
+        case errSecInteractionNotAllowed:
+            throw ClientError.invalid("Unlock the device to save your session.")
+        default:
+            throw ClientError.invalid("Unable to securely save the session.")
         }
     }
     private static func read(account: String) throws -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service, kSecAttrAccount as String: account,
+        let query = query(account: account).merging([
             kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        ]) { _, new in new }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -65,34 +75,26 @@ enum Keychain {
         }
         try write(try JSONEncoder().encode(vault), account: "accounts-v1")
         // Delete the legacy item only after the new atomic account-bound record exists.
-        let status = SecItemDelete(
-            [
-                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                kSecAttrAccount as String: "current",
-            ] as CFDictionary)
+        let status = SecItemDelete(query(account: "current") as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw ClientError.invalid("Unable to finish secure session migration.")
         }
         return vault
     }
-    static func update(_ change: (inout EnrollmentVault) throws -> Void) throws {
+    @discardableResult
+    static func update(_ change: (inout EnrollmentVault) throws -> Void) throws -> EnrollmentVault {
         lock.lock()
         defer { lock.unlock() }
         var value = try vault()
         try change(&value)
         try write(try JSONEncoder().encode(value), account: "accounts-v1")
+        return value
     }
     static func save(_ credentials: Credentials) throws {
         try update { $0.save(credentials) }
     }
     static func refresh(_ credentials: Credentials, previous: Credentials) throws {
-        try update { value in
-            let account = LedgerStore.accountKey(connection: previous.connection, subject: previous.subject)
-            guard value.activeAccount == account, value.current?.nonce == previous.nonce,
-                value.current?.refreshToken == previous.refreshToken
-            else { throw CancellationError() }
-            value.sessions[account] = credentials
-        }
+        try update { try $0.refresh(credentials, previous: previous) }
     }
     static func load() throws -> Credentials? { try vault().current }
     static func prepare(qr: EnrollmentQR, connection: Connection) throws -> PendingEnrollment {
@@ -104,7 +106,7 @@ enum Keychain {
             } else {
                 let pending = try PendingEnrollment(
                     qr: qr, connection: connection, installationID: value.installationID,
-                    deviceName: UIDevice.current.name)
+                    deviceName: "Nephos iPhone")
                 value.pending = pending
                 result = pending
             }
@@ -121,8 +123,7 @@ enum Keychain {
     static func remove() throws {
         lock.lock()
         defer { lock.unlock() }
-        let status = SecItemDelete(
-            [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
+        let status = SecItemDelete(query() as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw ClientError.invalid("Unable to remove the Keychain session.")
         }
@@ -134,9 +135,18 @@ final class AuthSession: AccessTokenProviding {
     private(set) var credentials: Credentials?
     private var refreshTask: Task<String, Error>?
     private var generation = UUID()
+    private let store: any SessionStorage
+    private let renew: (@MainActor (Credentials) async throws -> Credentials)?
 
     var subject: String? { credentials?.subject }
-    init(credentials: Credentials? = nil) { self.credentials = credentials }
+    init(
+        credentials: Credentials? = nil, store: any SessionStorage = KeychainStorage(),
+        renew: (@MainActor (Credentials) async throws -> Credentials)? = nil
+    ) {
+        self.credentials = credentials
+        self.store = store
+        self.renew = renew
+    }
 
     static func isCancelled(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
@@ -149,7 +159,7 @@ final class AuthSession: AccessTokenProviding {
         guard doc.issuer == connection.config.issuer else {
             throw ClientError.invalid("OIDC issuer mismatch.")
         }
-        for endpoint in [doc.token_endpoint, doc.jwks_uri] {
+        for endpoint in [doc.token_endpoint, doc.jwks_uri, doc.revocation_endpoint].compactMap({ $0 }) {
             _ = try URLPolicy.validate(endpoint.absoluteString, allowDevelopmentHTTP: developmentHTTP(connection))
             guard URLPolicy.sameOrigin(issuer, endpoint) else {
                 throw ClientError.invalid("OIDC endpoint is outside the approved issuer origin.")
@@ -164,74 +174,26 @@ final class AuthSession: AccessTokenProviding {
             return false
         #endif
     }
-    static func requestPin(connection: Connection, email: String) async throws -> LoginPinReceipt {
-        _ = try await discovery(connection)
-        return try await LoginPinClient.request(connection: connection, email: email)
-    }
-    func login(connection: Connection, email: String, pin: String) async throws {
-        let expectedGeneration = generation
-        let discovery = try await Self.discovery(connection)
-        let nonce = try Self.random()
-        let tokens = try await Self.exchange(
-            discovery.token_endpoint,
-            [
-                "grant_type": "urn:nephos:params:oauth:grant-type:login-pin",
-                "client_id": connection.config.clientId,
-                "username": email.trimmingCharacters(in: .whitespacesAndNewlines),
-                "pin": pin,
-                "nonce": nonce,
-                "scope": "openid profile offline_access",
-                "device_id": UUID().uuidString,
-                "device_name": String(UIDevice.current.name.prefix(100)),
-            ])
-        guard let idToken = tokens.id_token else {
-            throw ClientError.invalid("OIDC response omitted the identity token.")
-        }
-        guard let refreshToken = tokens.refresh_token, !refreshToken.isEmpty else {
-            throw ClientError.invalid("OIDC response omitted the persistent refresh token.")
-        }
-        let subject = try await JWTVerifier.verify(
-            idToken, discovery: discovery, clientID: connection.config.clientId, purpose: .authorization(nonce: nonce))
-        guard generation == expectedGeneration else { throw CancellationError() }
-        let saved = Credentials(
-            connection: connection, subject: subject, nonce: nonce, accessToken: tokens.access_token,
-            refreshToken: refreshToken, expiresAt: Date().addingTimeInterval(tokens.expires_in))
-        try Keychain.save(saved)
-        credentials = saved
-    }
     func accessToken() async throws -> String {
         guard let saved = credentials else { throw ClientError.signedOut }
-        if saved.expiresAt.timeIntervalSinceNow > 60 { return saved.accessToken }
         if let refreshTask { return try await refreshTask.value }
+        if saved.expiresAt.timeIntervalSinceNow > 60 { return saved.accessToken }
         let expectedGeneration = generation
         let task = Task { @MainActor in
-            guard let refresh = saved.refreshToken else { throw ClientError.signedOut }
-            let discovery = try await Self.discovery(saved.connection)
-            let tokens: TokenResponse
-            do {
-                tokens = try await Self.exchange(
-                    discovery.token_endpoint,
-                    [
-                        "grant_type": "refresh_token", "refresh_token": refresh,
-                        "client_id": saved.connection.config.clientId,
-                    ])
-            } catch ClientError.http(400, _) { throw ClientError.signedOut }
-            if let idToken = tokens.id_token {
-                _ = try await JWTVerifier.verify(
-                    idToken, discovery: discovery, clientID: saved.connection.config.clientId,
-                    purpose: .refresh(nonce: saved.nonce, subject: saved.subject))
+            let updated: Credentials
+            if let renew = self.renew {
+                updated = try await renew(saved)
+            } else {
+                updated = try await Self.renewCredentials(saved, store: self.store)
             }
             guard self.generation == expectedGeneration else { throw CancellationError() }
-            var updated = saved
-            updated.accessToken = tokens.access_token
-            updated.refreshToken = tokens.refresh_token ?? saved.refreshToken
-            updated.expiresAt = Date().addingTimeInterval(tokens.expires_in)
-            try Keychain.refresh(updated, previous: saved)
+            try await self.store.update { try $0.refresh(updated, previous: saved) }
+            guard self.generation == expectedGeneration else { throw CancellationError() }
             self.credentials = updated
             return updated.accessToken
         }
         refreshTask = task
-        defer { refreshTask = nil }
+        defer { if generation == expectedGeneration { refreshTask = nil } }
         return try await task.value
     }
     func recoverAccessToken(rejected: String) async throws -> String {
@@ -241,33 +203,83 @@ final class AuthSession: AccessTokenProviding {
         credentials = saved
         return try await accessToken()
     }
-    func signOut() throws {
+    func signOut() async throws {
+        invalidate()
+        try await store.remove()
+    }
+    func invalidate() {
         generation = UUID()
         refreshTask?.cancel()
         refreshTask = nil
         credentials = nil
-        try Keychain.remove()
     }
-    private static func random() throws -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw ClientError.invalid("Secure random generator failed.")
+    static func renewCredentials(_ saved: Credentials, store: any SessionStorage = KeychainStorage()) async throws
+        -> Credentials
+    {
+        guard let refresh = saved.refreshToken, !refresh.isEmpty else { throw ClientError.signedOut }
+        let discovery = try await discovery(saved.connection)
+        let key = try await proofKey(for: saved, store: store)
+        let (data, response) = try await OAuthTransport.post(
+            discovery.token_endpoint,
+            fields: [
+                "grant_type": "refresh_token", "refresh_token": refresh, "client_id": saved.connection.config.clientId,
+            ], key: key)
+        let tokens = try OAuthResponse.tokens(data, status: response.statusCode)
+        if let idToken = tokens.id_token {
+            _ = try await JWTVerifier.verify(
+                idToken, discovery: discovery, clientID: saved.connection.config.clientId,
+                purpose: .refresh(nonce: saved.nonce, subject: saved.subject))
         }
-        return Hashing.base64URL(Data(bytes))
+        try await JWTVerifier.verifyAccess(
+            tokens.access_token, discovery: discovery, clientID: saved.connection.config.clientId,
+            subject: saved.subject)
+        if let thumbprint = saved.dpopKeyThumbprint {
+            guard let replacement = tokens.refresh_token else {
+                throw ClientError.invalid(
+                    "The server omitted the bound renewal credential. Your session has been kept.")
+            }
+            try RefreshTokenClaims.validateResponseCredential(
+                replacement, issuer: discovery.issuer, clientID: saved.connection.config.clientId,
+                subject: saved.subject, thumbprint: thumbprint)
+        }
+        var updated = saved
+        updated.accessToken = tokens.access_token
+        updated.refreshToken = tokens.refresh_token ?? saved.refreshToken
+        updated.expiresAt = Date().addingTimeInterval(tokens.expires_in)
+        return updated
     }
-    private static func exchange(_ endpoint: URL, _ fields: [String: String]) async throws -> TokenResponse {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
-        let body = fields.sorted { $0.key < $1.key }.map {
-            "\($0.key.addingPercentEncoding(withAllowedCharacters: allowed)!)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
-        }.joined(separator: "&")
-        let tokens = try await HTTP.json(
-            TokenResponse.self,
-            HTTP.request(
-                endpoint, method: "POST", body: Data(body.utf8), contentType: "application/x-www-form-urlencoded"))
-        guard tokens.token_type.lowercased() == "bearer", tokens.expires_in > 0, !tokens.access_token.isEmpty else {
-            throw ClientError.invalid("Unsupported token response.")
+    static func revokeCredentials(_ saved: Credentials, store: any SessionStorage) async throws {
+        let discovery = try await discovery(saved.connection)
+        guard let endpoint = discovery.revocation_endpoint, let refresh = saved.refreshToken else {
+            throw ClientError.invalid("Remote sign-out is unavailable. You can still sign out on this device only.")
         }
-        return tokens
+        let key = try await proofKey(for: saved, store: store)
+        let (_, response) = try await OAuthTransport.post(
+            endpoint,
+            fields: [
+                "client_id": saved.connection.config.clientId, "token": refresh, "token_type_hint": "refresh_token",
+            ], key: key)
+        guard response.statusCode == 200 else {
+            throw ClientError.http(
+                response.statusCode, "The server has not confirmed sign-out. Retry or sign out on this device only.")
+        }
+    }
+
+    static func proofKey(for saved: Credentials, store: any SessionStorage) async throws -> DPoPKey? {
+        guard let expected = saved.dpopKeyThumbprint else { return nil }
+        let vault = try await store.vault()
+        let account = AccountIdentity.key(connection: saved.connection, subject: saved.subject)
+        guard vault.activeAccount == account, vault.current?.nonce == saved.nonce,
+            let persisted = vault.deviceKeys[account]
+        else {
+            throw ClientError.invalid("The saved device key is unavailable. Retry after unlocking your device.")
+        }
+        let key = DPoPKey(signingKey: DeviceSigningKey(persisted: persisted))
+        let thumbprint = try await Task.detached { try key.thumbprint }.value
+        guard thumbprint == expected else {
+            throw ClientError.invalid("The saved device key does not match this session. No credentials were changed.")
+        }
+        return key
     }
 }
 
@@ -301,7 +313,7 @@ enum JWTVerifier {
     {
         let claims = try await verifiedClaims(token, discovery: discovery)
         guard claims["iss"] as? String == discovery.issuer, claims["sub"] as? String == subject,
-            claims["azp"] as? String == clientID, claims["typ"] as? String == "Bearer",
+            claims["azp"] as? String == clientID, claims["typ"] as? String == "Bearer", claims["cnf"] == nil,
             let expiry = claims["exp"] as? NSNumber, CFGetTypeID(expiry) != CFBooleanGetTypeID(),
             expiry.doubleValue.isFinite, expiry.doubleValue > Date().timeIntervalSince1970,
             let issued = claims["iat"] as? NSNumber, CFGetTypeID(issued) != CFBooleanGetTypeID(),

@@ -17,6 +17,9 @@ import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.util.JsonSerialization;
+import org.keycloak.representations.dpop.DPoP;
+import org.keycloak.services.util.DPoPUtil;
+import org.keycloak.services.clientpolicy.ClientPolicyException;
 
 public final class QrGrant extends OAuth2GrantTypeBase {
     private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(QrGrant.class);
@@ -64,11 +67,26 @@ public final class QrGrant extends OAuth2GrantTypeBase {
             String status = (String) data.get("status");
             if ("cancelled".equals(status)) return fail("invite_cancelled");
             if ("revoked".equals(status)) return fail("session_revoked");
+            boolean bound = "used".equals(status) ? data.get("dpopJkt") != null : PersistentLoginPolicy.required(client);
+            String dpopJkt = null;
+            if (bound) {
+                DPoP dpop = session.getAttribute(DPoPUtil.DPOP_SESSION_ATTRIBUTE, DPoP.class);
+                if (dpop == null) return proofFailure("dpop_proof_required");
+                dpopJkt = EnrollmentCrypto.jwkThumbprint(publicKey);
+                if (!dpopJkt.equals(dpop.getThumbprint())
+                        || ("used".equals(status) && !dpopJkt.equals(data.get("dpopJkt"))))
+                    return proofFailure("dpop_key_mismatch");
+                PersistentLoginPolicy.bind(session, client);
+            } else if (!"used".equals(status)
+                    && session.getAttribute(DPoPUtil.DPOP_SESSION_ATTRIBUTE) != null) {
+                return proofFailure("persistent_login_not_enabled");
+            }
             String scope = getRequestedScopes();
             if (!Set.of("openid", "offline_access").equals(Set.of(scope.split(" "))))
                 return fail("invalid_scope");
             String binding = String.join("\n", inviteId, requestId, fingerprint, origin, client.getClientId(),
                     nonce, name, scope, Long.toString(store.epoch(record.subject)));
+            if (bound) binding += "\ndpop:" + dpopJkt;
             proof.put("used", true);
             store.save(challenge.id, challenge.kind, challenge.subject, challenge.expiresAt, proof);
             if ("used".equals(status)) {
@@ -132,6 +150,7 @@ public final class QrGrant extends OAuth2GrantTypeBase {
             String json = JsonSerialization.writeValueAsString(response.getEntity());
             if (json.length() > 16384) throw new IllegalStateException("Token receipt too large");
             data.put("status", "used"); data.put("binding", binding);
+            if (bound) data.put("dpopJkt", dpopJkt);
             data.put("sessionId", userSession.getId()); data.put("deliveryUntil", now + 600);
             data.put("clientTimestamp", offlineClient.getTimestamp());
             data.put("receipt", EnrollmentCrypto.crypt(json, binding, true));
@@ -140,6 +159,9 @@ public final class QrGrant extends OAuth2GrantTypeBase {
             store.em.flush();
             return response;
         } catch (CorsErrorResponseException exception) { throw exception; }
+        catch (ClientPolicyException exception) {
+            throw new CorsErrorResponseException(cors, exception.getError(), exception.getErrorDetail(), exception.getErrorStatus());
+        }
         catch (IllegalArgumentException exception) { return fail("invalid_request"); }
         catch (OAuthErrorException exception) { return fail("session_revoked"); }
         catch (Exception exception) {
@@ -151,6 +173,9 @@ public final class QrGrant extends OAuth2GrantTypeBase {
     }
     private Response fail(String code) {
         throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, code, Response.Status.BAD_REQUEST);
+    }
+    private Response proofFailure(String code) {
+        throw new CorsErrorResponseException(cors, "invalid_dpop_proof", code, Response.Status.BAD_REQUEST);
     }
     @Override public EventType getEventType() { return EventType.LOGIN; }
     @Override public Set<String> getTokenParameterNames() {

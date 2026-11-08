@@ -3,12 +3,44 @@
 
 import json
 import os
+from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from admin_config import CALLBACK, CLIENT_ID, IDENTITY_PUBLIC_URL
+
+
+def configure_mobile_policy(call, token, client_id):
+    definition = json.loads((Path(__file__).resolve().parents[1] / "deploy/keycloak/nephos-realm.json").read_text())
+    base = "/admin/realms/nephos"
+    for collection, source in (("profiles", "clientProfiles"), ("policies", "clientPolicies")):
+        path = base + "/client-policies/" + collection
+        existing = call(path, token=token).get(collection, [])
+        desired = definition[source][collection]
+        names = {item["name"] for item in desired}
+        merged = [item for item in existing if item["name"] not in names] + desired
+        call(path, {collection: merged}, token, "PUT")
+    call(
+        base,
+        {
+            "accessTokenLifespan": definition["accessTokenLifespan"],
+            "revokeRefreshToken": definition["revokeRefreshToken"],
+            "offlineSessionIdleTimeout": definition["offlineSessionIdleTimeout"],
+            "offlineSessionMaxLifespanEnabled": definition["offlineSessionMaxLifespanEnabled"],
+            "clientOfflineSessionIdleTimeout": 0,
+        },
+        token,
+        "PUT",
+    )
+    path = base + "/clients/" + client_id
+    client = call(path, token=token)
+    attributes = dict(client.get("attributes", {}))
+    for name in ("client.offline.session.idle.timeout", "client.offline.session.max.lifespan"):
+        attributes.pop(name, None)
+    attributes.update({"nephos.qr.dpop.required": "true", "dpop.bound.access.tokens": "false"})
+    call(path, {**client, "attributes": attributes}, token, "PUT")
 
 
 def main():
@@ -152,6 +184,7 @@ def main():
         token=token,
         method="PUT",
     )
+    configure_mobile_policy(call, token, mobile_clients[0]["id"])
     print("Private operator and API introspection clients configured; end-user credentials unchanged.")
 
 

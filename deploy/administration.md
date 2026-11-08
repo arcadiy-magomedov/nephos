@@ -57,8 +57,8 @@ the `urn:nephos:params:oauth:grant-type:login-pin` OAuth extension grant. It
 receives normal Keycloak OIDC access, ID and offline refresh tokens; Nephos does
 not mint a parallel token format. The PIN is the bootstrap credential for that
 device, not a reusable password. API access tokens last five minutes. Offline
-refresh sessions have no idle or absolute timeout, so they persist until the
-user is disabled or an operator revokes the device session.
+refresh sessions expire after 180 days without successful renewal; the realm has
+no absolute offline-session maximum. An operator can revoke a device session sooner.
 
 The private console can list/revoke a single Nephos iOS device. Revocation
 removes its Keycloak offline session and is checked immediately by each
@@ -94,11 +94,16 @@ drop a LAN/HTTPS override while upgrading. The upgrade helper adds missing secre
 `NEPHOS_PIN_PEPPER`; existing credentials are not rotated.
 
 Compose starts the private session store, completes `admin-init`, then starts
-the console. Bootstrap is idempotent: it configures only its named client,
-the master realm's explicit private frontend origin and brute-force protection.
-It preserves other realm settings, users, credentials and the public `nephos`
-realm. The client's scope permits the existing master `admin` role; bootstrap
-does not assign that role to any user.
+the console. Bootstrap is idempotent: it configures the named operator and
+introspection clients, the master realm's explicit private frontend origin and
+brute-force protection, and the public realm's mobile scope/listener/session policy.
+It merges the named persistent-login profile/policy, enables DPoP for new QR
+enrollments, sets 180-day inactivity with no absolute offline maximum, disables
+single-use refresh rotation, and removes shorter mobile client overrides.
+Unrelated policies, users, credentials, and existing sessions are preserved;
+legacy bearer sessions are not rebound or logged out. Realm import alone does
+not perform this upgrade. The operator client's scope permits the existing
+master `admin` role; bootstrap does not assign that role to any user.
 
 Defaults:
 

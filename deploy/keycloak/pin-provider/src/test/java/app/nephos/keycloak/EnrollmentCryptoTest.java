@@ -28,6 +28,8 @@ final class EnrollmentCryptoTest {
         System.arraycopy(x, Math.max(0, x.length - 32), point, 33 - Math.min(x.length, 32), Math.min(x.length, 32));
         System.arraycopy(y, Math.max(0, y.length - 32), point, 65 - Math.min(y.length, 32), Math.min(y.length, 32));
         String key = EnrollmentCrypto.encode(point);
+        assertEquals(org.keycloak.util.JWKSUtils.computeThumbprint(
+                org.keycloak.jose.jwk.JWKBuilder.create().ec(publicKey)), EnrollmentCrypto.jwkThumbprint(key));
         String challenge = "nephos-qr-v1\nhttps://photos.example.test\nnephos-ios\ninvite\nrequest\n"
                 + EnrollmentCrypto.fingerprint(key) + "\nchallenge\n" + EnrollmentCrypto.random();
         var signer = Signature.getInstance("SHA256withECDSA");

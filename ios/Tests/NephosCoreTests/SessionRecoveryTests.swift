@@ -50,8 +50,8 @@ final class SessionRecoveryTests: XCTestCase {
     func testExpiredAccessTokenRefreshesAndRetriesWithoutInvalidatingSession() async throws {
         let tokens = RecoveryTokens()
         let client = api(tokens)
-        let page = try await client.libraries()
-        XCTAssertTrue(page.items.isEmpty)
+        let data = try await client.data(client.request("v1/libraries"))
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{\"items\":[]}")
         XCTAssertEqual(tokens.recoveries, 1)
         XCTAssertFalse(client.invalidated)
     }
@@ -69,12 +69,24 @@ final class SessionRecoveryTests: XCTestCase {
     }
 
     @MainActor
+    func testUnauthenticated401DoesNotMeanTheSavedSessionWasRevoked() async throws {
+        let client = api(RecoveryTokens())
+        defer { client.invalidate() }
+        do {
+            _ = try await HTTP.data(HTTP.request(try client.endpoint("v1/config")), session: client.session)
+            XCTFail("The configuration request must fail.")
+        } catch ClientError.http(let status, _) {
+            XCTAssertEqual(status, 401)
+        }
+    }
+
+    @MainActor
     func testTemporaryRefreshFailureDoesNotBecomeSignedOut() async throws {
         let tokens = RecoveryTokens()
         tokens.transientFailure = true
         let client = api(tokens)
         do {
-            _ = try await client.libraries()
+            _ = try await client.data(client.request("v1/libraries"))
             XCTFail("The network failure must be surfaced.")
         } catch let error as URLError {
             XCTAssertEqual(error.code, .notConnectedToInternet)

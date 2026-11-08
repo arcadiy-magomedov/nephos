@@ -95,8 +95,14 @@ enum HTTP {
     static func data(_ request: URLRequest, maximum: Int = 2 * 1024 * 1024, session: URLSession = HTTP.session)
         async throws -> Data
     {
+        let (data, response) = try await response(request, maximum: maximum, session: session)
+        try check(response, authenticated: request.value(forHTTPHeaderField: "Authorization") != nil)
+        return data
+    }
+    static func response(_ request: URLRequest, maximum: Int, session: URLSession = HTTP.session)
+        async throws -> (Data, URLResponse)
+    {
         let (stream, response) = try await session.bytes(for: request)
-        try check(response)
         guard response.expectedContentLength <= maximum else {
             throw ClientError.invalid("Response exceeds the permitted size.")
         }
@@ -105,22 +111,22 @@ enum HTTP {
             guard data.count < maximum else { throw ClientError.invalid("Response exceeds the permitted size.") }
             data.append(byte)
         }
-        return data
+        return (data, response)
     }
     static func json<T: Decodable & Sendable>(_ type: T.Type, _ request: URLRequest, session: URLSession = HTTP.session)
         async throws -> T
     {
         try JSONDecoder().decode(type, from: await data(request, session: session))
     }
-    static func check(_ response: URLResponse) throws {
+    static func check(_ response: URLResponse, authenticated: Bool = false) throws {
         guard let http = response as? HTTPURLResponse else { throw ClientError.invalid("Invalid HTTP response.") }
-        if http.statusCode == 401 { throw ClientError.signedOut }
+        if http.statusCode == 401, authenticated { throw ClientError.signedOut }
         guard (200..<300).contains(http.statusCode) else {
             let reason: String
             switch http.statusCode {
-            case 403: reason = "You no longer have permission. No local files were deleted."
+            case 403: reason = "Access was denied. Contact your administrator."
             case 404: reason = "The requested resource is unavailable."
-            case 409: reason = "The server reported a conflict. Resume to reconcile upload state."
+            case 409: reason = "The server reported a conflict. Retry the request."
             case 300..<400: reason = "Redirects are blocked to protect credentials. Configure the canonical URL."
             default: reason = "Try again when the server is available."
             }
@@ -194,13 +200,5 @@ final class API {
             retried.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             return try await HTTP.data(retried, maximum: maximum, session: session)
         }
-    }
-    func libraries(cursor: UUID? = nil) async throws -> LibraryPage {
-        try await json(
-            LibraryPage.self, "v1/libraries",
-            query: Paging.libraries(after: cursor))
-    }
-    func assets(library: UUID, cursor: GalleryCursor?) async throws -> AssetPage {
-        try await json(AssetPage.self, "v1/libraries/\(library)/assets", query: Paging.gallery(before: cursor))
     }
 }
