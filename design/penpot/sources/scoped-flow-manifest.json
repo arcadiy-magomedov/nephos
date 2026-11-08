@@ -4,10 +4,25 @@
   "teamId": "2a4e1ac4-5a73-80ac-8008-e8cce365ad2f",
   "status": "draft",
   "approval": null,
+  "approvedFlow": "nephos-mobile-sign-in",
   "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
   "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
   "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
-  "mobilePageId": "e827db53-5187-4b5b-9a4a-14097bc19764",
+  "adminPageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",
+  "userFoundationsPageId": "c3b4bb7d-05de-803c-8008-e93747c75115",
+  "userComponentsPageId": "c3b4bb7d-05de-803c-8008-e937481380d4",
+  "userPreviewsPageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+  "mobilePageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+  "galleryBoard": {
+    "id": "f6ab4ffa-9212-809d-8008-e938a09902e2",
+    "name": "User app previews",
+    "screens": [
+      "Light · Library",
+      "Dark · Library",
+      "Dark · Selection",
+      "Light · Small phone"
+    ]
+  },
   "boards": [
     {
       "id": "acd17e70-ca48-433e-afd9-e0b225e2c73f",
@@ -52,54 +67,60 @@
   ],
   "mobileBoards": [
     {
-      "id": "3f7aeeb4-ee1c-4389-8df0-d367096e3e83",
+      "id": "48c9ca24-bf06-448b-a017-a83d09e30f1b",
       "name": "Light · 01 · Sign in"
     },
     {
-      "id": "2ed4e2df-49bd-4bf2-a81a-21049c4fdb6b",
+      "id": "29e9c4af-200e-40fe-9749-2b46b7037b28",
       "name": "Light · 02 · Scan"
     },
     {
-      "id": "41c5e307-5d7f-40cd-b888-e1fa9dd29245",
+      "id": "2b705607-a281-4464-8cbc-c16531f4ec56",
       "name": "Light · 03 · Signing in"
     },
     {
-      "id": "22a4d159-a842-46c2-bd4e-ead754537221",
+      "id": "9bfedd63-2b37-45b3-ac2e-fb8f1615184d",
       "name": "Light · QR error"
     },
     {
-      "id": "7924eb43-916a-4bb1-91ce-9b55845e3953",
+      "id": "48324ed5-c592-4543-83d7-0406411d7c47",
       "name": "Dark · 01 · Sign in"
     },
     {
-      "id": "c0525ad1-4aaf-4c32-9db2-d8e16001e3a2",
+      "id": "442b18de-fdc9-4dce-b22a-de2ae8738479",
       "name": "Dark · 02 · Scan"
     },
     {
-      "id": "c29b4ee2-f5dc-4779-8e97-570a2d95557b",
+      "id": "3b8bfee0-d674-4592-963d-1957e6cfcfce",
       "name": "Dark · 03 · Signing in"
     },
     {
-      "id": "612cbb01-054d-4ddd-9e8e-7500155f3328",
+      "id": "5c03644e-f3b4-44f7-aeb0-d04e33912805",
       "name": "Dark · QR error"
     }
   ],
-  "arrows": 20,
+  "arrows": 18,
   "adminArrows": 12,
-  "mobileArrows": 8,
-  "components": 9,
+  "mobileArrows": 6,
+  "components": 15,
   "componentAssets": [
-    "Button",
-    "Text field",
-    "Checkbox",
     "Alert",
+    "Button",
+    "Checkbox",
+    "Device row",
+    "Filter chip",
+    "Icon button",
+    "Media tile",
     "Navigation item",
     "QR icon",
     "QR placeholder",
-    "Icon button",
-    "Device row"
+    "Status badge",
+    "Text field",
+    "User icon button",
+    "User tab item",
+    "User text field"
   ],
-  "variantComponents": 52,
+  "variantComponents": 135,
   "buttonVariantProperties": [
     "Type",
     "State",
@@ -109,5 +130,57 @@
   "prototypeInteractions": {
     "admin": 23,
     "mobile": 10
-  }
+  },
+  "adminFlows": [
+    {
+      "name": "Flow 2",
+      "startingBoard": "05 · Connected devices"
+    },
+    {
+      "name": "Admin · QR issuance error",
+      "startingBoard": "Error · QR issuance"
+    },
+    {
+      "name": "Flow 6",
+      "startingBoard": "Error · Device revocation"
+    },
+    {
+      "name": "Flow 4",
+      "startingBoard": "07 · Revoking device"
+    },
+    {
+      "name": "Flow 1",
+      "startingBoard": "04 · QR modal"
+    },
+    {
+      "name": "Flow 3",
+      "startingBoard": "06 · Revoke device"
+    },
+    {
+      "name": "Admin · user creation and QR",
+      "startingBoard": "01 · Users"
+    },
+    {
+      "name": "Flow 5",
+      "startingBoard": "08 · Device revoked"
+    }
+  ],
+  "mobileFlows": [
+    {
+      "name": "Mobile · light QR sign-in",
+      "startingBoard": "Light · 01 · Sign in"
+    },
+    {
+      "name": "Mobile · light QR error",
+      "startingBoard": "Light · QR error"
+    },
+    {
+      "name": "Mobile · dark QR sign-in",
+      "startingBoard": "Dark · 01 · Sign in"
+    },
+    {
+      "name": "Mobile · dark QR error",
+      "startingBoard": "Dark · QR error"
+    }
+  ]
 }
