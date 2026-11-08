@@ -4,6 +4,7 @@
   "teamId": "2a4e1ac4-5a73-80ac-8008-e8cce365ad2f",
   "status": "draft",
   "approval": null,
+  "approvedFlow": "nephos-mobile-sign-in",
   "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
   "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
   "pageId": "7b06007a-4a5b-4f2b-be6e-58af0c4f965d",

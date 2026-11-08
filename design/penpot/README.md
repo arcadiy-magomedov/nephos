@@ -49,6 +49,11 @@ separate prototype starts because the prototype does not simulate conditional
 scan outcomes. Previews: [entire mobile canvas](previews/mobile-app-canvas.png)
 and [mobile QR flow](previews/mobile-qr-flow.png).
 
+**Approved:** The light/dark mobile sign-in flow, including its scan and error
+states, was approved on 2026-11-08. Its named Penpot snapshot and
+[approved export](exports/nephos-mobile-sign-in-approved.penpot) preserve the
+baseline. The export contains the whole file, but approval covers only sign-in.
+
 The user-app boards preserve the gallery, filters, source and sharing
 indicators, selection, and navigation as visual examples. They use public-domain
 sample photos credited on the board. The new palette and components are **draft**
@@ -70,7 +75,7 @@ revocation message to simulate server confirmation. Open the revocation-error
 board to explore the alternate server outcome. These are prototype simulations,
 not implemented server behavior. Camera scanning, photo selection, real sign-in,
 and the native photo picker are likewise not implemented in the prototype.
-All designs remain **drafts**, not approved designs.
+The gallery, shared user-facing system, and admin designs remain **drafts**.
 
 ## Action placement
 

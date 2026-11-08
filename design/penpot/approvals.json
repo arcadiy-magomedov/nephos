@@ -27,6 +27,32 @@
       "mobilePageId": "c3b4bb7d-05de-803c-8008-e93748606044",
       "export": "exports/nephos-user-system.penpot",
       "notes": "Draft only. All mobile app screens and flows share the dedicated mobile canvas, separate from admin. Neutral light and dark roles, reusable variants and gallery examples are not yet adopted by the shipped iOS app."
+    },
+    {
+      "id": "nephos-mobile-sign-in",
+      "title": "Mobile QR sign-in flow",
+      "status": "approved",
+      "approval": {
+        "by": "arcadiy-magomedov",
+        "date": "2026-11-08",
+        "scope": "Light and dark sign-in, scanning, signing-in, QR error, and their prototype transitions."
+      },
+      "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+      "pageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+      "boardIds": [
+        "48c9ca24-bf06-448b-a017-a83d09e30f1b",
+        "29e9c4af-200e-40fe-9749-2b46b7037b28",
+        "2b705607-a281-4464-8cbc-c16531f4ec56",
+        "9bfedd63-2b37-45b3-ac2e-fb8f1615184d",
+        "48324ed5-c592-4543-83d7-0406411d7c47",
+        "442b18de-fdc9-4dce-b22a-de2ae8738479",
+        "3b8bfee0-d674-4592-963d-1957e6cfcfce",
+        "5c03644e-f3b4-44f7-aeb0-d04e33912805"
+      ],
+      "snapshotId": "fa0c6273-dbed-81e9-8008-ea00f3557033",
+      "revision": 107,
+      "export": "exports/nephos-mobile-sign-in-approved.penpot",
+      "notes": "Approval covers only the listed mobile sign-in screens and transitions. Gallery, shared user-facing system, and admin designs remain drafts."
     }
   ]
 }
