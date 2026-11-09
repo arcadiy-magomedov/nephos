@@ -36,23 +36,37 @@ foundations page is the source of truth for the complete palette:
 | Action | `#3157C8` | `#A9BAFA` |
 | On action | `#FFFFFF` | `#191D27` |
 
-Component variants show both appearances together. **Do not toggle the
+Component variants show both appearances together. Mobile screen frames bind
+colors to mode-neutral `semantic.user.*` and `component.user.*` aliases, so each
+screen exists once and follows the Light/Dark token sets. Source-indicator colors
+and the upload overlay remain invariant for readability over media.
+Mobile text uses direct semantic color aliases. Materialize text-range fill
+overrides before binding tokens so inherited colors do not return after reload.
+
+**Do not toggle the
 `Nephos Preview / Light` or `Dark` themes in the shared file:** Penpot 2.18.6 can reflow existing admin
 text even after the original theme is restored. Test theme switching only in an
-isolated copy. Disabled opacity is mirrored from `opacity.disabled` rather than
+isolated copy. Use the private
+[mobile theme preview](http://localhost:9001/#/workspace?team-id=2a4e1ac4-5a73-80ac-8008-e8cce365ad2f&file-id=fa0c6273-dbed-81e9-8008-ea6e916c3b63&page-id=c3b4bb7d-05de-803c-8008-e93748606044)
+and choose **Tokens → Themes → Nephos Preview → Light / Dark**. It contains
+the sign-in flow and gallery without a copied admin-screen canvas; it is not
+the canonical source. Disabled opacity is mirrored from `opacity.disabled` rather than
 dynamically bound: update the disabled components if that token changes.
 
-The mobile canvas contains the light/dark QR sign-in flows above the gallery
-examples. Each path runs Sign in → Scan → Signing in; invalid or expired codes
+The mobile canvas contains one theme-aware QR sign-in flow above the separately
+marked gallery section. The path runs Sign in → Scan → Signing in; invalid or expired codes
 branch from Scan to QR error, and Retry returns to Scan. The error states have
 separate prototype starts because the prototype does not simulate conditional
-scan outcomes. Previews: [entire mobile canvas](previews/mobile-app-canvas.png)
+scan outcomes. Existing static previews predate the theme-aware consolidation:
+[entire mobile canvas](previews/mobile-app-canvas.png)
 and [mobile QR flow](previews/mobile-qr-flow.png).
 
-**Approved:** The light/dark mobile sign-in flow, including its scan and error
+**Approved baseline:** The original light/dark mobile sign-in flow, including its scan and error
 states, was approved on 2026-11-08. Its named Penpot snapshot and
 [approved export](exports/nephos-mobile-sign-in-approved.penpot) preserve the
 baseline. The export contains the whole file, but approval covers only sign-in.
+The current theme-aware consolidation is a draft for review; the original
+interaction paths and both palettes are preserved.
 
 The user-app boards preserve the gallery, filters, source and sharing
 indicators, selection, and navigation as visual examples. They use public-domain
@@ -60,6 +74,57 @@ sample photos credited on the board. The new palette and components are **draft*
 designs and have not yet been adopted by the shipped iOS app. Portable previews:
 [foundations](previews/user-foundations.png), [components](previews/user-components.png),
 and [gallery](previews/user-app-previews.png).
+
+The mobile gallery uses twelve complete, linked **MediaThumbnail** instances.
+The component on **04 · User components** contains the image, source/shared
+indicators, upload overlay, and video duration. Select the inner `thumbnail-*`
+instance, not its outer `gallery-cell-*` layout board, to change **Kind**
+(`Photo` / `Video`) and the boolean variant controls **hasLocalMedia**,
+**isUploaded**, **isShared**, and **isUploading**. These select predefined
+visual variants, not runtime conditional logic.
+
+The twelve variants cover Photo/Video for local-only, uploaded-only, local and
+uploaded, shared remote, shared local, and uploading states. Shared states show
+only the shared icon. Override the nested `media / Media slot` image fill and
+`duration / Label` text per instance; these overrides survive variant changes.
+Duration is visible only for Video and retains the same 4px edge insets as the
+source indicators. Uploading retains the editable, static angular-gradient
+sample; it is not an animated progress implementation. The main gallery and
+isolated mobile theme preview use the same component structure.
+
+The mobile viewer draft adds photo, video-playback, and expanded **More** states.
+Tap the zinnia photo or the video thumbnail in Today to open the corresponding
+viewer; Back returns to the gallery. Media fits without cropping. Capture
+date/time appear only in the header instead of storage-status copy; the
+illustrated metadata is sample content, not EXIF extracted from the bundled
+media. Location is not displayed in the current draft.
+
+The viewer offers **Share** and **More**, without Favorite or Info.
+More opens a small context menu anchored beneath the **…** button, containing
+**Download original** and destructive **Delete**, without background dimming.
+Tapping outside dismisses it and preserves the current photo/video context.
+Albums are absent from navigation and the menu.
+`MediaActionsMenu` has `isShared=false/true` variants; the shared variant has
+**Download original** only and no Delete action. `MediaDeletionDialog` has
+`isUploaded=true/false` variants. Uploaded media offers **Delete from device**,
+**Delete everywhere**, and **Cancel**; not-uploaded media offers **Delete from
+device** and **Cancel**. The first, second, third, and sixth Today thumbnails
+demonstrate not-uploaded, uploaded, shared, and uploaded-video flows.
+Device-only deletion preserves an existing backup; shared media cannot be
+deleted. Destructive operations and downstream downloads are not simulated.
+Video uses a static
+poster and playback-control illustration, not an embedded playback engine.
+
+Current portable previews:
+[gallery](previews/mobile-gallery.png),
+[photo viewer](previews/mobile-photo-viewer.png),
+[video viewer](previews/mobile-video-viewer.png),
+[anchored menu](previews/mobile-media-menu.png),
+[menu variants](previews/mobile-media-menu-variants.png), and
+[deletion confirmations](previews/mobile-delete-confirmations.png).
+These show the current Dark appearance; the new viewer/dialog states have not
+been visually rechecked in Light. The separate mobile theme preview currently
+contains sign-in and gallery only, not the new viewer and deletion flows.
 
 The separate admin canvas includes user creation, QR enrollment,
 connected devices, and device revocation with confirmation, pending, success,
@@ -97,8 +162,8 @@ The Components canvas documents the shared action rules, based on
 Nephos deliberately retains inset, rounded controls rather than Carbon's
 full-bleed modal footer. Do not mix in a competing primary-left ordering.
 
-All thirteen comment threads are resolved on the live Penpot file; their history
-remains there. Comments are not included in `.penpot` exports and require a
+Comment threads and their resolution history remain on the live Penpot file.
+Comments are not included in `.penpot` exports and require a
 live-server backup to preserve. Historical feedback anchors remain on their
 original page, even when they concern a moved mobile screen. Credentials are in
 the ignored `.credentials.json` file.
@@ -121,6 +186,11 @@ signing in. The existing installation already has its profile.
 
 `exports/nephos-user-system.penpot` is the latest portable editable draft
 export of the shared file, including the user-facing library.
+The 2026-11-09 delivery captures live revision 261. It was restored in an
+isolated project: all six pages, 151 component records, variant properties,
+token definitions, theme selections, geometry, and prototype destinations
+matched the source. Saved View-mode checks covered uploaded photo/video,
+not-uploaded media, shared media without Delete, and confirmation cancellation.
 `exports/nephos-admin-user-qr.penpot` preserves the earlier admin/QR draft.
 Import an export from the Penpot dashboard on a new installation; file and page IDs
 may change, and the imported file may need to be published as a library again.
