@@ -29,6 +29,26 @@
       "notes": "Draft only. All mobile app screens and flows share the dedicated mobile canvas, separate from admin. Neutral light and dark roles, reusable variants and gallery examples are not yet adopted by the shipped iOS app."
     },
     {
+      "id": "nephos-mobile-media",
+      "title": "Theme-aware gallery, media viewers, and deletion flows",
+      "status": "draft",
+      "approval": null,
+      "fileId": "2a4e1ac4-5a73-80ac-8008-e8cfe4eedfef",
+      "pageId": "c3b4bb7d-05de-803c-8008-e93748606044",
+      "componentsPageId": "c3b4bb7d-05de-803c-8008-e937481380d4",
+      "boardIds": [
+        "c1585415-02be-80a0-8008-ea533a206385",
+        "23ccb51c-a4e9-8083-8008-ea8e36b00794",
+        "23ccb51c-a4e9-8083-8008-ea8e36f89f2e",
+        "e2657f81-d23b-801d-8008-ebaf49b58a7a",
+        "c7839ae1-d2ca-80ba-8008-ebc1e6e883e5",
+        "c7839ae1-d2ca-80ba-8008-ebc1f65d102e"
+      ],
+      "revision": 261,
+      "export": "exports/nephos-user-system.penpot",
+      "notes": "Draft only. Includes complete thumbnail variants, anchored menus with isShared variants, and isUploaded deletion-confirmation variants. Location, Albums, Favorite, and Info are not displayed. Shared media has no Delete action. Destructive operations are not simulated. The original approved sign-in export remains unchanged."
+    },
+    {
       "id": "nephos-mobile-sign-in",
       "title": "Mobile QR sign-in flow",
       "status": "approved",

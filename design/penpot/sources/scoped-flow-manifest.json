@@ -4,6 +4,10 @@
   "teamId": "2a4e1ac4-5a73-80ac-8008-e8cce365ad2f",
   "status": "draft",
   "approval": null,
+  "export": "exports/nephos-user-system.penpot",
+  "exportRevision": 261,
+  "exportSha256": "7b820277f493f9491f993e7e7d1393b76d4531fbfdd8e6da3863527884724e4b",
+  "restoreVerified": true,
   "approvedFlow": "nephos-mobile-sign-in",
   "foundationsPageId": "a7237ac9-d665-41b8-a500-6294db96931c",
   "componentsPageId": "5f1a2c5b-c560-492f-860c-a6e250be0720",
@@ -14,13 +18,10 @@
   "userPreviewsPageId": "c3b4bb7d-05de-803c-8008-e93748606044",
   "mobilePageId": "c3b4bb7d-05de-803c-8008-e93748606044",
   "galleryBoard": {
-    "id": "f6ab4ffa-9212-809d-8008-e938a09902e2",
-    "name": "User app previews",
+    "id": "c1585415-02be-80a0-8008-ea533a206385",
+    "name": "Gallery · Theme-aware · Single screen draft",
     "screens": [
-      "Light · Library",
-      "Dark · Library",
-      "Dark · Selection",
-      "Light · Small phone"
+      "Gallery · Theme-aware · Single screen draft"
     ]
   },
   "boards": [
@@ -68,41 +69,49 @@
   "mobileBoards": [
     {
       "id": "48c9ca24-bf06-448b-a017-a83d09e30f1b",
-      "name": "Light · 01 · Sign in"
+      "name": "Sign-in · 01 · Entry"
     },
     {
       "id": "29e9c4af-200e-40fe-9749-2b46b7037b28",
-      "name": "Light · 02 · Scan"
+      "name": "Sign-in · 02 · Scan QR"
     },
     {
       "id": "2b705607-a281-4464-8cbc-c16531f4ec56",
-      "name": "Light · 03 · Signing in"
+      "name": "Sign-in · 03 · Connecting"
     },
     {
       "id": "9bfedd63-2b37-45b3-ac2e-fb8f1615184d",
-      "name": "Light · QR error"
+      "name": "Sign-in · QR error"
     },
     {
-      "id": "48324ed5-c592-4543-83d7-0406411d7c47",
-      "name": "Dark · 01 · Sign in"
+      "id": "c1585415-02be-80a0-8008-ea533a206385",
+      "name": "Gallery · Theme-aware · Single screen draft"
     },
     {
-      "id": "442b18de-fdc9-4dce-b22a-de2ae8738479",
-      "name": "Dark · 02 · Scan"
+      "id": "23ccb51c-a4e9-8083-8008-ea8e36b00794",
+      "name": "Media viewer - Photo - theme-aware draft"
     },
     {
-      "id": "3b8bfee0-d674-4592-963d-1957e6cfcfce",
-      "name": "Dark · 03 · Signing in"
+      "id": "23ccb51c-a4e9-8083-8008-ea8e36f89f2e",
+      "name": "Media viewer - Video - theme-aware draft"
     },
     {
-      "id": "5c03644e-f3b4-44f7-aeb0-d04e33912805",
-      "name": "Dark · QR error"
+      "id": "e2657f81-d23b-801d-8008-ebaf49b58a7a",
+      "name": "Media viewer - Anchored More menu expanded - theme-aware draft"
+    },
+    {
+      "id": "c7839ae1-d2ca-80ba-8008-ebc1e6e883e5",
+      "name": "Media viewer - Not uploaded - theme-aware draft"
+    },
+    {
+      "id": "c7839ae1-d2ca-80ba-8008-ebc1f65d102e",
+      "name": "Media viewer - Shared - theme-aware draft"
     }
   ],
-  "arrows": 18,
+  "arrows": 15,
   "adminArrows": 12,
-  "mobileArrows": 6,
-  "components": 15,
+  "mobileArrows": 3,
+  "components": 18,
   "componentAssets": [
     "Alert",
     "Button",
@@ -111,6 +120,9 @@
     "Filter chip",
     "Icon button",
     "Media tile",
+    "MediaActionsMenu",
+    "MediaDeletionDialog",
+    "MediaThumbnail",
     "Navigation item",
     "QR icon",
     "QR placeholder",
@@ -120,7 +132,22 @@
     "User tab item",
     "User text field"
   ],
-  "variantComponents": 135,
+  "variantComponents": 151,
+  "mediaComponentProperties": {
+    "MediaThumbnail": [
+      "Kind",
+      "hasLocalMedia",
+      "isUploaded",
+      "isShared",
+      "isUploading"
+    ],
+    "MediaActionsMenu": [
+      "isShared"
+    ],
+    "MediaDeletionDialog": [
+      "isUploaded"
+    ]
+  },
   "buttonVariantProperties": [
     "Type",
     "State",
@@ -129,7 +156,7 @@
   ],
   "prototypeInteractions": {
     "admin": 23,
-    "mobile": 10
+    "mobile": 24
   },
   "adminFlows": [
     {
@@ -167,20 +194,28 @@
   ],
   "mobileFlows": [
     {
-      "name": "Mobile · light QR sign-in",
-      "startingBoard": "Light · 01 · Sign in"
+      "name": "Mobile · QR sign-in",
+      "startingBoard": "Sign-in · 01 · Entry"
     },
     {
-      "name": "Mobile · light QR error",
-      "startingBoard": "Light · QR error"
+      "name": "Mobile · QR error",
+      "startingBoard": "Sign-in · QR error"
     },
     {
-      "name": "Mobile · dark QR sign-in",
-      "startingBoard": "Dark · 01 · Sign in"
+      "name": "More - anchored menu preview",
+      "startingBoard": "Media viewer - Anchored More menu expanded - theme-aware draft"
     },
     {
-      "name": "Mobile · dark QR error",
-      "startingBoard": "Dark · QR error"
+      "name": "Gallery - media viewer",
+      "startingBoard": "Gallery · Theme-aware · Single screen draft"
+    },
+    {
+      "name": "Flow 1",
+      "startingBoard": "Delete confirmation - Uploaded overlay"
+    },
+    {
+      "name": "Flow 2",
+      "startingBoard": "Delete confirmation - Local overlay"
     }
   ]
 }
