@@ -37,11 +37,16 @@ final class SignInModel {
 
     func restore() async {
         await run {
-            self.screen = .restoring
+            if let session = self.auth, self.screen == .signedIn {
+                try await self.validate(session)
+                try Task.checkCancellation()
+                self.message = ""
+                return
+            }
             let vault = try await self.store.vault()
             try Task.checkCancellation()
             if let saved = vault.current {
-                try await self.establish(saved)
+                try await self.establish(saved, restoringLocalContent: true)
             } else if let pending = vault.pending {
                 guard pending.installationID == vault.installationID else { throw QREnrollmentError.invalidProof }
                 let connection = try await self.connect(pending.qr)
@@ -150,11 +155,13 @@ final class SignInModel {
         try await establish(credentials)
     }
 
-    private func establish(_ credentials: Credentials) async throws {
+    private func establish(_ credentials: Credentials, restoringLocalContent: Bool = false) async throws {
         let session = AuthSession(credentials: credentials, store: store, renew: renew)
         auth?.invalidate()
         auth = session
         serverName = credentials.connection.baseURL.host ?? credentials.connection.baseURL.absoluteString
+        // Local Photos needs no server authorization. Protected requests still authenticate independently.
+        if restoringLocalContent { screen = .signedIn }
         try await validate(session)
         try Task.checkCancellation()
         screen = .signedIn
@@ -193,6 +200,12 @@ final class SignInModel {
                 screen = .recovery
                 message = error.localizedDescription
             }
+            return
+        }
+        if auth?.credentials != nil {
+            screen = .signedIn
+            message =
+                AuthSession.isCancelled(error) ? "Connection interrupted. Please retry." : error.localizedDescription
             return
         }
         do {

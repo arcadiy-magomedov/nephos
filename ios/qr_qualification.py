@@ -47,6 +47,12 @@ def failure_summary(result_bundle):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simulator", required=True)
+    parser.add_argument("--only-testing", action="append", default=[], help="Run a specific XCTest identifier.")
+    parser.add_argument(
+        "--local-gallery",
+        action="store_true",
+        help="Also test the local gallery. Adds Photos fixtures and deletes only its own fixture; use a disposable simulator.",
+    )
     parser.add_argument(
         "--qr-image", type=Path, help="Fresh real invitation PNG from the isolated HTTPS service fixture."
     )
@@ -59,7 +65,10 @@ def main():
     logs.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="qr-native-", dir=scratch) as directory:
         workspace = Path(directory)
-        destination = project(workspace, test_sources=[IOS / "Qualification/QREnrollmentUITests.swift"])
+        test_sources = [IOS / "Qualification/QREnrollmentUITests.swift"]
+        if args.local_gallery:
+            test_sources.append(IOS / "Qualification/LocalGalleryUITests.swift")
+        destination = project(workspace, test_sources=test_sources)
         result_bundle = logs / (workspace.name + ".xcresult")
         common = [
             "xcodebuild",
@@ -114,6 +123,7 @@ def main():
                     "NO",
                     "-resultBundlePath",
                     str(result_bundle),
+                    *["-only-testing:" + identifier for identifier in args.only_testing],
                 ],
                 check=True,
             )

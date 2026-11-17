@@ -124,6 +124,7 @@ jobs:
           global-json-file: global.json
       - run: python3 scripts/admin-tests.py
       - run: python3 scripts/dev-env.py
+      - run: python3 scripts/cleanup-tests.py
       - run: python3 scripts/admin-test-tls.py
       - name: Use the generated qualification trust bundle
         run: |
@@ -270,13 +271,27 @@ jobs:
           xcodebuild -quiet -project ios/Nephos.xcodeproj -scheme Nephos \
             -configuration Release -destination 'generic/platform=iOS' \
             -derivedDataPath ios/.derivedData-device CODE_SIGNING_ALLOWED=NO build
-      - name: Native sign-in and Keychain acceptance
+      - name: Create disposable iOS qualification simulator
         run: |
-          simulator="$(xcrun simctl list devices available -j | jq -er '
-            [.devices | to_entries[] | select(.key | contains("iOS"))
-              | .value[] | select(.name | startswith("iPhone")) | .udid][0]')"
+          runtime="$(xcrun simctl list runtimes -j | jq -er \
+            '[.runtimes[] | select(.isAvailable and (.identifier | contains("iOS")))][0].identifier')"
+          device="$(xcrun simctl list devicetypes -j | jq -er \
+            '[.devicetypes[] | select(.name | startswith("iPhone"))][0].identifier')"
+          simulator="$(xcrun simctl create nephos-ios-ci "$device" "$runtime")"
+          echo "IOS_SIMULATOR=$simulator" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator"
           xcrun simctl bootstatus "$simulator" -b
-          python3 ios/qr_qualification.py --simulator "$simulator"
+      - name: Native sign-in, Keychain and Photos acceptance
+        run: python3 ios/qr_qualification.py --simulator "$IOS_SIMULATOR" --local-gallery
+      - name: Generic background file upload acceptance
+        run: python3 ios/file_upload_qualification.py --simulator "$IOS_SIMULATOR"
+      - name: Remove disposable iOS qualification simulator
+        if: always()
+        run: |
+          if [ -n "${IOS_SIMULATOR:-}" ]; then
+            xcrun simctl shutdown "$IOS_SIMULATOR" || true
+            xcrun simctl delete "$IOS_SIMULATOR"
+          fi
 
   native-qr:
     name: Native QR real-service acceptance

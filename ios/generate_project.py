@@ -125,6 +125,13 @@ def generate():
         "LSRequiresIPhoneOS": True,
         "NSCameraUsageDescription": "Scan your administrator's single-use Nephos sign-in QR code.",
         "NSLocalNetworkUsageDescription": "Connect to the Nephos server in your administrator's QR code.",
+        "NSPhotoLibraryUsageDescription": "Browse, share, and back up your photos and videos to your Nephos server. Automatic upload is off until you enable it. Delete items only when you confirm.",
+        "UIBackgroundModes": ["fetch", "processing"],
+        "BGTaskSchedulerPermittedIdentifiers": [
+            "app.nephos.ios.upload-refresh",
+            "app.nephos.ios.upload-processing",
+        ],
+        "PHPhotoLibraryPreventAutomaticLimitedAccessAlert": True,
         "UILaunchScreen": {},
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
         "UISupportedInterfaceOrientations": [
