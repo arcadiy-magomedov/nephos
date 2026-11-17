@@ -28,7 +28,7 @@ try:
     )
     for attempt in range(60):
         ready = subprocess.run(
-            ["docker", "exec", name, "pg_isready", "-U", "postgres"],
+            ["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -43,6 +43,8 @@ try:
         "-i",
         name,
         "psql",
+        "-h",
+        "127.0.0.1",
         "-v",
         "ON_ERROR_STOP=1",
         "-U",
@@ -63,6 +65,8 @@ try:
         "-i",
         name,
         "psql",
+        "-h",
+        "127.0.0.1",
         "-v",
         "ON_ERROR_STOP=1",
         "-U",

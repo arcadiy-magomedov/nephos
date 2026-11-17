@@ -123,8 +123,8 @@ jobs:
         with:
           global-json-file: global.json
       - run: python3 scripts/admin-tests.py
-      - run: python3 scripts/cleanup-tests.py
       - run: python3 scripts/dev-env.py
+      - run: python3 scripts/cleanup-tests.py
       - run: python3 scripts/admin-test-tls.py
       - name: Use the generated qualification trust bundle
         run: |
