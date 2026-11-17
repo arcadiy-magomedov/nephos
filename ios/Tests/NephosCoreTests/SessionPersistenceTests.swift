@@ -151,12 +151,95 @@ final class SessionPersistenceTests: XCTestCase {
             validate: { session in _ = try await session.accessToken() })
         XCTAssertEqual(model.screen, .restoring)
         await model.restore()
-        XCTAssertEqual(model.screen, .recovery)
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertFalse(model.message.isEmpty)
         XCTAssertNotNil(try store.vault().current)
         state.offline = false
         await model.restore()
         XCTAssertEqual(model.screen, .signedIn)
         XCTAssertEqual(model.serverName, "photos.example.test")
+        XCTAssertTrue(model.message.isEmpty)
+    }
+
+    @MainActor
+    func testColdLaunchAndForegroundValidationNeverReplaceLocalContent() async throws {
+        let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
+        var completion: CheckedContinuation<Void, Error>?
+        var sessions: [ObjectIdentifier] = []
+        let model = SignInModel(
+            store: store,
+            validate: { session in
+                sessions.append(ObjectIdentifier(session))
+                try await withCheckedThrowingContinuation { completion = $0 }
+            })
+        let coldLaunch = Task { await model.restore() }
+        while completion == nil { await Task.yield() }
+        XCTAssertEqual(model.screen, .signedIn)
+        completion?.resume()
+        await coldLaunch.value
+        completion = nil
+        let foreground = Task { await model.restore() }
+        while completion == nil { await Task.yield() }
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertEqual(sessions.count, 2)
+        XCTAssertEqual(sessions.first, sessions.last)
+        completion?.resume()
+        await foreground.value
+        XCTAssertTrue(model.message.isEmpty)
+    }
+
+    @MainActor
+    func testForegroundNetworkFailurePreservesContentAndRetryClearsWarning() async throws {
+        let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
+        var offline = false
+        let model = SignInModel(
+            store: store,
+            validate: { _ in
+                if offline { throw URLError(.notConnectedToInternet) }
+            })
+        await model.restore()
+        offline = true
+        await model.restore()
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertFalse(model.message.isEmpty)
+        XCTAssertNotNil(try store.vault().current)
+        offline = false
+        await model.restore()
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertTrue(model.message.isEmpty)
+    }
+
+    @MainActor
+    func testWarmValidationFailureKeepsLocalContentEvenIfKeychainIsTemporarilyLocked() async throws {
+        let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
+        var offline = false
+        let model = SignInModel(
+            store: store,
+            validate: { _ in
+                if offline { throw URLError(.notConnectedToInternet) }
+            })
+        await model.restore()
+        store.readFails = true
+        offline = true
+        await model.restore()
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertFalse(model.message.isEmpty)
+    }
+
+    @MainActor
+    func testValidationCompletingAfterSignOutCannotRestoreContent() async throws {
+        let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
+        var completion: CheckedContinuation<Void, Error>?
+        let model = SignInModel(
+            store: store,
+            validate: { _ in try await withCheckedThrowingContinuation { completion = $0 } })
+        let restore = Task { await model.restore() }
+        while completion == nil { await Task.yield() }
+        await model.signOut()
+        completion?.resume()
+        await restore.value
+        XCTAssertEqual(model.screen, .welcome)
+        XCTAssertNil(try store.vault().current)
     }
 
     @MainActor

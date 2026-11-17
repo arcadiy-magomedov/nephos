@@ -148,11 +148,11 @@ final class AuthSession: AccessTokenProviding {
         self.renew = renew
     }
 
-    static func isCancelled(_ error: Error) -> Bool {
+    nonisolated static func isCancelled(_ error: Error) -> Bool {
         error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    static func discovery(_ connection: Connection) async throws -> OIDCDiscovery {
+    nonisolated static func discovery(_ connection: Connection) async throws -> OIDCDiscovery {
         let issuer = try URLPolicy.validate(connection.config.issuer, allowDevelopmentHTTP: developmentHTTP(connection))
         let doc = try await HTTP.json(
             OIDCDiscovery.self, HTTP.request(issuer.appendingPathComponent(".well-known/openid-configuration")))
@@ -167,7 +167,7 @@ final class AuthSession: AccessTokenProviding {
         }
         return doc
     }
-    static func developmentHTTP(_ connection: Connection) -> Bool {
+    nonisolated static func developmentHTTP(_ connection: Connection) -> Bool {
         #if DEBUG
             return connection.allowDevelopmentHTTP
         #else
@@ -213,7 +213,8 @@ final class AuthSession: AccessTokenProviding {
         refreshTask = nil
         credentials = nil
     }
-    static func renewCredentials(_ saved: Credentials, store: any SessionStorage = KeychainStorage()) async throws
+    nonisolated static func renewCredentials(_ saved: Credentials, store: any SessionStorage = KeychainStorage())
+        async throws
         -> Credentials
     {
         guard let refresh = saved.refreshToken, !refresh.isEmpty else { throw ClientError.signedOut }
@@ -248,7 +249,7 @@ final class AuthSession: AccessTokenProviding {
         updated.expiresAt = Date().addingTimeInterval(tokens.expires_in)
         return updated
     }
-    static func revokeCredentials(_ saved: Credentials, store: any SessionStorage) async throws {
+    nonisolated static func revokeCredentials(_ saved: Credentials, store: any SessionStorage) async throws {
         let discovery = try await discovery(saved.connection)
         guard let endpoint = discovery.revocation_endpoint, let refresh = saved.refreshToken else {
             throw ClientError.invalid("Remote sign-out is unavailable. You can still sign out on this device only.")
@@ -265,7 +266,7 @@ final class AuthSession: AccessTokenProviding {
         }
     }
 
-    static func proofKey(for saved: Credentials, store: any SessionStorage) async throws -> DPoPKey? {
+    nonisolated static func proofKey(for saved: Credentials, store: any SessionStorage) async throws -> DPoPKey? {
         guard let expected = saved.dpopKeyThumbprint else { return nil }
         let vault = try await store.vault()
         let account = AccountIdentity.key(connection: saved.connection, subject: saved.subject)

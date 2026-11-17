@@ -8,6 +8,8 @@ namespace Nephos.Storage.Api.Uploads;
 
 public interface IUploadRepository
 {
+    Task<Upload> RetryAsync(Guid id, CancellationToken token) =>
+        throw new UploadConflictException("This storage repository does not support restarting failed uploads.");
     Task<Upload> CreateAsync(UploadIntent intent, string subject, CancellationToken token);
     Task<Upload?> FindAsync(Guid id, CancellationToken token);
     Task<int[]> PartsAsync(Guid id, CancellationToken token);
@@ -23,6 +25,43 @@ public interface IUploadRepository
 
 public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolumeStore volume) : IUploadRepository
 {
+    public async Task<Upload> RetryAsync(Guid id, CancellationToken token)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await using (var gate = Command(connection, transaction, "SELECT pg_advisory_xact_lock(48465002)"))
+            await gate.ExecuteNonQueryAsync(token);
+        var upload = await SingleAsync(Command(connection, transaction,
+            $"SELECT {Columns} FROM uploads WHERE id=$1 AND released_at IS NULL FOR UPDATE", id), token)
+            ?? throw new UploadConflictException("The upload is unavailable.");
+        if (upload.State != "failed") return upload;
+        await using (var deleting = Command(connection, transaction,
+            "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=$1 AND deleting)", upload.ExpectedHash))
+            if ((bool)(await deleting.ExecuteScalarAsync(token))!)
+                throw new UploadConflictException("Blob cleanup is pending. Retry with the same intent later.");
+        await using (var quota = Command(connection, transaction, """
+            SELECT count(*) FILTER(WHERE subject=$1),coalesce(sum(size),0)
+            FROM uploads WHERE state IN ('uploading','verifying')
+            """, upload.Subject))
+        await using (var reader = await quota.ExecuteReaderAsync(token))
+        {
+            await reader.ReadAsync(token);
+            if (reader.GetInt64(0) >= 16 || reader.GetFieldValue<decimal>(1) + upload.Size > 64L * 1024 * 1024 * 1024)
+                throw new UploadQuotaException("Pending upload budget exhausted. Complete existing uploads first.");
+        }
+        if (!volume.HasSpace(upload.Size * 2))
+            throw new UploadQuotaException("Insufficient storage headroom for staging and verification.");
+        volume.RemoveStaging(id);
+        await using (var parts = Command(connection, transaction, "DELETE FROM upload_parts WHERE upload_id=$1", id))
+            await parts.ExecuteNonQueryAsync(token);
+        await using (var restart = Command(connection, transaction, """
+            UPDATE uploads SET state='uploading',error=NULL,updated_at=now() WHERE id=$1
+            """, id))
+            await restart.ExecuteNonQueryAsync(token);
+        await transaction.CommitAsync(token);
+        return upload with { State = "uploading", Error = null };
+    }
+
     public async Task<StorageMetrics> MetricsAsync(CancellationToken token)
     {
         await using var query = dataSource.CreateCommand("""

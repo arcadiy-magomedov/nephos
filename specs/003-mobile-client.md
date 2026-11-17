@@ -145,8 +145,11 @@ are normative. The device session must survive token expiry, normal app/OS
 updates, restarts, suspension, reboot, network changes, and offline periods up
 to the configured 180-day inactivity timeout without another QR code. A device
 that has not successfully renewed for 180 days must be enrolled again. On
-launch, use a neutral restoration state; offline recovery must preserve the
-account without pretending protected APIs are available. Access tokens can be
+launch, restore the saved account without a visible session-refresh screen and
+keep local Photos browsing available while server validation runs silently.
+Foreground validation must preserve the current gallery/viewer and its position.
+Offline recovery must preserve the account without pretending protected APIs are
+available; definitive revocation still returns to sign-in. Access tokens can be
 reused during their short lifetime; silent renewal and the long-lived device
 session are separate concepts. Background refresh may be attempted
 opportunistically but cannot guarantee the session stays active.
@@ -242,6 +245,13 @@ Do not remove an in-flight request body to meet a cache budget; defer new export
 and report low space instead. Reconcile surviving OS tasks with the durable
 ledger on launch and preserve retry-safe source mappings.
 
+The iOS transport must remain file-type agnostic: accept immutable local files,
+caller-provided HTTPS requests and opaque recovery context without PhotoKit,
+media-role, library, batch or media-size assumptions. Photos discovery, compound
+manifests, media chunking and final backup evidence are separate adapters. Resolve
+upload destinations from the verified QR-enrolled connection, not a hardcoded
+Info.plist server URL.
+
 ### 3.7 C07 - Scheduling and resource policy
 
 Use iOS background URLSession transfers and permitted background task scheduling;
@@ -255,8 +265,9 @@ network can delay discovery and transfers. Surface pending/deferred work rather
 than promising immediate backup while the app is not running.
 
 Configure bounded concurrency, staging, retry/backoff, and per-run work.
-Expose Wi-Fi/cellular, roaming, charging, and battery policies; exact settings
-and defaults remain open. Manual foreground upload can make progress when
+The current iOS settings expose All networks, Wi-Fi only and Disabled, with
+Disabled as the default. Charging, roaming and finer battery controls remain
+future settings. Manual foreground upload can make progress when
 background opportunities are scarce. Complete OS callbacks within their budgets
 and checkpoint unfinished work for later.
 

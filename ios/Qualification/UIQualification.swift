@@ -13,10 +13,22 @@ final class QualificationApp: UIResponder, UIApplicationDelegate {
         self.window = window
         let environment = ProcessInfo.processInfo.environment
         window.overrideUserInterfaceStyle = environment["NEPHOS_UI_THEME"] == "dark" ? .dark : .light
-        window.rootViewController = UIHostingController(rootView: ProgressView("Restoring session"))
+        window.rootViewController = UIHostingController(rootView: MediaStyle.background.ignoresSafeArea())
         window.makeKeyAndVisible()
         Task { @MainActor in
             do {
+                if environment["NEPHOS_UI_SCREEN"] == "generic-file-upload" {
+                    guard let raw = environment["NEPHOS_FILE_UPLOAD_ORIGIN"], let origin = URL(string: raw) else {
+                        throw FileUploadError.invalid("Missing loopback upload fixture.")
+                    }
+                    try await FileUploadQualification.start(origin: origin)
+                    show("Generic file uploads queued")
+                    return
+                }
+                if environment["NEPHOS_UI_SCREEN"] == "local-gallery" {
+                    window.rootViewController = UIHostingController(rootView: LocalGalleryQualification())
+                    return
+                }
                 if environment["NEPHOS_UI_SCREEN"] == "qr-native-checks" {
                     try await Task.detached { try QRNativeQualification.checkPersistence() }.value
                     show("QR native checks passed")
@@ -74,18 +86,20 @@ final class QualificationApp: UIResponder, UIApplicationDelegate {
                     }
                     let model = SignInModel()
                     await model.restore()
-                    guard model.screen == .signedIn else { throw ClientError.invalid("Session restoration failed.") }
+                    guard model.screen == .signedIn, model.message.isEmpty else {
+                        throw ClientError.invalid("Session restoration failed.")
+                    }
                     guard try await KeychainStorage().vault().current?.dpopKeyThumbprint != nil else {
                         throw ClientError.invalid("Restoration silently lost device binding.")
                     }
-                    window.rootViewController = UIHostingController(rootView: SignInView(model: model))
+                    window.rootViewController = UIHostingController(rootView: AppRootView(model: model))
                     return
                 }
                 try await KeychainStorage().remove()
                 let model = SignInModel()
                 await model.restore()
                 if environment["NEPHOS_UI_SCREEN"] == "invalid-qr" { await model.accept("not-a-nephos-code") }
-                window.rootViewController = UIHostingController(rootView: SignInView(model: model))
+                window.rootViewController = UIHostingController(rootView: AppRootView(model: model))
             } catch {
                 let code: String
                 if let error = error as? QREnrollmentError {

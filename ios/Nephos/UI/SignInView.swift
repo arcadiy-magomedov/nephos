@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SignInView: View {
     @Bindable var model: SignInModel
-    @Environment(\.scenePhase) private var scenePhase
     @State private var image: PhotosPickerItem?
     @State private var photosPresented = false
     @State private var confirmSignOut = false
@@ -39,9 +38,6 @@ struct SignInView: View {
         .foregroundStyle(SignInStyle.text)
         .tint(SignInStyle.action)
         .photosPicker(isPresented: $photosPresented, selection: $image, matching: .images)
-        .task {
-            if model.screen == .restoring { await model.restore() }
-        }
         .task(id: image) {
             guard let image else { return }
             do {
@@ -56,12 +52,6 @@ struct SignInView: View {
             self.image = nil
         }
         .onChange(of: model.screen) { _, _ in headingFocused = true }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.cancelScan() }
-            if phase == .active, model.screen == .signedIn || model.screen == .recovery {
-                Task { await model.restore() }
-            }
-        }
         .confirmationDialog("Sign out of Nephos?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { await model.signOut(remotely: true) } }
             Button("Sign out on this device only", role: .destructive) { Task { await model.signOut() } }

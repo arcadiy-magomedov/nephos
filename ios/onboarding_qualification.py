@@ -40,6 +40,8 @@ def project(workspace, test_sources=None, app_sources=None):
             if is_test
             else sorted(path for path in (IOS / "Nephos").rglob("*.swift") if path.name != "NephosApp.swift")
             + [IOS / "Qualification/UIQualification.swift"]
+            + [IOS / "Qualification/LocalGalleryQualification.swift"]
+            + [IOS / "Qualification/FileUploadQualification.swift"]
             + (app_sources or [])
         )
         builds = []

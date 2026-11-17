@@ -62,6 +62,12 @@ public static class UploadEndpoints
             await repository.SealAsync(id, token);
             return Results.Json(await Status((await repository.FindAsync(id, token))!, context, repository, access, token), statusCode: 202);
         });
+        group.MapPost("/{id:guid}/retry", async (Guid id, HttpContext context, IUploadRepository repository,
+            LibraryAccess access, CancellationToken token) =>
+        {
+            if (await Authorized(id, context, repository, access, token) is null) return Results.NotFound();
+            return Results.Ok(await Status(await repository.RetryAsync(id, token), context, repository, access, token));
+        });
         group.MapDelete("/{id:guid}", async (Guid id, HttpContext context, IUploadRepository repository,
             LibraryAccess access, CancellationToken token) =>
         {
