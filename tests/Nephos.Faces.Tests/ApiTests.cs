@@ -91,6 +91,45 @@ public sealed class FacesApplication : WebApplicationFactory<Program>
 [Collection("face-database")]
 public sealed class ApiTests
 {
+    private sealed class FixtureInference(string hash) : IInferenceClient
+    {
+        public byte[]? Received { get; private set; }
+        public Task<InferenceResult> AnalyzeAsync(byte[] bytes, CancellationToken ct)
+        {
+            Received = bytes.ToArray();
+            return Task.FromResult(PersistenceTests.Result(hash));
+        }
+    }
+
+    [DatabaseFact]
+    public async Task FixtureInferenceCompletesWorkerJobWithVerifiedSourceAndDurableObservation()
+    {
+        await using var app = new FacesApplication();
+        var owner = "fixture-worker-" + Guid.NewGuid();
+        byte[] original = [1, 2, 3, 4];
+        var hash = Convert.ToHexStringLower(SHA256.HashData(original));
+        var source = PersistenceTests.Source(owner) with { Size = original.Length, Sha256 = hash };
+        app.Source.Sources[source.Id] = (source, original);
+        var repository = app.Services.GetRequiredService<IFaceRepository>();
+        using var client = app.Authenticated(owner);
+        var response = await client.PostAsync($"/v1/faces/jobs/{source.Id}", null);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var inference = new FixtureInference(hash);
+        var worker = new FaceWorker(repository, app.Source, inference, NullLogger<FaceWorker>.Instance);
+
+        var claim = await repository.ClaimAsync(default);
+        Assert.NotNull(claim);
+        Assert.Equal(source.Id, claim.AssetId);
+        await worker.ProcessAsync(claim, default);
+
+        Assert.Equal(original, inference.Received);
+        Assert.Equal("complete", (await repository.JobAsync(owner, claim.Id, default))!.Status);
+        var observation = Assert.Single(await repository.FacesAsync(owner, source.Id, null, null, 100, default));
+        Assert.Equal(hash, observation.SourceSha256);
+        Assert.NotNull(observation.PersonId);
+        Assert.Empty(await repository.FacesAsync("other-" + owner, source.Id, null, null, 100, default));
+    }
+
     private sealed class DisableDuringInference(ControlledSource source, string hash) : IInferenceClient
     {
         public Task<InferenceResult> AnalyzeAsync(byte[] bytes, CancellationToken ct)

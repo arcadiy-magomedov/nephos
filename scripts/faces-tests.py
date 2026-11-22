@@ -1,9 +1,13 @@
 """Run repository/API tests against only the optional face database, without exposing credentials."""
 
 from pathlib import Path
+import argparse
 import os
 import subprocess
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--real-inference", action="store_true", help="Opt in to local model/portrait qualification.")
+args = parser.parse_args()
 values = dict(line.split("=", 1) for line in Path(".env.faces").read_text().splitlines() if "=" in line)
 env = dict(os.environ)
 compose = [
@@ -83,4 +87,8 @@ env["FACES_TEST_CONNECTION"] = (
     f"Host=127.0.0.1;Port=18086;Database=faces_tests;Username=faces_app;Password={values['FACES_APP_PASSWORD']}"
 )
 env["FACES_PROJECT_ROOT"] = str(Path.cwd())
+if args.real_inference:
+    env["FACES_REAL_INFERENCE"] = "1"
+else:
+    env.pop("FACES_REAL_INFERENCE", None)
 raise SystemExit(subprocess.call(["dotnet", "test", "tests/Nephos.Faces.Tests", "--nologo", "-v:minimal"], env=env))

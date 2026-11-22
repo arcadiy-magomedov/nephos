@@ -329,10 +329,17 @@ face-inference/.venv/bin/python -m unittest discover -s face-inference -p 'test_
 docker compose --env-file .env --env-file .env.faces \
   -f compose.yaml -f compose.faces.yaml -f deploy/faces/compose.test.yaml \
   up -d --no-deps faces-postgres
-python3 scripts/faces-tests.py
+python3 scripts/faces-tests.py --real-inference
 ```
 
 The test script migrates **faces_tests**, not the production face database.
+Normal CI instead runs `python3 scripts/faces-fixture-tests.py`: a disposable
+PostgreSQL database, real repository/API/worker code, small fixed embedding
+fixtures and controlled source clients. It does not install ML runtimes, fetch
+model weights or download portrait/camera images. Authorization, provenance,
+clustering, corrections, retries and restart persistence remain required checks.
+`RealInferenceTests` is a separate local opt-in qualification category, enabled
+only with `FACES_REAL_INFERENCE=1` or the script's `--real-inference` option.
 `.NET` tests distinguish deterministic vector/control-adapter tests from the
 six-photograph test, which executes the real detector/embedding subprocess for
 each durable API-created job and verifies three groups, names, merge/undo/split

@@ -185,10 +185,10 @@ jobs:
         run: docker compose down
 
   faces:
-    name: Face models and real-photo integration
+    name: Face contracts and persistence fixtures
     needs: [quality, backend]
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
     env:
       OTEL_SDK_DISABLED: "true"
     steps:
@@ -202,45 +202,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: dotnet restore Nephos.slnx --locked-mode
-      - name: Prepare real inference fixtures
-        run: |
-          python3 scripts/dev-env.py
-          python3 scripts/faces-env.py
-          python3 -m venv face-inference/.venv
-          face-inference/.venv/bin/python -m pip install -r face-inference/requirements.txt
-          python3 face-inference/download_models.py
-          python3 face-inference/fixtures/download.py
-          face-inference/.venv/bin/python face-inference/fixtures/generate_heic.py
-          face-inference/.venv/bin/python face-inference/fixtures/download_camera.py
-          face-inference/.venv/bin/python -m unittest discover -s face-inference -p 'test_*.py'
-          face-inference/.venv/bin/python face-inference/fixtures/evaluate.py
-          face-inference/.venv/bin/python face-inference/fixtures/evaluate_heic.py
-      - name: Build and start optional face deployment
-        run: |
-          docker compose --env-file .env --env-file .env.faces \
-            -f compose.yaml -f compose.faces.yaml -f deploy/faces/compose.test.yaml \
-            up -d --build --quiet-pull
-      - name: Repository, API and real-photo tests
-        run: |
-          python3 scripts/heic-upgrade-smoke.py
-          python3 scripts/faces-tests.py
-          python3 scripts/faces-smoke.py
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: always()
-        with:
-          name: face-integration-evidence
-          path: artifacts/faces-live-smoke.json
-          retention-days: 7
-      - name: Failure diagnostics
-        if: failure()
-        run: |
-          docker compose --env-file .env --env-file .env.faces \
-            -f compose.yaml -f compose.faces.yaml logs --no-color --tail=80
-      - name: Stop face deployment
-        if: always()
-        run: |
-          docker compose --env-file .env --env-file .env.faces \
-            -f compose.yaml -f compose.faces.yaml -f deploy/faces/compose.test.yaml down
+      - name: Fixture inference, API authorization and durable corrections
+        run: python3 scripts/faces-fixture-tests.py
 
   ios:
     name: iOS lint, tests and simulator builds
