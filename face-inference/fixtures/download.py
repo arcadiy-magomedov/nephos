@@ -14,7 +14,10 @@ sources = json.loads((root / "sources.json").read_text())
 for source in sources:
     path = root / "photos" / (source["id"] + ".jpg")
     if not path.exists():
-        request = urllib.request.Request(source["url"], headers={"User-Agent": "NephosTestFixtureResearch/1.0"})
+        request = urllib.request.Request(
+            source["url"],
+            headers={"User-Agent": "NephosTestFixtureResearch/1.0 (https://github.com/arcadiy-magomedov/nephos)"},
+        )
         for attempt in range(4):
             try:
                 with urllib.request.urlopen(request, timeout=60) as response:
