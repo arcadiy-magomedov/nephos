@@ -44,7 +44,7 @@ final class QREnrollmentUITests: XCTestCase {
         app.terminate()
         app.launchEnvironment["NEPHOS_QR_PHASE"] = "restore"
         app.launch()
-        require(app.staticTexts["You're signed in"], in: app, stage: "recover", timeout: 60)
+        require(app.staticTexts["Library"], in: app, stage: "recover", timeout: 60)
         XCTAssertFalse(app.buttons["Open library"].exists)
         app.terminate()
         app.launchEnvironment["NEPHOS_QR_PHASE"] = "discard-refresh-response"
@@ -59,7 +59,7 @@ final class QREnrollmentUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == true"), object: app.buttons["onboarding.scanQR"])
         loginFlash.isInverted = true
         wait(for: [loginFlash], timeout: 2)
-        require(app.staticTexts["You're signed in"], in: app, stage: "refresh-restore", timeout: 60)
+        require(app.staticTexts["Library"], in: app, stage: "refresh-restore", timeout: 60)
         XCTAssertFalse(app.buttons["onboarding.scanQR"].exists)
         app.terminate()
         app.launchEnvironment["NEPHOS_QR_PHASE"] = "revoke"

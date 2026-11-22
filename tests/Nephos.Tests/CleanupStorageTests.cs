@@ -38,6 +38,7 @@ public sealed class CleanupStorageTests : IAsyncLifetime
     private VolumeStore volume = null!;
     private BlobCleanupRepository cleanup = null!;
     private PostgresUploadRepository uploads = null!;
+    private readonly List<string> additionalHashes = [];
 
     public Task InitializeAsync()
     {
@@ -116,6 +117,38 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await Assert.ThrowsAsync<UploadConflictException>(() => cleanup.ReleaseAsync(id, "other-owner", default));
         await Assert.ThrowsAsync<UploadConflictException>(() => uploads.CreateAsync(
             new(id, Guid.NewGuid(), "late.jpg", "image/jpeg", 4, hash), subject, default));
+    }
+
+    [CleanupStorageFact]
+    public async Task Cleanup_failed_upload_retry_keeps_identity_and_manifest_and_discards_only_failed_chunks()
+    {
+        byte[] original = [1, 2, 3];
+        var digest = Convert.ToHexStringLower(SHA256.HashData(original));
+        additionalHashes.Add(digest);
+        var id = Guid.NewGuid();
+        var set = Guid.NewGuid();
+        var intent = new UploadIntent(id, Guid.NewGuid(), "retry.jpg", "image/jpeg", original.Length, digest,
+            ResourceSetId: set);
+        await uploads.CreateAsync(intent, subject, default);
+        await uploads.PutAsync(id, 0, new MemoryStream([1, 2, 4]), 3, default);
+        await uploads.SealAsync(id, default);
+        Assert.True(await uploads.VerifyNextAsync(default));
+        Assert.Equal("failed", (await uploads.FindAsync(id, default))!.State);
+
+        var retry = await uploads.RetryAsync(id, default);
+        Assert.Equal(id, retry.Id);
+        Assert.Equal(set, retry.ResourceSetId);
+        Assert.Equal(digest, retry.ExpectedHash);
+        Assert.Equal("uploading", retry.State);
+        Assert.Empty(await uploads.PartsAsync(id, default));
+        await uploads.PutAsync(id, 0, new MemoryStream(original), original.Length, default);
+        await uploads.SealAsync(id, default);
+        Assert.True(await uploads.VerifyNextAsync(default));
+
+        Assert.Equal("stored", (await uploads.FindAsync(id, default))!.State);
+        Assert.Equal(original, await File.ReadAllBytesAsync(volume.OriginalPath(digest)));
+        Assert.Equal("stored", (await uploads.RetryAsync(id, default)).State);
+        Assert.Equal(original, await File.ReadAllBytesAsync(volume.OriginalPath(digest)));
     }
 
     [CleanupStorageFact]
@@ -271,9 +304,10 @@ public sealed class CleanupStorageTests : IAsyncLifetime
                 command.Parameters.AddWithValue(subject);
                 await command.ExecuteNonQueryAsync();
             }
-            await using (var command = fixtureSource.CreateCommand("DELETE FROM blobs WHERE sha256=$1"))
+            foreach (var digest in additionalHashes.Append(hash))
             {
-                command.Parameters.AddWithValue(hash);
+                await using var command = fixtureSource.CreateCommand("DELETE FROM blobs WHERE sha256=$1");
+                command.Parameters.AddWithValue(digest);
                 await command.ExecuteNonQueryAsync();
             }
             await source.DisposeAsync();

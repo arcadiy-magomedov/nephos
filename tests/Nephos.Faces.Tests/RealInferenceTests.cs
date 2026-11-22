@@ -14,9 +14,10 @@ public sealed class RealPhotoFactAttribute : FactAttribute
     public RealPhotoFactAttribute()
     {
         var root = Environment.GetEnvironmentVariable("FACES_PROJECT_ROOT");
-        if (Environment.GetEnvironmentVariable("FACES_TEST_CONNECTION") is null || root is null ||
+        if (Environment.GetEnvironmentVariable("FACES_REAL_INFERENCE") != "1" ||
+            Environment.GetEnvironmentVariable("FACES_TEST_CONNECTION") is null || root is null ||
             !File.Exists(Path.Combine(root, "face-inference/fixtures/provenance.json")))
-            Skip = "Download licensed fixtures and set FACES_PROJECT_ROOT + FACES_TEST_CONNECTION.";
+            Skip = "Opt in locally with FACES_REAL_INFERENCE=1 and downloaded models/fixtures.";
     }
 }
 
@@ -48,6 +49,7 @@ public sealed class ActualLocalInference(string root) : IInferenceClient
 }
 
 [Collection("face-database")]
+[Trait("Category", "RealInference")]
 public sealed class RealInferenceTests
 {
     [RealPhotoFact]
