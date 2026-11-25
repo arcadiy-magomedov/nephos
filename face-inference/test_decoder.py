@@ -17,6 +17,7 @@ from PIL import Image
 
 from decoder import ImageRejected, MAX_BYTES, MAX_PIXELS, decode_rgb
 from infer import analyze
+from worker_pool import WorkerTimeoutError
 
 ROOT = Path(__file__).resolve().parent
 FIXTURES = ROOT / "fixtures/heic"
@@ -47,10 +48,10 @@ class DecoderRejectionTests(unittest.TestCase):
         handler.headers = {"Content-Length": "4", "X-Nephos-Inference-Key": "k" * 32}
         handler.rfile = io.BytesIO(b"data")
         handler.reply = Mock()
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("infer.py", 45)) as child:
+        with patch.object(server["pool"], "execute", side_effect=WorkerTimeoutError("worker_timeout")) as child:
             handler.do_POST()
-        self.assertEqual(45, child.call_args.kwargs["timeout"])
-        self.assertEqual(b"data", child.call_args.kwargs["input"])
+        self.assertEqual(45, server["pool"].timeout)
+        self.assertEqual(b"data", child.call_args.args[0])
         handler.connection.settimeout.assert_called_once_with(15)
         handler.reply.assert_called_once_with(422, b'{"error":"inference_timeout"}')
 

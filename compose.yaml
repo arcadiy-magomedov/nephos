@@ -28,6 +28,7 @@ services:
       Services__Storage: http://storage-api:8080
       Services__Key: ${SERVICE_KEY:?Required}
       Cleanup__IntervalHours: "24"
+      Cleanup__CompactHistory: "true"
     depends_on:
       library-api: {condition: service_started}
       storage-api: {condition: service_started}
@@ -328,12 +329,14 @@ services:
     mem_limit: 64m
 
   otel-collector:
+    profiles: ["observability"]
     image: otel/opentelemetry-collector-contrib:0.163.2
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes: ["./deploy/otel/collector.yaml:/etc/otelcol/config.yaml:ro"]
     mem_limit: 256m
 
   prometheus:
+    profiles: ["observability"]
     image: prom/prometheus:v3.15.1
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
@@ -346,6 +349,7 @@ services:
     mem_limit: 384m
 
   loki:
+    profiles: ["observability"]
     image: grafana/loki:3.7.9
     command: ["-config.file=/etc/loki/nephos.yaml"]
     volumes:
@@ -354,6 +358,7 @@ services:
     mem_limit: 384m
 
   tempo:
+    profiles: ["observability"]
     image: grafana/tempo:3.1.1
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
@@ -362,6 +367,7 @@ services:
     mem_limit: 384m
 
   grafana:
+    profiles: ["observability"]
     image: grafana/grafana:13.2.4
     environment:
       GF_SECURITY_ADMIN_USER: admin

@@ -34,10 +34,17 @@ public sealed class PostgresAssetRepository(NpgsqlDataSource source) : IAssetRep
         var start = new DateTimeOffset(year ?? 1800, month ?? 1, 1, 0, 0, 0, TimeSpan.Zero);
         var end = month is not null ? start.AddMonths(1) : year is not null ? start.AddYears(1) : DateTimeOffset.UtcNow.AddDays(2);
         await using var command = source.CreateCommand("""
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$1 AND p.enabled AND m.library_id=$2
+                ) AS is_member
+            )
             SELECT to_char(date_trunc($3, a.created_at AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS bucket,count(*)
             FROM assets a
-            WHERE can_read_asset($1,a.id) AND a.library_id=$2 AND NOT a.hidden AND a.deleted_at IS NULL
+            WHERE a.library_id=$2 AND NOT a.hidden AND a.deleted_at IS NULL
                 AND a.created_at >= $4 AND a.created_at < $5
+                AND ((SELECT is_member FROM auth) OR can_read_asset($1,a.id))
             GROUP BY bucket ORDER BY bucket DESC
             """);
         foreach (var value in new object[] { subject, library, month is not null ? "day" : year is not null ? "month" : "year", start, end })
@@ -70,9 +77,16 @@ public sealed class PostgresAssetRepository(NpgsqlDataSource source) : IAssetRep
     public async Task<IReadOnlyList<Asset>> ListAsync(string subject, Guid library, AssetCursor? before, int limit, CancellationToken token)
     {
         await using var command = source.CreateCommand($"""
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$1 AND p.enabled AND m.library_id=$2
+                ) AS is_member
+            )
             SELECT {Columns},CASE WHEN a.uploaded_by<>$1 THEN coalesce(owner.display_name,'Known user') END FROM assets a
             JOIN principals owner ON owner.subject=a.uploaded_by
-            WHERE can_read_asset($1,a.id) AND a.library_id=$2 AND NOT a.hidden AND a.deleted_at IS NULL
+            WHERE a.library_id=$2 AND NOT a.hidden AND a.deleted_at IS NULL
+            AND ((SELECT is_member FROM auth) OR can_read_asset($1,a.id))
             AND ($3::timestamptz IS NULL OR (a.created_at,a.id)<($3,$4))
             ORDER BY a.created_at DESC,a.id DESC LIMIT $5
             """);

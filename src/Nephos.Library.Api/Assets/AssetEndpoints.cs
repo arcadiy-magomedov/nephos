@@ -35,6 +35,28 @@ public static class AssetEndpoints
             return subject is not null && (upload == true ? await repository.CanUploadAsync(subject, id, token) : await repository.CanAccessAsync(subject, id, token))
                 ? Results.Ok(new { id }) : Results.NotFound();
         }).RequireAuthorization();
+        app.MapInternalV1("/storage/access/{id:guid}", ["GET"], async (
+            Guid id, string? subject, bool? upload, HttpContext context, IConfiguration configuration,
+            IAssetRepository repository, CancellationToken token) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!MediaProtocol.IsInternal(context, configuration)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(subject) || subject.Length > 256) return Results.BadRequest();
+            var allowed = upload == true
+                ? await repository.CanUploadAsync(subject, id, token)
+                : await repository.CanAccessAsync(subject, id, token);
+            return allowed ? Results.NoContent() : Results.NotFound();
+        });
+        app.MapInternalV1("/storage/published/{id:guid}", ["GET"], async (
+            Guid id, string? subject, HttpContext context, IConfiguration configuration,
+            IAssetRepository repository, CancellationToken token) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!MediaProtocol.IsInternal(context, configuration)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(subject) || subject.Length > 256) return Results.BadRequest();
+            // Reuse FindAsync so projected hidden resource-set constituents report ready before commit.
+            return await repository.FindAsync(subject, id, token) is not null ? Results.NoContent() : Results.NotFound();
+        });
         app.MapGet("/v1/libraries/{id:guid}/assets", async (
             Guid id, int? limit, DateTimeOffset? before, Guid? beforeId,
             HttpContext context, IAssetRepository repository, CancellationToken token) =>
@@ -88,7 +110,9 @@ public static class AssetEndpoints
                     request.Headers.TryAddWithoutValidation(header, value.ToArray());
             using var response = await clients.CreateClient("storage").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             context.Response.StatusCode = (int)response.StatusCode;
-            context.Response.Headers.CacheControl = "private, no-store";
+            var cacheablePreview = kind == "preview" &&
+                (response.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.NotModified);
+            context.Response.Headers.CacheControl = cacheablePreview ? "private, no-cache" : "private, no-store";
             context.Response.Headers.XContentTypeOptions = "nosniff";
             foreach (var header in new[] { "Content-Type", "Content-Length", "Content-Disposition", "Content-Range", "ETag", "Accept-Ranges", "Last-Modified" })
             {
@@ -97,7 +121,8 @@ public static class AssetEndpoints
                 else if (response.Headers.TryGetValues(header, out var values))
                     context.Response.Headers[header] = values.ToArray();
             }
-            await response.Content.CopyToAsync(context.Response.Body, token);
+            if (response.StatusCode != System.Net.HttpStatusCode.NotModified && !HttpMethods.IsHead(context.Request.Method))
+                await response.Content.CopyToAsync(context.Response.Body, token);
         }).RequireAuthorization();
     }
 }

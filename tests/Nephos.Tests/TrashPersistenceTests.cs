@@ -241,6 +241,78 @@ public sealed class TrashPersistenceTests
     }
 
     [LibraryDatabaseFact]
+    public async Task Gallery_history_compaction_prunes_old_superseded_rows_and_preserves_active_snapshots()
+    {
+        await using var db = Open();
+        await using var runtime = Runtime();
+        var (owner, _, library) = await Seed(db);
+        var assets = new PostgresAssetRepository(runtime);
+        var gallery = new PostgresGalleryRepository(runtime);
+        var first = Message(owner, library);
+        var second = Message(owner, library);
+        Assert.True(await assets.ProjectAsync(first, default));
+        var oldSnapshot = await gallery.CreateAsync(owner, library, default);
+        Assert.True(await assets.DeleteAsync(owner, first.Id, default));
+        Assert.True(await assets.ProjectAsync(second, default));
+        var currentSnapshot = await gallery.CreateAsync(owner, library, default);
+
+        // Age superseded history past 30 days while keeping oldSnapshot active.
+        await Execute(db, "UPDATE gallery_versions SET closed_at=now()-interval '31 days' WHERE library_id=$1 AND to_revision IS NOT NULL", library);
+        await Execute(db, "UPDATE gallery_changes SET created_at=now()-interval '31 days' WHERE library_id=$1", library);
+
+        // While oldSnapshot is active at revision 1, revision 2's superseded version cannot be pruned below revision 1.
+        var protectedRun = await gallery.CompactHistoryAsync(default);
+        Assert.Equal(0, protectedRun.PrunedVersions);
+
+        // Expire oldSnapshot: now the superseded version (closed at revision 2 <= currentSnapshot.Revision) can be pruned safely.
+        await Execute(db, "UPDATE gallery_snapshots SET expires_at=now()-interval '1 minute' WHERE id=$1", oldSnapshot.Id);
+        var compacted = await gallery.CompactHistoryAsync(default);
+        Assert.True(compacted.ExpiredSnapshots >= 1);
+        Assert.True(compacted.PrunedVersions >= 1);
+        Assert.True(compacted.PrunedChanges >= 1);
+
+        // Active currentSnapshot still returns intact results.
+        var page = await gallery.PageAsync(owner, library, currentSnapshot.Id, null, 50, default);
+        Assert.Equal([second.Id], page.Items.Select(x => x.Id).ToArray());
+
+        // Concurrent snapshot creations while expired rows exist must not abort with 40001.
+        await Execute(db, "INSERT INTO gallery_snapshots(id,library_id,subject,revision,access_generation,total_count,expires_at) VALUES($1,$2,$3,1,0,0,now()-interval '1 minute')",
+            Guid.NewGuid(), library, owner);
+        var concurrent = await Task.WhenAll(
+            Enumerable.Range(0, 6).Select(_ => gallery.CreateAsync(owner, library, default)));
+        Assert.All(concurrent, s => Assert.Equal(currentSnapshot.Revision, s.Revision));
+    }
+
+    [LibraryDatabaseFact]
+    public async Task Non_photo_domain_libraries_exclude_assets_from_face_analysis_and_member_fast_path_honors_revocation()
+    {
+        await using var db = Open();
+        await using var runtime = Runtime();
+        var (owner, other, library) = await Seed(db);
+        var booksLibrary = Guid.NewGuid();
+        await Execute(db, "INSERT INTO libraries(id,name,domain) VALUES($1,'Books','books')", booksLibrary);
+        await Execute(db, "INSERT INTO library_members(subject,library_id) VALUES($1,$2)", owner, booksLibrary);
+
+        var assets = new PostgresAssetRepository(runtime);
+        var analysis = new PostgresAnalysisRepository(runtime);
+        var photoMsg = Message(owner, library);
+        var bookCoverMsg = Message(owner, booksLibrary);
+        Assert.True(await assets.ProjectAsync(photoMsg, default));
+        Assert.True(await assets.ProjectAsync(bookCoverMsg, default));
+
+        Assert.NotNull(await analysis.FindSourceAsync(owner, photoMsg.Id, default));
+        Assert.Null(await analysis.FindSourceAsync(owner, bookCoverMsg.Id, default));
+        Assert.Equal([photoMsg.Id], (await analysis.FilterAuthorizedSourcesAsync(owner, [photoMsg.Id, bookCoverMsg.Id], default)).ToArray());
+
+        // Member fast-path returns owner's assets, denies non-member, and immediately stops when disabled.
+        Assert.Single(await assets.ListAsync(owner, library, null, 50, default));
+        Assert.Empty(await assets.ListAsync(other, library, null, 50, default));
+        await Execute(db, "UPDATE principals SET enabled=false WHERE subject=$1", owner);
+        Assert.Empty(await assets.ListAsync(owner, library, null, 50, default));
+        Assert.Empty(await assets.TimelineAsync(owner, library, null, null, default));
+    }
+
+    [LibraryDatabaseFact]
     public async Task Runtime_role_can_delete_restore_and_purge_without_membership_write_permissions()
     {
         await using var admin = Open();

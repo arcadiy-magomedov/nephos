@@ -134,6 +134,8 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await uploads.SealAsync(id, default);
         Assert.True(await uploads.VerifyNextAsync(default));
         Assert.Equal("failed", (await uploads.FindAsync(id, default))!.State);
+        // Sweep failed staging so staging_cleaned=true, then ensure RetryAsync resets staging_cleaned=false.
+        await uploads.CleanupAsync(default);
 
         var retry = await uploads.RetryAsync(id, default);
         Assert.Equal(id, retry.Id);
@@ -144,6 +146,8 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await uploads.PutAsync(id, 0, new MemoryStream(original), original.Length, default);
         await uploads.SealAsync(id, default);
         Assert.True(await uploads.VerifyNextAsync(default));
+        await uploads.CleanupAsync(default);
+        Assert.False(Directory.Exists(Path.Combine(root, "staging", id.ToString("N"))));
 
         Assert.Equal("stored", (await uploads.FindAsync(id, default))!.State);
         Assert.Equal(original, await File.ReadAllBytesAsync(volume.OriginalPath(digest)));
@@ -237,8 +241,7 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await cleanup.ReleaseAsync(id, subject, default);
         await using var connection = await source!.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
-        await using (var gate = new NpgsqlCommand($"SELECT pg_advisory_xact_lock({BlobCleanupRepository.Gate})", connection, transaction))
-            await gate.ExecuteNonQueryAsync();
+        await BlobCleanupRepository.LockHashAsync(connection, transaction, hash, default);
         var collection = cleanup.CollectNextAsync(default);
         await Task.Delay(100);
         Assert.False(collection.IsCompleted);
@@ -257,6 +260,28 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         await transaction.CommitAsync();
         Assert.False(await collection);
         Assert.True(File.Exists(volume.OriginalPath(hash)));
+    }
+
+    [CleanupStorageFact]
+    public async Task Cleanup_per_hash_lock_does_not_block_unrelated_blob_uploads_or_verification()
+    {
+        await using var blocker = await source!.OpenConnectionAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await BlobCleanupRepository.LockHashAsync(blocker, transaction, hash, default);
+
+        byte[] otherBytes = [9, 8, 7, 6];
+        var otherHash = Convert.ToHexStringLower(SHA256.HashData(otherBytes));
+        additionalHashes.Add(otherHash);
+        var otherId = Guid.NewGuid();
+        var created = await uploads.CreateAsync(
+            new(otherId, Guid.NewGuid(), "other.bin", "application/octet-stream", otherBytes.Length, otherHash),
+            subject, default);
+        await uploads.PutAsync(otherId, 0, new MemoryStream(otherBytes), otherBytes.Length, default);
+        await uploads.SealAsync(otherId, default);
+        Assert.True(await uploads.VerifyNextAsync(default));
+        Assert.Equal("stored", (await uploads.FindAsync(otherId, default))!.State);
+        Assert.Equal(otherBytes, await File.ReadAllBytesAsync(volume.OriginalPath(otherHash)));
+        await transaction.CommitAsync();
     }
 
     [Fact]

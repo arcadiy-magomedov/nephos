@@ -25,6 +25,23 @@ public static class MediaProtocol
     public const long MaxUploadBytes = 8L * 1024 * 1024 * 1024;
     public static readonly ActivitySource Activities = new("Nephos.Media");
 
+    private static readonly HashSet<string> SupportedUploadMediaTypes = new(StringComparer.Ordinal)
+    {
+        // Photos
+        "image/jpeg", "image/png", "image/heic", "image/heif", "image/webp", "image/gif",
+        // Videos / cinema
+        "video/mp4", "video/quicktime", "video/x-matroska", "video/webm",
+        // Books / documents
+        "application/pdf", "application/epub+zip",
+        // Audio
+        "audio/mpeg", "audio/flac", "audio/mp4", "audio/ogg",
+        // Opaque non-executable binary fallback (active web formats like text/html & image/svg+xml stay rejected)
+        "application/octet-stream"
+    };
+
+    public static bool IsSupportedUploadMediaType(string mediaType) =>
+        SupportedUploadMediaTypes.Contains(mediaType);
+
     public static bool IsForcedBrokerShutdown(Exception exception) =>
         exception is OperationInterruptedException { ShutdownReason.ReplyCode: 320 };
 
@@ -37,14 +54,15 @@ public static class MediaProtocol
             SHA256.HashData(Encoding.UTF8.GetBytes(expected)), SHA256.HashData(Encoding.UTF8.GetBytes(provided)));
     }
 
-    public static async Task<IConnection> ConnectBrokerAsync(IConfiguration configuration, CancellationToken token)
+    public static async Task<IConnection> ConnectBrokerAsync(
+        IConfiguration configuration, CancellationToken token, bool automaticRecovery = true)
     {
         var factory = new ConnectionFactory
         {
             HostName = configuration["Broker:Host"] ?? "rabbitmq",
             UserName = configuration["Broker:Username"] ?? "nephos",
             Password = configuration["Broker:Password"] ?? throw new InvalidOperationException("Broker:Password is required."),
-            AutomaticRecoveryEnabled = true
+            AutomaticRecoveryEnabled = automaticRecovery
         };
         return await factory.CreateConnectionAsync(token);
     }

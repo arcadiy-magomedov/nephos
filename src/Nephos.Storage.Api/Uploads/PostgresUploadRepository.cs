@@ -29,12 +29,13 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     {
         await using var connection = await dataSource.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
-        await using (var gate = Command(connection, transaction, "SELECT pg_advisory_xact_lock(48465002)"))
-            await gate.ExecuteNonQueryAsync(token);
+        await BlobCleanupRepository.LockQuotaAsync(connection, transaction, token);
+        await BlobCleanupRepository.LockUploadAsync(connection, transaction, id, token);
         var upload = await SingleAsync(Command(connection, transaction,
             $"SELECT {Columns} FROM uploads WHERE id=$1 AND released_at IS NULL FOR UPDATE", id), token)
             ?? throw new UploadConflictException("The upload is unavailable.");
         if (upload.State != "failed") return upload;
+        await BlobCleanupRepository.LockHashAsync(connection, transaction, upload.ExpectedHash, token);
         await using (var deleting = Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=$1 AND deleting)", upload.ExpectedHash))
             if ((bool)(await deleting.ExecuteScalarAsync(token))!)
@@ -55,7 +56,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
         await using (var parts = Command(connection, transaction, "DELETE FROM upload_parts WHERE upload_id=$1", id))
             await parts.ExecuteNonQueryAsync(token);
         await using (var restart = Command(connection, transaction, """
-            UPDATE uploads SET state='uploading',error=NULL,updated_at=now() WHERE id=$1
+            UPDATE uploads SET state='uploading',error=NULL,staging_cleaned=false,verify_lease_id=NULL,verify_lease_until=NULL,updated_at=now() WHERE id=$1
             """, id))
             await restart.ExecuteNonQueryAsync(token);
         await transaction.CommitAsync(token);
@@ -79,6 +80,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     }
 
     private const string Columns = "id,subject,library_id,file_name,media_type,size,expected_hash,state,sha256,has_preview,error,coalesce(captured_at,created_at),trace_parent,resource_set_id";
+    private const string QualifiedColumns = "u.id,u.subject,u.library_id,u.file_name,u.media_type,u.size,u.expected_hash,u.state,u.sha256,u.has_preview,u.error,coalesce(u.captured_at,u.created_at),u.trace_parent,u.resource_set_id";
     private static NpgsqlCommand Command(NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql, params object[] values)
     {
         var command = new NpgsqlCommand(sql, connection, transaction);
@@ -96,10 +98,15 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     {
         await using var connection = await dataSource.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
-        await BlobCleanupRepository.LockAsync(connection, transaction, token);
+        await BlobCleanupRepository.LockUploadAsync(connection, transaction, id, token);
         var upload = await SingleAsync(Command(connection, transaction,
             $"SELECT {Columns} FROM uploads WHERE id=$1 AND released_at IS NULL", id), token);
         if (upload is not { State: "stored", Sha256: not null }) throw new UploadConflictException("Original is not committed.");
+        await BlobCleanupRepository.LockHashAsync(connection, transaction, upload.Sha256, token);
+        await using (var deleting = Command(connection, transaction,
+            "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=$1 AND deleting)", upload.Sha256))
+            if ((bool)(await deleting.ExecuteScalarAsync(token))!)
+                throw new UploadConflictException("Original blob cleanup is pending.");
         await using (var stream = File.OpenRead(volume.OriginalPath(upload.Sha256)))
         {
             var hash = Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(stream, token));
@@ -139,8 +146,9 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
     {
         await using var connection = await dataSource.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
-        await using (var gate = Command(connection, transaction, "SELECT pg_advisory_xact_lock(48465002)"))
-            await gate.ExecuteNonQueryAsync(token);
+        await BlobCleanupRepository.LockQuotaAsync(connection, transaction, token);
+        await BlobCleanupRepository.LockUploadAsync(connection, transaction, intent.Id, token);
+        await BlobCleanupRepository.LockHashAsync(connection, transaction, intent.Sha256, token);
         await using (var released = Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM cleanup_releases WHERE asset_id=$1)", intent.Id))
             if ((bool)(await released.ExecuteScalarAsync(token))!)
@@ -218,7 +226,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
             "INSERT INTO outbox(id,payload) VALUES($1,$2::jsonb) ON CONFLICT DO NOTHING", upload.Id, JsonSerializer.Serialize(message)))
             await messageInsert.ExecuteNonQueryAsync(token);
         await using (var commit = Command(connection, transaction,
-            "UPDATE uploads SET state='stored',sha256=$2,has_preview=$3,updated_at=now() WHERE id=$1", upload.Id, hash, preview))
+            "UPDATE uploads SET state='stored',sha256=$2,has_preview=$3,verify_lease_id=NULL,verify_lease_until=NULL,updated_at=now() WHERE id=$1", upload.Id, hash, preview))
             await commit.ExecuteNonQueryAsync(token);
     }
 
@@ -282,29 +290,107 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
 
     public async Task<bool> VerifyNextAsync(CancellationToken token)
     {
-        await using var connection = await dataSource.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
-        await BlobCleanupRepository.LockAsync(connection, transaction, token);
-        var upload = await SingleAsync(Command(connection, transaction, $"""
-            SELECT {Columns} FROM uploads WHERE state='verifying' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
-            """), token);
+        var leaseId = Guid.NewGuid();
+        Upload? upload;
+        await using (var connection = await dataSource.OpenConnectionAsync(token))
+        await using (var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token))
+        {
+            upload = await SingleAsync(Command(connection, transaction, $"""
+                WITH candidate AS (
+                    SELECT id FROM uploads
+                    WHERE state='verifying' AND (verify_lease_until IS NULL OR verify_lease_until < now())
+                    ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE uploads u SET verify_lease_id=$1, verify_lease_until=now()+interval '5 minutes'
+                FROM candidate c WHERE u.id=c.id
+                RETURNING {QualifiedColumns}
+                """, leaseId), token);
+            await transaction.CommitAsync(token);
+        }
         if (upload is null) return false;
         ActivityContext.TryParse(upload.TraceParent, null, out var parent);
         using var activity = MediaProtocol.Activities.StartActivity("verify original", ActivityKind.Consumer, parent);
+        StagedOriginal? staged = null;
+        Dictionary<int, string>? preparedPreviews = null;
         try
         {
-            var hash = await volume.AssembleAsync(upload, token);
-            var preview = await volume.CreatePreviewAsync(hash, upload.MediaType, token);
-            await StoreAsync(connection, transaction, upload, hash, preview, token);
+            // Perform all disk assembly, hashing, FFmpeg, and HTTP preview work outside DB locks.
+            staged = await volume.StageVerifiedAsync(upload, leaseId, token);
+            preparedPreviews = await volume.PreparePreviewsAsync(staged.Path, staged.Hash, upload.MediaType, leaseId, token);
+            var hasPreview = preparedPreviews is not null;
+
+            await using var connection = await dataSource.OpenConnectionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
+            await BlobCleanupRepository.LockUploadAsync(connection, transaction, upload.Id, token);
+            // Lock the uploads row FOR UPDATE before acquiring HashLock and publishing so no expired-lease takeover can race PublishStaged.
+            await using (var owned = Command(connection, transaction, """
+                SELECT 1 FROM uploads
+                WHERE id=$1 AND state='verifying' AND verify_lease_id=$2 AND verify_lease_until > now()
+                FOR UPDATE
+                """, upload.Id, leaseId))
+            {
+                if (await owned.ExecuteScalarAsync(token) is null)
+                {
+                    CleanupStaged(staged, preparedPreviews);
+                    return true;
+                }
+            }
+            await BlobCleanupRepository.LockHashAsync(connection, transaction, staged.Hash, token);
+            await using (var deleting = Command(connection, transaction,
+                "SELECT EXISTS(SELECT 1 FROM blobs WHERE sha256=$1 AND deleting)", staged.Hash))
+            {
+                if ((bool)(await deleting.ExecuteScalarAsync(token))!)
+                {
+                    CleanupStaged(staged, preparedPreviews);
+                    await using var release = Command(connection, transaction,
+                        "UPDATE uploads SET verify_lease_id=NULL,verify_lease_until=NULL WHERE id=$1 AND verify_lease_id=$2",
+                        upload.Id, leaseId);
+                    await release.ExecuteNonQueryAsync(token);
+                    await transaction.CommitAsync(token);
+                    return true;
+                }
+            }
+            volume.PublishStaged(staged, preparedPreviews);
+            preparedPreviews = null;
+            staged = null;
+            await StoreAsync(connection, transaction, upload, upload.ExpectedHash, hasPreview, token);
+            await transaction.CommitAsync(token);
+            return true;
         }
         catch (UploadConflictException exception)
         {
-            await using var fail = Command(connection, transaction,
-                "UPDATE uploads SET state='failed',error=$2,updated_at=now() WHERE id=$1", upload.Id, exception.Message);
+            CleanupStaged(staged, preparedPreviews);
+            await using var connection = await dataSource.OpenConnectionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(token);
+            await BlobCleanupRepository.LockUploadAsync(connection, transaction, upload.Id, token);
+            await using var fail = Command(connection, transaction, """
+                UPDATE uploads SET state='failed',error=$2,verify_lease_id=NULL,verify_lease_until=NULL,updated_at=now()
+                WHERE id=$1 AND state='verifying' AND verify_lease_id=$3 AND verify_lease_until > now()
+                """, upload.Id, exception.Message, leaseId);
             await fail.ExecuteNonQueryAsync(token);
+            await transaction.CommitAsync(token);
+            return true;
         }
-        await transaction.CommitAsync(token);
-        return true;
+        catch
+        {
+            CleanupStaged(staged, preparedPreviews);
+            try
+            {
+                await using var releaseConn = await dataSource.OpenConnectionAsync(CancellationToken.None);
+                await using var releaseCmd = Command(releaseConn, null,
+                    "UPDATE uploads SET verify_lease_id=NULL,verify_lease_until=NULL WHERE id=$1 AND verify_lease_id=$2",
+                    upload.Id, leaseId);
+                await releaseCmd.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch (NpgsqlException) { }
+            throw;
+        }
+    }
+
+    private void CleanupStaged(StagedOriginal? staged, Dictionary<int, string>? preparedPreviews)
+    {
+        if (staged is { IsSinglePart: false } && File.Exists(staged.Path)) File.Delete(staged.Path);
+        volume.CleanupPreparedPreviews(preparedPreviews);
     }
 
     public async Task<bool> PublishNextAsync(Func<byte[], CancellationToken, Task> publish, CancellationToken token)

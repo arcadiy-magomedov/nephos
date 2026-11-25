@@ -138,6 +138,56 @@ public sealed class LibraryApiTests
             (await owner.DeleteAsync($"/v1/assets/{Guid.NewGuid()}")).StatusCode);
         Assert.Equal(2, factory.Assets.DeleteCalls);
     }
+
+    [Fact]
+    public async Task Concurrent_requests_with_same_token_coalesce_introspection_without_caching_revocation()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var factory = new ApiFactory { IntrospectionGate = gate };
+        var token = factory.Token("known");
+        using var first = factory.CreateClient();
+        using var second = factory.CreateClient();
+        using var third = factory.CreateClient();
+        foreach (var client in new[] { first, second, third })
+            client.DefaultRequestHeaders.Authorization = new("Bearer", token);
+
+        using var cancelled = new CancellationTokenSource();
+        var t1 = first.GetAsync("/v1/libraries", cancelled.Token);
+        var t2 = second.GetAsync("/v1/libraries");
+        var t3 = third.GetAsync("/v1/libraries");
+        await factory.IntrospectionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // Cancelling one waiter must not cancel the shared introspection for concurrent callers.
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => t1);
+        gate.TrySetResult();
+        var responses = await Task.WhenAll(t2, t3);
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        Assert.Equal(1, factory.IntrospectionCalls);
+
+        // Immediately after revocation, the next request must re-introspect and reject with 401.
+        factory.IntrospectionActive = false;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await second.GetAsync("/v1/libraries")).StatusCode);
+        Assert.Equal(2, factory.IntrospectionCalls);
+    }
+
+    [Fact]
+    public async Task Internal_storage_access_and_published_endpoints_require_service_key_and_preserve_predicates()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        var libraryId = Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync($"/internal/v1/storage/access/{libraryId}?subject=known&upload=true")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync($"/internal/v1/storage/published/{factory.Assets.AssetId}?subject=known")).StatusCode);
+
+        client.DefaultRequestHeaders.Add("X-Nephos-Service-Key", ApiFactory.InternalKey);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.GetAsync($"/internal/v1/storage/access/{libraryId}?subject=known&upload=true")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.GetAsync($"/internal/v1/storage/published/{factory.Assets.AssetId}?subject=known")).StatusCode);
+        Assert.Equal(0, factory.IntrospectionCalls);
+    }
 }
 
 internal sealed class ApiFactory : WebApplicationFactory<Program>
@@ -150,6 +200,10 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
     public FakeAssetRepository Assets { get; } = new();
     public bool IntrospectionActive { get; set; } = true;
     public bool IntrospectionUnavailable { get; set; }
+    public TaskCompletionSource? IntrospectionGate { get; set; }
+    public TaskCompletionSource IntrospectionStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int introspectionCalls;
+    public int IntrospectionCalls => Volatile.Read(ref introspectionCalls);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -200,16 +254,19 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
 
     private sealed class IntrospectionHandler(ApiFactory factory) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("http://identity.test/realms/nephos/protocol/openid-connect/token/introspect", request.RequestUri?.ToString());
             Assert.Equal("Basic", request.Headers.Authorization?.Scheme);
+            Interlocked.Increment(ref factory.introspectionCalls);
+            factory.IntrospectionStarted.TrySetResult();
+            if (factory.IntrospectionGate is { } gate) await gate.Task.WaitAsync(cancellationToken);
             if (factory.IntrospectionUnavailable) throw new HttpRequestException("Synthetic identity outage.");
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
                     $"{{\"active\":{factory.IntrospectionActive.ToString().ToLowerInvariant()}}}", Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 }

@@ -7,6 +7,7 @@ builder.AddServiceDefaults("nephos-faces");
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 16384);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(builder.Configuration.GetConnectionString("Faces")
     ?? throw new InvalidOperationException("ConnectionStrings:Faces is required.")));
+builder.Services.AddSingleton<IFaceVectorIndex, PostgresCentroidVectorIndex>();
 builder.Services.AddSingleton<IFaceRepository, PostgresFaceRepository>();
 builder.Services.AddSingleton<FaceAdministrationRepository>();
 builder.Services.AddSingleton<IAnalysisSourceClient, AnalysisSourceClient>();

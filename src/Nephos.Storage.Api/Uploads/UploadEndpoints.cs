@@ -6,10 +6,18 @@ namespace Nephos.Storage.Api.Uploads;
 
 public sealed class LibraryAccess(HttpClient client, IConfiguration configuration)
 {
+    private HttpRequestMessage Internal(string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"{configuration["Services:Library"]}{path}");
+        request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
+        return request;
+    }
+
     public async Task<bool> CanAccessAsync(HttpContext context, Guid library, CancellationToken token)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{configuration["Services:Library"]}/v1/libraries/{library}?upload=true");
-        request.Headers.TryAddWithoutValidation("Authorization", context.Request.Headers.Authorization.ToString());
+        var subject = context.User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(subject)) return false;
+        using var request = Internal($"/internal/v1/storage/access/{library}?subject={Uri.EscapeDataString(subject)}&upload=true");
         using var response = await client.SendAsync(request, token);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized) return false;
         response.EnsureSuccessStatusCode();
@@ -18,8 +26,9 @@ public sealed class LibraryAccess(HttpClient client, IConfiguration configuratio
 
     public async Task<bool> IsPublishedAsync(HttpContext context, Guid id, CancellationToken token)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{configuration["Services:Library"]}/v1/assets/{id}/backup");
-        request.Headers.TryAddWithoutValidation("Authorization", context.Request.Headers.Authorization.ToString());
+        var subject = context.User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(subject)) return false;
+        using var request = Internal($"/internal/v1/storage/published/{id}?subject={Uri.EscapeDataString(subject)}");
         using var response = await client.SendAsync(request, token);
         if (response.StatusCode == HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
@@ -115,12 +124,14 @@ public static class UploadEndpoints
             var upload = await repository.FindAsync(id, token);
             if (upload is not { State: "stored", Sha256: not null })
                 return Results.NotFound();
-            var path = kind == "preview" ? volume.PreviewPath(upload.Sha256, side) : volume.OriginalPath(upload.Sha256);
+            var path = kind == "preview" ? volume.ResolvePreviewPath(upload.Sha256, side) : volume.OriginalPath(upload.Sha256);
             if (kind == "preview" && !File.Exists(path) &&
                 !await cleanup.EnsurePreviewAsync(id, side, token))
                 return Results.Problem(statusCode: 503, title: "Preview is unavailable. The original has not been modified.");
+            if (kind == "preview") path = volume.ResolvePreviewPath(upload.Sha256, side);
             if (!File.Exists(path)) return Results.Problem(statusCode: 503, title: "Original storage is unavailable.");
-            context.Response.Headers.CacheControl = "private, no-store";
+            // Previews allow private browser/app cache storage but always require authenticated ETag revalidation.
+            context.Response.Headers.CacheControl = kind == "preview" ? "private, no-cache" : "private, no-store";
             return Results.File(path, kind == "preview" ? "image/jpeg" : upload.MediaType,
                 kind == "preview" ? null : upload.FileName, enableRangeProcessing: true,
                 entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{upload.Sha256}-{kind}{(kind == "preview" ? "-" + side : "")}\""));

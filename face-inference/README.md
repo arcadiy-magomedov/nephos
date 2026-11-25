@@ -14,14 +14,19 @@ container. It does **not** make the entire platform complete.
 * Separate observations, generated clusters, stable people, manual track
   assignments, reversible merge redirects, aliases, negative matches and
   append-only correction history. A merge is a cluster association, **not training**.
-* Cosine threshold **0.45**, ambiguity margin **0.05**, up to eight representatives
-  per identity / 2,000 representatives per matching operation. These constants
-  were fixed before testing the six portraits. Larger libraries can fragment
-  beyond that matching window; no billion-image accuracy/scalability claim.
-* Every public route validates a JWT and calls Library for live enabled
-  membership. A user's subject comes from the JWT, never a request owner field.
-  Owner-private labels cannot be read or changed by recipients of shared media.
-  Face and person-asset reads additionally reauthorize each returned asset.
+* Cosine threshold **0.45**, ambiguity margin **0.05**, with two-stage matching
+  behind `IFaceVectorIndex`: per-person normalized centroids (`person_centroids`,
+  stored per unmerged person so merge/unmerge stay lossless) recall the top 64
+  candidate people, then up to eight highest-confidence representatives per
+  candidate person are scored under the exact existing threshold, ambiguity, and
+  exclusion rules. These constants were fixed before testing the six portraits.
+* Every public route validates a JWT (with in-flight token introspection
+  coalescing) and checks live enabled membership via Library's private internal
+  endpoint (`GET /internal/v1/analysis/owners/{subject}/access`). A user's
+  subject comes from the JWT, never a request owner field. Owner-private labels
+  cannot be read or changed by recipients of shared media. Face and person-asset
+  reads reauthorize returned assets in one batch request
+  (`POST /internal/v1/analysis/owners/{subject}/assets/authorize`).
 * Original bytes are fetched only after owner/source authorization, bounded and
   checked against the exact committed size/hash. The original is never changed.
   Face success is never used as a backup, deletion, retention or offload signal.
@@ -115,14 +120,13 @@ For canonical HTTPS deployment, apply Compose overlays in this order:
 and metadata configuration to both face processes. Development-only settings
 are not a production authentication configuration.
 
-**Backup gap:** the current `scripts/backup.py` backs up the base PostgreSQL,
-media and RabbitMQ volumes, **not** `faces-postgres` or `.env.faces`. Until optional
-face backup/restore is integrated, protect the face database and its credentials
-separately with tested backup/restore procedures. Names, aliases, manual
-assignments, negative constraints, merge/split decisions and correction history
-are **not reconstructible from originals or regenerated embeddings**. Do not
-describe these user annotations as rebuildable, or claim the existing backup
-command protects them.
+**Backups:** `scripts/backup.py` backs up `faces-postgres` and `.env.faces`
+automatically whenever the optional face stack is active, in both cold snapshots
+and zero-downtime `create --online` logical dumps (`pg_dump --format=custom` +
+`pg_dumpall --globals-only`). Names, aliases, manual assignments, negative
+constraints, merge/split decisions and correction history are **not
+reconstructible from originals or regenerated embeddings**; verify backups
+regularly with `scripts/backup.py verify`.
 
 ## API
 

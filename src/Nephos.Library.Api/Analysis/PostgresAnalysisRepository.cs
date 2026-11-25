@@ -10,6 +10,7 @@ public sealed record FaceDeletion(Guid AssetId, string Subject, Guid LeaseId, in
 public interface IAnalysisRepository
 {
     Task<AnalysisSource?> FindSourceAsync(string subject, Guid assetId, CancellationToken token);
+    Task<IReadOnlySet<Guid>> FilterAuthorizedSourcesAsync(string subject, IReadOnlyList<Guid> assetIds, CancellationToken token);
     Task<FacePublication?> ClaimAsync(CancellationToken token);
     Task CompleteAsync(FacePublication publication, int? status, CancellationToken token);
     Task<FaceDeletion?> ClaimDeletionAsync(CancellationToken token);
@@ -29,6 +30,20 @@ public sealed class PostgresAnalysisRepository(NpgsqlDataSource source) : IAnaly
         return await reader.ReadAsync(token)
             ? new(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5))
             : null;
+    }
+
+    public async Task<IReadOnlySet<Guid>> FilterAuthorizedSourcesAsync(string subject, IReadOnlyList<Guid> assetIds, CancellationToken token)
+    {
+        var authorized = new HashSet<Guid>();
+        if (assetIds.Count == 0) return authorized;
+        await using var query = source.CreateCommand("""
+            SELECT id FROM analysis_sources WHERE subject=$1 AND id=ANY($2)
+            """);
+        query.Parameters.AddWithValue(subject);
+        query.Parameters.AddWithValue(assetIds.ToArray());
+        await using var reader = await query.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) authorized.Add(reader.GetGuid(0));
+        return authorized;
     }
 
     public async Task<FacePublication?> ClaimAsync(CancellationToken token)

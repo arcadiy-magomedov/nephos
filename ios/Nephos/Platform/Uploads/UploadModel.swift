@@ -26,6 +26,7 @@ final class UploadModel {
     @ObservationIgnored private var coordinator: UploadCoordinator?
     @ObservationIgnored private var client: UploadHTTPClient?
     @ObservationIgnored private var foregroundTask: Task<Void, Never>?
+    @ObservationIgnored private var foregroundID: UUID?
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var workID: UUID?
     @ObservationIgnored private var historyLimit = 100
@@ -33,6 +34,10 @@ final class UploadModel {
     @ObservationIgnored private var backgroundCompletions: [() -> Void] = []
     @ObservationIgnored private var isForeground = false
     @ObservationIgnored private var needsDiscovery = true
+    @ObservationIgnored private var needsWork = true
+    @ObservationIgnored private var lastDiscovery: Date?
+    @ObservationIgnored private var reloadGeneration: UInt64 = 0
+    @ObservationIgnored private let wakeGate = UploadWakeGate()
     @ObservationIgnored private lazy var connectivity = UploadConnectivity { [weak self] in
         self?.networkChanged()
     }
@@ -66,6 +71,7 @@ final class UploadModel {
         do {
             let vault = try await KeychainStorage().vault()
             guard let saved = vault.current else {
+                reloadGeneration &+= 1
                 await transport?.cancel(scope: nil)
                 destination = nil
                 coordinator = nil
@@ -74,6 +80,8 @@ final class UploadModel {
                 thumbnailItems = [:]
                 libraries = []
                 showsProgress = false
+                lastDiscovery = nil
+                wake()
                 return
             }
             if let stored = try await configuration?.load(),
@@ -83,6 +91,7 @@ final class UploadModel {
                 if destination != stored { try configure(stored) }
                 try await reload()
             } else {
+                reloadGeneration &+= 1
                 await transport?.cancel(scope: nil)
                 destination = nil
                 coordinator = nil
@@ -90,11 +99,13 @@ final class UploadModel {
                 thumbnailItems = [:]
                 libraries = []
                 showsProgress = false
+                lastDiscovery = nil
                 client = UploadHTTPClient(
                     connection: saved.connection,
                     authorization: UploadAuthorization(
                         account: AccountIdentity.key(
                             connection: saved.connection, subject: saved.subject)))
+                wake()
             }
         } catch { report(error) }
     }
@@ -130,6 +141,7 @@ final class UploadModel {
             try configure(selected)
             try await reload()
             message = nil
+            wake()
         } catch { report(error) }
     }
 
@@ -153,10 +165,12 @@ final class UploadModel {
             work?.cancel()
             try await repository.setPolicy(policy, scope: destination.scope)
             await transport?.cancel(scope: destination.scope)
-            needsDiscovery = true
+            needsDiscovery = policy != .disabled
+            needsWork = policy != .disabled
             try await reload()
             message = nil
             if policy == .disabled { UploadBackgroundScheduler.cancel() } else { UploadBackgroundScheduler.schedule() }
+            wake()
             await process(discover: policy != .disabled)
         } catch { report(error) }
     }
@@ -168,7 +182,9 @@ final class UploadModel {
             work?.cancel()
             try await repository.setPaused(paused, scope: destination.scope)
             if paused { await transport?.cancel(scope: destination.scope) }
+            needsWork = !paused
             try await reload()
+            wake()
             await process(discover: true)
         } catch { report(error) }
     }
@@ -177,49 +193,124 @@ final class UploadModel {
         do {
             guard let destination, let repository else { throw unavailable() }
             try await repository.retryFailed(scope: destination.scope)
+            needsWork = true
             try await reload()
+            wake()
             await process(discover: true)
         } catch { report(error) }
     }
 
     func foreground() {
+        let wasForeground = isForeground
         isForeground = true
-        guard foregroundTask == nil else { return }
+        _ = connectivity
+        if foregroundTask != nil {
+            if !wasForeground {
+                needsDiscovery = true
+                needsWork = true
+            }
+            wake()
+            return
+        }
+        needsDiscovery = true
+        needsWork = true
+        wake()
+        let id = UUID()
+        foregroundID = id
         foregroundTask = Task { [weak self] in
             guard let self else { return }
-            await restore()
-            var lastDiscovery = Date.distantPast
-            while !Task.isCancelled {
-                let discover = needsDiscovery || Date().timeIntervalSince(lastDiscovery) >= 15
-                if work == nil {
-                    if discover {
-                        lastDiscovery = Date()
-                        needsDiscovery = false
-                    }
-                    _ = startWork(discover: discover)
-                }
-                do {
-                    try await reload()
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    if !AuthSession.isCancelled(error) { report(error) }
-                    break
+            defer {
+                if self.foregroundID == id {
+                    self.foregroundTask = nil
+                    self.foregroundID = nil
                 }
             }
-            foregroundTask = nil
+            await self.restore()
+            var nextWorkAt: Date?
+            while !Task.isCancelled, self.foregroundID == id, self.isForeground {
+                self.wakeGate.consumePending()
+                let now: Date
+                do {
+                    now = try await self.reload()
+                } catch {
+                    if !AuthSession.isCancelled(error) { self.report(error) }
+                    break
+                }
+                guard !Task.isCancelled, self.foregroundID == id, self.isForeground else { break }
+                let allowsNetwork = !self.connectivity.hasPath || self.connectivity.permits(self.snapshot.policy)
+                let hasPending = self.snapshot.pendingCount > 0 || !self.snapshot.pending.isEmpty
+                if let deadline = nextWorkAt, now >= deadline {
+                    nextWorkAt = nil
+                    if self.work == nil, self.snapshot.canTransfer, allowsNetwork, hasPending || self.snapshot.scanning
+                    {
+                        self.needsWork = true
+                    }
+                }
+                let discover = UploadWakePolicy.shouldDiscover(
+                    for: self.snapshot, needsDiscovery: self.needsDiscovery,
+                    lastDiscovery: self.lastDiscovery, now: now)
+                let shouldRunWork: Bool
+                if self.snapshot.policy == .disabled {
+                    self.needsDiscovery = false
+                    self.needsWork = false
+                    nextWorkAt = nil
+                    shouldRunWork = false
+                } else if discover {
+                    shouldRunWork = true
+                } else if self.snapshot.canTransfer, allowsNetwork, self.needsWork, hasPending {
+                    shouldRunWork = true
+                } else {
+                    if self.work == nil { self.needsWork = false }
+                    shouldRunWork = false
+                }
+                if shouldRunWork, self.work == nil {
+                    nextWorkAt = nil
+                    _ = self.startWork(discover: discover)
+                }
+                let waitSeconds = UploadWakePolicy.nextWait(
+                    for: self.snapshot, now: now, allowsNetwork: allowsNetwork, isWorking: self.work != nil)
+                let effectiveTimeout: TimeInterval?
+                if let waitSeconds {
+                    let proposed = now.addingTimeInterval(waitSeconds)
+                    if let existing = nextWorkAt, existing < proposed {
+                        effectiveTimeout = max(0.05, existing.timeIntervalSince(now))
+                    } else {
+                        nextWorkAt = proposed
+                        effectiveTimeout = waitSeconds
+                    }
+                } else {
+                    nextWorkAt = nil
+                    effectiveTimeout = nil
+                }
+                let outcome = await self.wakeGate.wait(timeout: effectiveTimeout)
+                if outcome == .cancelled { break }
+                if outcome == .timedOut, self.work == nil, self.snapshot.canTransfer, allowsNetwork,
+                    hasPending || self.snapshot.scanning
+                {
+                    nextWorkAt = nil
+                    self.needsWork = true
+                }
+            }
         }
     }
 
     func background() {
         isForeground = false
         foregroundTask?.cancel()
+        foregroundTask = nil
+        foregroundID = nil
+        wakeGate.cancel()
         work?.cancel()
         if snapshot.policy != .disabled { UploadBackgroundScheduler.schedule() }
     }
 
     func stop() async {
         isForeground = false
+        reloadGeneration &+= 1
         foregroundTask?.cancel()
+        foregroundTask = nil
+        foregroundID = nil
+        wakeGate.cancel()
         work?.cancel()
         await transport?.cancel(scope: nil)
         UploadBackgroundScheduler.cancel()
@@ -236,12 +327,15 @@ final class UploadModel {
 
     private func startWork(discover: Bool) -> Task<Void, Never>? {
         guard let coordinator else { return nil }
+        if discover { needsDiscovery = false }
+        needsWork = false
         let id = UUID()
         let task = Task {
             defer {
                 if workID == id {
                     work = nil
                     workID = nil
+                    wake()
                 }
             }
             do {
@@ -249,7 +343,11 @@ final class UploadModel {
                     try await Task.sleep(for: .milliseconds(100))
                 }
                 let permits = connectivity.permits(snapshot.policy)
+                let ranDiscovery = discover || snapshot.scanning
                 try await coordinator.process(discover: discover, allowsPreparation: permits)
+                if ranDiscovery, snapshot.policy != .disabled {
+                    lastDiscovery = Date()
+                }
             } catch {
                 if !AuthSession.isCancelled(error) { report(error) }
             }
@@ -264,11 +362,18 @@ final class UploadModel {
         do { try await reload() } catch { report(error) }
     }
 
-    func watch(_ id: String) { visibleIDs.insert(id) }
+    func watch(_ id: String) {
+        let inserted = visibleIDs.insert(id).inserted
+        if inserted, destination != nil, thumbnailItems[id] == nil { wake() }
+    }
+
     func unwatch(_ id: String) { visibleIDs.remove(id) }
+
     func photosChanged() {
         needsDiscovery = true
+        needsWork = true
         thumbnailItems = [:]
+        wake()
     }
 
     func handleBackgroundEvents(completion: @escaping () -> Void) {
@@ -280,6 +385,11 @@ final class UploadModel {
         await restore()
         await process(discover: discover)
         do { try await reload() } catch { report(error) }
+        wake()
+    }
+
+    private func wake() {
+        wakeGate.wake()
     }
 
     private func configure(_ destination: UploadDestination) throws {
@@ -292,10 +402,15 @@ final class UploadModel {
             destination: destination, repository: repository, source: UploadPhotoLibrary(), client: client,
             transport: transport, files: files, events: events)
         needsDiscovery = true
+        needsWork = true
+        lastDiscovery = nil
     }
 
-    private func reload() async throws {
-        guard let destination, let repository else { return }
+    @discardableResult
+    private func reload() async throws -> Date {
+        guard let destination, let repository else { return Date() }
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
         let stored = try await repository.snapshot(scope: destination.scope, limit: historyLimit)
         let active = await transport?.active() ?? []
         var sent: [UUID: Int64] = [:]
@@ -324,26 +439,31 @@ final class UploadModel {
             }
             return item
         }
+        let items = try await repository.items(localIdentifiers: Array(visibleIDs), scope: destination.scope)
+        let evaluatedAt = Date()
+        // Drop stale reload results if sign-out, library switch, or a newer reload superseded this call.
+        guard generation == reloadGeneration, self.destination == destination else { return evaluatedAt }
         snapshot = UploadSnapshot(
             policy: stored.policy, paused: stored.paused, scanning: stored.scanning, notice: stored.notice,
             batch: stored.batch, succeeded: stored.succeeded, failed: stored.failed,
             pending: stored.pending.map(live), succeededCount: stored.succeededCount,
             failedCount: stored.failedCount, pendingCount: stored.pendingCount)
-        let items = try await repository.items(localIdentifiers: Array(visibleIDs), scope: destination.scope)
         thumbnailItems = Dictionary(
             items.map { ($0.localIdentifier, live($0)) }, uniquingKeysWith: { first, _ in first })
-        showsProgress =
-            snapshot.batch.map {
-                $0.completedAt.map { Date().timeIntervalSince($0) < 2 } ?? true
-            } ?? false
+        showsProgress = UploadWakePolicy.showsProgress(for: snapshot.batch, now: evaluatedAt)
+        return evaluatedAt
     }
 
     private func receivedBackgroundEvent() {
+        needsWork = true
+        wake()
         guard !isForeground, work == nil else { return }
         backgroundWindow(completions: [])
     }
 
     private func finishedBackgroundEvents() {
+        needsWork = true
+        wake()
         let completions = backgroundCompletions
         backgroundCompletions.removeAll()
         backgroundWindow(completions: completions)
@@ -374,7 +494,10 @@ final class UploadModel {
             if snapshot.policy == .wiFiOnly {
                 Task { await transport?.cancel(scope: destination?.scope) }
             }
+        } else if snapshot.canTransfer {
+            needsWork = true
         }
+        wake()
     }
 
     private func report(_ error: Error) {

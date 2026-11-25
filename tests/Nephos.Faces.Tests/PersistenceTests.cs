@@ -194,6 +194,84 @@ public sealed class PersistenceTests
     }
 
     [DatabaseFact]
+    public async Task CentroidsPersistUpdateOnAssignAndDeleteAndSurviveMergeUnmerge()
+    {
+        await using var db = Open();
+        var r = new PostgresFaceRepository(db);
+        var owner = "centroids-" + Guid.NewGuid();
+        var s1 = Source(owner);
+        var s2 = Source(owner);
+        var s3 = Source(owner);
+        await r.EnqueueAsync(owner, s1, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s1.Sha256, axis: 0), default);
+        await r.EnqueueAsync(owner, s2, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s2.Sha256, axis: 1), default);
+
+        // Centroids must be persisted per unmerged person_id.
+        await using (var countCmd = db.CreateCommand("SELECT count(*) FROM person_centroids WHERE owner=$1"))
+        {
+            countCmd.Parameters.AddWithValue(owner);
+            Assert.Equal(2L, (long)(await countCmd.ExecuteScalarAsync(default))!);
+        }
+
+        var faces = await r.FacesAsync(owner, null, null, null, 100, default);
+        var p1 = faces.Single(f => f.AssetId == s1.Id).PersonId!.Value;
+        var p2 = faces.Single(f => f.AssetId == s2.Id).PersonId!.Value;
+        Assert.True(await r.MergeAsync(owner, p2, p1, default));
+
+        // Incoming face matching axis 1 must still match p2's unmerged centroid (under merged group p1) and preserve unmerge.
+        await r.EnqueueAsync(owner, s3, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s3.Sha256, axis: 1), default);
+        Assert.True(await r.MergeAsync(owner, p2, null, default));
+        Assert.Equal(2, (await r.AssetsAsync(owner, p2, null, 100, default)).Count);
+        Assert.Single(await r.AssetsAsync(owner, p1, null, 100, default));
+
+        // Deleting all assets for p1 removes its centroid cleanly.
+        await r.DeleteAssetAsync(owner, s1.Id, default);
+        await using (var remaining = db.CreateCommand("SELECT count(*) FROM person_centroids WHERE owner=$1 AND person_id=$2"))
+        {
+            remaining.Parameters.AddWithValue(owner);
+            remaining.Parameters.AddWithValue(p1);
+            Assert.Equal(0L, (long)(await remaining.ExecuteScalarAsync(default))!);
+        }
+    }
+
+    [DatabaseFact]
+    public async Task EmptyCentroidsSelfHealAllPreExistingPeopleOnFirstSearch()
+    {
+        await using var db = Open();
+        var r = new PostgresFaceRepository(db);
+        var owner = "backfill-" + Guid.NewGuid();
+        var s1 = Source(owner);
+        var s2 = Source(owner);
+        var s3 = Source(owner);
+        var s4 = Source(owner);
+        await r.EnqueueAsync(owner, s1, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s1.Sha256, axis: 0), default);
+        await r.EnqueueAsync(owner, s2, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s2.Sha256, axis: 1), default);
+        var facesBefore = await r.FacesAsync(owner, null, null, null, 100, default);
+        var p1 = facesBefore.Single(f => f.AssetId == s1.Id).PersonId!.Value;
+        var p2 = facesBefore.Single(f => f.AssetId == s2.Id).PersonId!.Value;
+
+        // Simulate a database upgraded before centroids were populated.
+        await using (var wipe = db.CreateCommand("DELETE FROM person_centroids WHERE owner=$1"))
+        {
+            wipe.Parameters.AddWithValue(owner);
+            await wipe.ExecuteNonQueryAsync(default);
+        }
+
+        // First new upload touches axis 0 (p1); second upload touches axis 1 (p2) and must STILL recall p2.
+        await r.EnqueueAsync(owner, s3, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s3.Sha256, axis: 0), default);
+        await r.EnqueueAsync(owner, s4, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s4.Sha256, axis: 1), default);
+        var facesAfter = await r.FacesAsync(owner, null, null, null, 100, default);
+        Assert.Equal(p1, facesAfter.Single(f => f.AssetId == s3.Id).PersonId);
+        Assert.Equal(p2, facesAfter.Single(f => f.AssetId == s4.Id).PersonId);
+    }
+
+    [DatabaseFact]
     public async Task FencesStaleLeasesRetriesNoFacesAndModelChanges()
     {
         await using var db = Open();

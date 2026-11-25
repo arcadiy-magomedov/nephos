@@ -9,8 +9,7 @@ public sealed record UploadIntent(Guid Id, Guid LibraryId, string FileName, stri
         Id != Guid.Empty && LibraryId != Guid.Empty && ResourceSetId != Guid.Empty && Size is > 0 and <= MediaProtocol.MaxUploadBytes &&
         !string.IsNullOrWhiteSpace(FileName) && FileName.Length <= 200 &&
         !FileName.Any(c => char.IsControl(c) || c is '/' or '\\') &&
-        MediaType is "image/jpeg" or "image/png" or "image/heic" or "image/heif" or "image/webp" or "image/gif" or
-            "video/mp4" or "video/quicktime" or "application/octet-stream" &&
+        MediaProtocol.IsSupportedUploadMediaType(MediaType) &&
         Sha256 is { Length: 64 } && Sha256.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') &&
         (CapturedAt is null || CapturedAt >= new DateTimeOffset(1800, 1, 1, 0, 0, 0, TimeSpan.Zero) && CapturedAt <= DateTimeOffset.UtcNow.AddDays(1));
 }

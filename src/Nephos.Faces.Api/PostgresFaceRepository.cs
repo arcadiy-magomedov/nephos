@@ -4,8 +4,9 @@ using NpgsqlTypes;
 
 namespace Nephos.Faces.Api;
 
-public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceRepository
+public sealed class PostgresFaceRepository(NpgsqlDataSource data, IFaceVectorIndex? vectorIndex = null) : IFaceRepository
 {
+    private readonly IFaceVectorIndex index = vectorIndex ?? new PostgresCentroidVectorIndex();
     private static NpgsqlCommand Command(NpgsqlConnection connection, string sql, params object?[] values)
     {
         var command = new NpgsqlCommand(sql, connection);
@@ -52,15 +53,30 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
             await tombstone.ExecuteNonQueryAsync(ct);
         }
         var tracks = new List<Guid>();
-        await using (var query = Command(c, "SELECT id FROM face_tracks WHERE owner=$1 AND asset_id=$2", owner, assetId))
+        var affectedPeople = new HashSet<Guid>();
+        await using (var query = Command(c, """
+            SELECT t.id, t.manual_override, t.manual_person_id, o.generated_person_id
+            FROM face_tracks t LEFT JOIN observations o ON o.track_id=t.id AND o.owner=t.owner
+            WHERE t.owner=$1 AND t.asset_id=$2
+            """, owner, assetId))
         await using (var reader = await query.ExecuteReaderAsync(ct))
-            while (await reader.ReadAsync(ct)) tracks.Add(reader.GetGuid(0));
+            while (await reader.ReadAsync(ct))
+            {
+                var trackId = reader.GetGuid(0);
+                if (!tracks.Contains(trackId)) tracks.Add(trackId);
+                var person = reader.GetBoolean(1)
+                    ? (reader.IsDBNull(2) ? (Guid?)null : reader.GetGuid(2))
+                    : (reader.IsDBNull(3) ? (Guid?)null : reader.GetGuid(3));
+                if (person is Guid personId) affectedPeople.Add(personId);
+            }
         if (tracks.Count > 0)
         {
             await Execute(c, "DELETE FROM corrections WHERE owner=$1 AND subject_id=ANY($2)", ct, owner, tracks.ToArray());
             await Execute(c, "DELETE FROM track_exclusions WHERE owner=$1 AND track_id=ANY($2)", ct, owner, tracks.ToArray());
             await Execute(c, "DELETE FROM observations WHERE owner=$1 AND track_id=ANY($2)", ct, owner, tracks.ToArray());
             await Execute(c, "DELETE FROM face_tracks WHERE owner=$1 AND id=ANY($2)", ct, owner, tracks.ToArray());
+            foreach (var personId in affectedPeople)
+                await index.RecomputePersonAsync(c, owner, Pipeline.Version, personId, ct);
         }
         await Execute(c, "DELETE FROM jobs WHERE owner=$1 AND asset_id=$2", ct, owner, assetId);
         await tx.CommitAsync(ct);
@@ -150,20 +166,9 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
                 tracks.Add(new(reader.GetGuid(0), reader.GetDouble(1), reader.GetDouble(2), reader.GetDouble(3), reader.GetDouble(4),
                     reader.GetBoolean(5), reader.IsDBNull(6) ? null : reader.GetGuid(6)));
 
-        var representatives = new List<(Guid Person, Guid Root, float[] Vector)>();
-        await using (var command = Command(c, """
-            WITH candidates AS (
-              SELECT CASE WHEN t.manual_override THEN t.manual_person_id ELSE o.generated_person_id END person,
-                     o.embedding, o.id
-              FROM observations o JOIN jobs j ON j.id=o.job_id JOIN face_tracks t ON t.id=o.track_id
-              WHERE o.owner=$1 AND j.pipeline_version=$2 AND j.status='complete' AND o.embedding IS NOT NULL),
-            ranked AS (SELECT *,row_number() OVER (PARTITION BY person ORDER BY id DESC) AS position FROM candidates WHERE person IS NOT NULL)
-            SELECT person,resolve_person($1,person),embedding FROM ranked WHERE position<=8 ORDER BY id DESC LIMIT 2000
-            """, job.Owner, Pipeline.Version))
-        await using (var reader = await command.ExecuteReaderAsync(ct))
-            while (await reader.ReadAsync(ct)) representatives.Add((reader.GetGuid(0), reader.GetGuid(1), reader.GetFieldValue<float[]>(2)));
-
         var used = new HashSet<Guid>();
+        var sessionAdded = new List<FaceMatchCandidate>();
+        var touchedPeople = new HashSet<Guid>();
         foreach (var face in result.Faces)
         {
             var track = tracks.Where(t => !used.Contains(t.Id))
@@ -178,11 +183,13 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
             Guid? person = track?.Person;
             if (face.Embedding is { } vector && person is null && track?.Manual != true)
             {
-                var scores = representatives.GroupBy(r => r.Root)
+                var candidates = (await index.SearchCandidatesAsync(c, job.Owner, Pipeline.Version, vector, ct))
+                    .Concat(sessionAdded);
+                var scores = candidates.GroupBy(r => r.RootId)
                     .Select(g =>
                     {
                         var best = g.OrderByDescending(r => Clustering.Similarity(vector, r.Vector)).First();
-                        return (Person: best.Person, Root: g.Key, Score: Clustering.Similarity(vector, best.Vector));
+                        return (Person: best.PersonId, Root: g.Key, Score: Clustering.Similarity(vector, best.Vector));
                     })
                     .Where(s => s.Score >= Pipeline.Threshold).OrderByDescending(s => s.Score).ToArray();
                 foreach (var candidate in scores)
@@ -200,8 +207,9 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
                     await Execute(c, "INSERT INTO people(id,owner) VALUES($1,$2)", ct, person, job.Owner);
                 }
                 var root = await ScalarId(c, "SELECT resolve_person($1,$2)", ct, job.Owner, person) ?? person.Value;
-                representatives.Add((person.Value, root, vector));
+                sessionAdded.Add(new(person.Value, root, vector));
             }
+            if (person is Guid matchedPerson && face.Embedding is not null) touchedPeople.Add(matchedPerson);
             Guid? cluster = null;
             if (person is not null)
                 cluster = await ScalarId(c, """
@@ -217,6 +225,8 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         }
         await Execute(c, "UPDATE jobs SET status=$1,lease_token=NULL,lease_until=NULL WHERE id=$2", ct,
             result.Faces.Length == 0 ? "no_faces" : "complete", job.Id);
+        foreach (var personId in touchedPeople)
+            await index.RecomputePersonAsync(c, job.Owner, job.PipelineVersion, personId, ct);
         await tx.CommitAsync(ct);
     }
 
@@ -348,12 +358,29 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data) : IFaceReposit
         }
         else if (target is not null && await ScalarId(c, "SELECT id FROM people WHERE owner=$1 AND id=$2", ct, owner, target) is null)
             return false;
+        var previousPeople = new HashSet<Guid>();
+        await using (var prev = Command(c, """
+            SELECT t.manual_override, t.manual_person_id, o.generated_person_id
+            FROM face_tracks t LEFT JOIN observations o ON o.track_id=t.id AND o.owner=t.owner
+            WHERE t.owner=$1 AND t.id=$2
+            """, owner, faceId))
+        await using (var reader = await prev.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+            {
+                var p = reader.GetBoolean(0)
+                    ? (reader.IsDBNull(1) ? (Guid?)null : reader.GetGuid(1))
+                    : (reader.IsDBNull(2) ? (Guid?)null : reader.GetGuid(2));
+                if (p is Guid pid) previousPeople.Add(pid);
+            }
         await Execute(c, """
             INSERT INTO track_exclusions(owner,track_id,person_id)
             SELECT $1,$2,generated_person_id FROM observations WHERE owner=$1 AND track_id=$2 AND generated_person_id IS NOT NULL
             ON CONFLICT DO NOTHING
             """, ct, owner, faceId);
         await Execute(c, "UPDATE face_tracks SET manual_override=true,manual_person_id=$1 WHERE owner=$2 AND id=$3", ct, target, owner, faceId);
+        if (target is Guid targetPerson) previousPeople.Add(targetPerson);
+        foreach (var personId in previousPeople)
+            await index.RecomputePersonAsync(c, owner, Pipeline.Version, personId, ct);
         await Audit(c, owner, request.NewPerson ? "split" : "assign", faceId, target, ct);
         await tx.CommitAsync(ct);
         return true;

@@ -29,6 +29,8 @@ with path.open("a") as output:
         output.write(f"NEPHOS_QR_DELIVERY_KEY={base64.b64encode(secrets.token_bytes(32)).decode()}\n")
     if "NEPHOS_QR_KEY_VERSION" not in existing:
         output.write("NEPHOS_QR_KEY_VERSION=1\n")
+    if "COMPOSE_PROFILES" not in existing:
+        output.write("COMPOSE_PROFILES=observability\n")
     output.flush()
     os.fsync(output.fileno())
 os.chmod(path, 0o600)

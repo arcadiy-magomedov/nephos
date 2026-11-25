@@ -1,19 +1,40 @@
-"""Private renderer; bounded admission and killable child, no storage or model weights."""
+"""Private renderer; bounded admission and pre-warmed killable children, no storage or model weights."""
 
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
-import subprocess
+import signal
 import sys
 import threading
 
-from decoder import MAX_BYTES
+root = Path(__file__).resolve().parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
+
+from worker_pool import (  # noqa: E402
+    MAX_BYTES,
+    WorkerBusyError,
+    WorkerFailedError,
+    WorkerPool,
+    WorkerPoolClosedError,
+    WorkerTimeoutError,
+    parse_max_requests,
+    parse_worker_count,
+)
 
 key = os.environ["DERIVATIVE_KEY"]
 if len(key) < 32:
     raise RuntimeError("DERIVATIVE_KEY must contain at least 32 characters")
-gate = threading.BoundedSemaphore(1)
+
+workers = parse_worker_count("DERIVATIVE_WORKERS", default=1, minimum=1, maximum=2)
+max_requests = parse_max_requests()
+pool = WorkerPool(
+    [sys.executable, str(root / "derivatives.py"), "--worker"],
+    workers=workers,
+    timeout=45,
+    max_requests=max_requests,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -43,28 +64,47 @@ class Handler(BaseHTTPRequestHandler):
         if not 0 < length <= MAX_BYTES or self.headers.get("Transfer-Encoding"):
             self.reply(413, b"{}")
             return
-        if not gate.acquire(blocking=False):
+        try:
+            with pool.slot():
+                data = self.rfile.read(length)
+                if len(data) != length:
+                    self.reply(400, b"{}")
+                    return
+                result = pool.execute(data, acquired=True)
+        except WorkerBusyError:
             self.reply(429, b"{}")
             return
-        try:
-            data = self.rfile.read(length)
-            if len(data) != length:
-                self.reply(400, b"{}")
-                return
-            result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("derivatives.py"))],
-                input=data,
-                capture_output=True,
-                timeout=45,
-                check=False,
-            )
-            self.reply(200 if result.returncode == 0 else 422, result.stdout or b'{"error":"render_rejected"}')
-        except subprocess.TimeoutExpired:
+        except WorkerPoolClosedError:
+            self.reply(503, b'{"error":"service_shutting_down"}')
+            return
+        except WorkerTimeoutError:
             self.reply(422, b'{"error":"render_timeout"}')
+            return
+        except WorkerFailedError:
+            self.reply(422, b'{"error":"render_rejected"}')
+            return
         except (OSError, ValueError):
             self.reply(400, b'{"error":"invalid_request"}')
-        finally:
-            gate.release()
+            return
+        self.reply(200 if result.ok else 422, result.payload or b'{"error":"render_rejected"}')
 
 
-ThreadingHTTPServer(("0.0.0.0", 8091), Handler).serve_forever()
+def run_server():
+    httpd = None
+    try:
+        pool.warm()
+        httpd = ThreadingHTTPServer(("0.0.0.0", 8091), Handler)
+
+        def _shutdown(*_):
+            threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+        signal.signal(signal.SIGTERM, _shutdown)
+        httpd.serve_forever()
+    finally:
+        if httpd is not None:
+            httpd.server_close()
+        pool.close()
+
+
+if __name__ == "__main__":
+    run_server()
