@@ -1,10 +1,13 @@
 import base64
 import hashlib
 import io
-from pathlib import Path
-import unittest
+import json
 import os
+from pathlib import Path
 import runpy
+import subprocess
+import sys
+import unittest
 from unittest.mock import Mock, patch
 
 from PIL import Image, ImageCms
@@ -13,6 +16,7 @@ import numpy as np
 from decoder import ANALYSIS_MAX_SIDE, ImageRejected, decode_working_rgb
 from derivatives import SIZES, render
 from infer import analyze
+from worker_pool import WorkerResult
 
 ROOT = Path(__file__).resolve().parent
 LARGE = ROOT / "fixtures/heic/obama-2009-48mp.heic"
@@ -46,10 +50,45 @@ class DerivativeTests(unittest.TestCase):
             handler.path = "/render"
             handler.headers = headers
             handler.reply = Mock()
-            with patch("subprocess.run") as child:
+            with patch.object(server["pool"], "execute") as child:
                 handler.do_POST()
                 child.assert_not_called()
             handler.reply.assert_called_once_with(expected, b"{}")
+
+        handler = object.__new__(server["Handler"])
+        handler.connection = Mock()
+        handler.path = "/v1/render"
+        handler.headers = {"X-Nephos-Service-Key": "k" * 32, "Content-Length": "4"}
+        handler.rfile = io.BytesIO(b"body")
+        handler.reply = Mock()
+        payload = b'{"sourceSha256":"abc","width":1,"height":1,"variants":{}}'
+        with patch.object(server["pool"], "execute", return_value=WorkerResult(True, payload)) as child:
+            handler.do_POST()
+            self.assertEqual(b"body", child.call_args.args[0])
+        handler.reply.assert_called_once_with(200, payload)
+
+    def test_single_shot_cli_mode_remains_compatible(self):
+        encoded = io.BytesIO()
+        Image.new("RGB", (64, 48), "blue").save(encoded, format="PNG")
+        ok = subprocess.run(
+            [sys.executable, str(ROOT / "derivatives.py")],
+            input=encoded.getvalue(),
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        parsed = json.loads(ok.stdout)
+        self.assertEqual((64, 48), (parsed["width"], parsed["height"]))
+        self.assertEqual(set(map(str, SIZES)), set(parsed["variants"]))
+        bad = subprocess.run(
+            [sys.executable, str(ROOT / "derivatives.py")],
+            input=b"not an image",
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertNotEqual(0, bad.returncode)
+        self.assertEqual({"error": "corrupt_image"}, json.loads(bad.stdout))
 
     def test_sizes_no_upscale_and_metadata_removed(self):
         encoded = io.BytesIO()

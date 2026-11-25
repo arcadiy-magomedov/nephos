@@ -68,5 +68,11 @@ public static class TrashEndpoints
             return await repository.CompleteAsync(assetId, request.LeaseId, token)
                 ? Results.NoContent() : Results.Conflict();
         });
+        app.MapInternalV1("/cleanup/compact-history", ["POST"], async (HttpContext context,
+            IConfiguration configuration, IGalleryRepository gallery, CancellationToken token) =>
+        {
+            if (!MediaProtocol.IsInternal(context, configuration)) return Results.Unauthorized();
+            return Results.Ok(await gallery.CompactHistoryAsync(token));
+        });
     }
 }

@@ -102,24 +102,24 @@ public static class FaceEndpoints
             Guid? assetId, Guid? personId, int? limit, Guid? after, CancellationToken ct) =>
         {
             if (!ValidLimit(limit)) return Results.BadRequest();
-            var rows = await r.FacesAsync(Owner(c), assetId, personId, after, (limit ?? 50) + 1, ct);
-            var allowed = new Dictionary<Guid, bool>();
-            foreach (var asset in rows.Select(f => f.AssetId).Distinct())
-                allowed[asset] = await access.SourceAsync(Owner(c), asset, ct) is not null;
             var pageSize = limit ?? 50;
+            var rows = await r.FacesAsync(Owner(c), assetId, personId, after, pageSize + 1, ct);
+            var page = rows.Take(pageSize).ToArray();
+            var allowed = await access.AuthorizeSourcesAsync(Owner(c), page.Select(f => f.AssetId).Distinct().ToArray(), ct);
             // Advance over revoked rows as well: filtering must not trap a cursor on inaccessible assets.
-            return Results.Ok(new Page<Face>(rows.Take(pageSize).Where(f => allowed[f.AssetId]).ToArray(),
-                rows.Count > pageSize ? rows[pageSize - 1].Id : null));
+            return Results.Ok(new Page<Face>(page.Where(f => allowed.Contains(f.AssetId)).ToArray(),
+                rows.Count > pageSize ? page[^1].Id : null));
         });
         group.MapGet("/people/{id:guid}/assets", async (Guid id, HttpContext c, IAnalysisSourceClient access,
             IFaceRepository r, int? limit, Guid? after, CancellationToken ct) =>
         {
             if (!ValidLimit(limit)) return Results.BadRequest();
-            var rows = await r.AssetsAsync(Owner(c), id, after, (limit ?? 50) + 1, ct);
-            var authorized = new List<Guid>();
-            foreach (var asset in rows.Take(limit ?? 50))
-                if (await access.SourceAsync(Owner(c), asset, ct) is not null) authorized.Add(asset);
-            return Results.Ok(new Page<Guid>(authorized, rows.Count > (limit ?? 50) ? rows[(limit ?? 50) - 1] : null));
+            var pageSize = limit ?? 50;
+            var rows = await r.AssetsAsync(Owner(c), id, after, pageSize + 1, ct);
+            var page = rows.Take(pageSize).ToArray();
+            var allowed = await access.AuthorizeSourcesAsync(Owner(c), page, ct);
+            return Results.Ok(new Page<Guid>(page.Where(allowed.Contains).ToArray(),
+                rows.Count > pageSize ? page[^1] : null));
         });
         group.MapGet("/corrections", async (HttpContext c, IFaceRepository r, int? limit, Guid? after, CancellationToken ct) =>
         {

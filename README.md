@@ -47,59 +47,62 @@ not a claim that the entire platform is production-qualified.
   evidence covers every original, not just its representative image.
 - Owner-controlled selected-media or all/future-media sharing with known users;
   shared provenance, scoped snapshots/deltas, revocation and read-only grants.
-- Native media-first iOS navigation, chronological preview grid, full-screen
-  photo viewing, upload progress/pause, and persistent System/Light/Dark themes.
-  People screens use real private face crops and support names, aliases, merges,
-  undo, reassignment, splitting and different-person rules. Native sharing
-  includes selection, known-user discovery, scope changes and revocation.
-- Optional [owner-private face service](face-inference/README.md): local CPU
-  detection/embeddings, stable person clusters, names, aliases, reversible
-  merges/splits and manual negative matches. A transactional Library outbox
-  automatically queues eligible committed primary photos independently of backup.
+- Native iOS app ([ios/README.md](ios/README.md)) supporting QR enrollment with
+  DPoP-bound 180-day persistent sessions, local Photos/Live Photo viewing and
+  original sharing, opt-in automatic backup with durable growing batches,
+  event-driven foreground updates, shared `MediaThumbnail` byte-weighted radial
+  progress, and a file-type-agnostic background `URLSession` file uploader.
+- Optional [owner-private face service](face-inference/README.md): pre-warmed
+  isolated local CPU detection/embeddings, per-person centroid candidate recall
+  plus best-representative matching, names, aliases, reversible merges/splits,
+  and manual negative matches. A transactional Library outbox automatically
+  queues eligible committed primary photos from `photos`-domain libraries.
 - Renewable, persisted 30-day retention holds with fresh original rehashing for
-  eligible phone cleanup. User deletion retains originals for 30 days; only the
-  scheduled reference-aware cleanup service can reclaim expired server bytes.
-- Shared OpenTelemetry logs/metrics/traces and Grafana/Prometheus/Loki/Tempo,
-  including propagation through verification, the outbox, and projection.
-  The private Python administration service exports all three signals through
-  the same Collector and propagates trace context into the administration API.
-  Provisioned operational dashboards and alert rules cover worker liveness,
-  storage headroom, verification, publication backlogs, and dead letters.
+  eligible phone cleanup. User deletion retains originals for 30 days; the
+  scheduled cleanup service reclaims expired server bytes, notifies configured
+  domain cleanup hooks, and compacts expired gallery history.
+- Shared OpenTelemetry logs/metrics/traces and Grafana/Prometheus/Loki/Tempo
+  (under the `observability` Compose profile, enabled by default in `.env`;
+  set `COMPOSE_PROFILES=""` for a lean home-server deployment without telemetry
+  containers), with provisioned dashboards and alert rules.
 
 The current implementation is **not yet production-qualified as a whole**.
-Server albums/favorites, semantic search, APNs, Android, HA, and multi-host
-workload/network isolation remain unfinished. Face analysis currently supports
-JPEG/PNG/WebP/HEIC/HEIF still images, not video. HEIC is decoded only inside the
-bounded analysis service; the phone uploads its original and the stored bytes,
-hash and download format stay unchanged. Existing eligible HEIC/HEIF primaries
-are queued by Library migration `006`; `scripts/faces-backfill.py` can safely
-repeat discovery. Analysis accepts up to 20 MiB / 64 million pixels, including
-48-Mp HEIC. Above the previous 32-Mp boundary, a temporary image capped at 4096
-pixels is prepared before OpenCV; face boxes remain normalized against the
-upright original. Existing supported-image embeddings and labels are preserved.
-The private `image-derivatives` service generates 512/1280/2560-pixel JPEG
-previews. iOS grids and photo viewing use previews, not original downloads;
-originals are fetched explicitly for export/restore (video playback uses bounded ranges).
-See the iOS documentation for supported resource restoration and
-device-only acceptance checks; a simulator build does not certify Face ID,
+Remote cloud-gallery browsing/People/Search/Sharing on iOS, server albums/favorites,
+semantic search, APNs, Android, HA, and multi-host workload/network isolation
+remain unfinished. Face analysis currently supports JPEG/PNG/WebP/HEIC/HEIF
+still images from `photos`-domain libraries, not video. HEIC is decoded only
+inside the bounded analysis service; originals stay unchanged. Existing eligible
+HEIC/HEIF primaries are queued by Library migration `006`;
+`scripts/faces-backfill.py` can safely repeat discovery. Analysis accepts up to
+20 MiB / 64 million pixels, including 48-Mp HEIC. Above the previous 32-Mp
+boundary, a temporary image capped at 4096 pixels is prepared before OpenCV;
+face boxes remain normalized against the upright original. The private
+`image-derivatives` service runs pre-warmed isolated workers to generate
+sharded 512/1280/2560-pixel JPEG previews served with `Cache-Control: private, no-cache`
+and `ETag` revalidation. See [ios/README.md](ios/README.md) for current iOS scope
+and device-only acceptance checks; a simulator build does not certify Face ID,
 background scheduling, or Photos deletion.
-
-The native Search screen currently supports case-insensitive substrings of person names/aliases and
-explicitly scoped filename filtering of loaded items, not semantic search.
-The Albums tab exposes libraries and incoming/outgoing sharing; server album
-creation is explicitly unavailable. See the
-[remaining feature list](ios/README.md#remaining-features) rather than treating
-every design mockup as an implemented backend capability.
 
 ## Start locally
 
 Requires Docker Compose, Python 3, and .NET SDK 10.0.300 for local .NET builds.
-The complete stack needs several GB of memory and free disk space.
+The complete stack needs several GB of memory and free disk space; to omit the
+five telemetry containers (~1.8 GB RAM) on a small home server, set
+`COMPOSE_PROFILES=""` in `.env`.
 
 ```sh
 python3 scripts/dev-env.py                   # first setup only
 # python3 scripts/upgrade-dev-env.py         # existing foundation .env instead
 docker compose up -d --build
+```
+
+Backups support both cold snapshots and zero-downtime online backups (including
+optional `faces-postgres` and `.env.faces`, excluding rebuildable previews and
+staging):
+
+```sh
+python3 scripts/backup.py create --online /path/to/backup-dir
+python3 scripts/backup.py verify /path/to/backup-dir
 ```
 
 Credentials and a stable server ID are generated into ignored, mode-0600 `.env`.

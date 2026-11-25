@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -90,48 +92,55 @@ public static class Extensions
                             context.Fail("Bearer token is missing.");
                             return;
                         }
-                        var client = context.HttpContext.RequestServices
-                            .GetRequiredService<IHttpClientFactory>().CreateClient("keycloak-introspection");
-                        using var request = new HttpRequestMessage(HttpMethod.Post, introspectionUri);
-                        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes(
-                            $"{introspectionClientId}:{introspectionClientSecret}"));
-                        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-                        request.Content = new FormUrlEncodedContent(
-                            [new KeyValuePair<string, string>("token", authorization["Bearer ".Length..].Trim())]);
-                        using var response = await client.SendAsync(request, context.HttpContext.RequestAborted);
-                        if (!response.IsSuccessStatusCode)
+                        var token = authorization["Bearer ".Length..].Trim();
+                        var coalescer = context.HttpContext.RequestServices.GetRequiredService<IntrospectionCoalescer>();
+                        var clientFactory = context.HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>();
+                        var outcome = await coalescer.InspectAsync(
+                            token,
+                            async ct =>
+                            {
+                                try
+                                {
+                                    var client = clientFactory.CreateClient("keycloak-introspection");
+                                    using var request = new HttpRequestMessage(HttpMethod.Post, introspectionUri);
+                                    var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                                        $"{introspectionClientId}:{introspectionClientSecret}"));
+                                    request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+                                    request.Content = new FormUrlEncodedContent(
+                                        [new KeyValuePair<string, string>("token", token)]);
+                                    using var response = await client.SendAsync(request, ct);
+                                    if (!response.IsSuccessStatusCode) return IntrospectionOutcome.Unavailable;
+                                    using var body = await JsonDocument.ParseAsync(
+                                        await response.Content.ReadAsStreamAsync(ct),
+                                        cancellationToken: ct);
+                                    return body.RootElement.TryGetProperty("active", out var active) &&
+                                        active.ValueKind == JsonValueKind.True
+                                        ? IntrospectionOutcome.Active
+                                        : IntrospectionOutcome.Inactive;
+                                }
+                                catch (OperationCanceledException) { return IntrospectionOutcome.Unavailable; }
+                                catch (HttpRequestException) { return IntrospectionOutcome.Unavailable; }
+                                catch (JsonException) { return IntrospectionOutcome.Unavailable; }
+                            },
+                            context.HttpContext.RequestAborted);
+                        if (outcome == IntrospectionOutcome.Unavailable)
                         {
                             context.HttpContext.Items[IntrospectionUnavailable] = true;
                             context.Fail("Token session status is unavailable.");
-                            return;
                         }
-                        using var body = await JsonDocument.ParseAsync(
-                            await response.Content.ReadAsStreamAsync(context.HttpContext.RequestAborted),
-                            cancellationToken: context.HttpContext.RequestAborted);
-                        if (!body.RootElement.TryGetProperty("active", out var active) ||
-                            active.ValueKind != JsonValueKind.True)
+                        else if (outcome == IntrospectionOutcome.Inactive)
                         {
                             context.Fail("The identity provider has revoked this token session.");
                         }
                     }
-                    catch (OperationCanceledException) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                    catch (OperationCanceledException) when (context.HttpContext.RequestAborted.IsCancellationRequested)
                     {
-                        context.HttpContext.Items[IntrospectionUnavailable] = true;
-                        context.Fail("Token session status is unavailable.");
-                    }
-                    catch (HttpRequestException)
-                    {
-                        context.HttpContext.Items[IntrospectionUnavailable] = true;
-                        context.Fail("Token session status is unavailable.");
-                    }
-                    catch (JsonException)
-                    {
-                        context.HttpContext.Items[IntrospectionUnavailable] = true;
-                        context.Fail("Token session status is unavailable.");
+                        context.Fail("Request was cancelled before token validation completed.");
                     }
                 }
             };
         });
+        builder.Services.AddSingleton<IntrospectionCoalescer>();
         builder.Services.AddHttpClient("keycloak-introspection", client =>
             client.Timeout = TimeSpan.FromSeconds(5));
         builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme).ValidateOnStart();
@@ -204,6 +213,38 @@ public static class Extensions
                 [HealthStatus.Unhealthy] = 503
             }
         });
+    }
+
+    private enum IntrospectionOutcome { Active, Inactive, Unavailable }
+
+    // Coalesces concurrent in-flight introspections for the same token without post-completion caching.
+    private sealed class IntrospectionCoalescer
+    {
+        private readonly ConcurrentDictionary<string, Lazy<Task<IntrospectionOutcome>>> inflight = new();
+
+        public async Task<IntrospectionOutcome> InspectAsync(
+            string token, Func<CancellationToken, Task<IntrospectionOutcome>> probe, CancellationToken callerToken)
+        {
+            var key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+            Lazy<Task<IntrospectionOutcome>>? created = null;
+            created = new Lazy<Task<IntrospectionOutcome>>(() => RunAsync(key, created!, probe));
+            var entry = inflight.GetOrAdd(key, created);
+            return await entry.Value.WaitAsync(callerToken);
+        }
+
+        private async Task<IntrospectionOutcome> RunAsync(
+            string key, Lazy<Task<IntrospectionOutcome>> self, Func<CancellationToken, Task<IntrospectionOutcome>> probe)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                return await probe(timeout.Token);
+            }
+            finally
+            {
+                inflight.TryRemove(KeyValuePair.Create(key, self));
+            }
+        }
     }
 
     private sealed class SafeTraceProcessor : BaseProcessor<Activity>

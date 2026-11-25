@@ -9,6 +9,7 @@ import sys
 from PIL import Image
 
 from decoder import ImageRejected, MAX_BYTES, decode_working_rgb
+from worker_pool import apply_worker_limits, serve_worker
 
 SIZES = (512, 1280, 2560)
 
@@ -33,17 +34,32 @@ def render(data):
         image.close()
 
 
-if __name__ == "__main__":
+def _handle_worker_request(data):
     try:
-        if sys.platform == "linux":
-            import resource
-
-            resource.setrlimit(resource.RLIMIT_CPU, (40, 40))
-            resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
-        print(json.dumps(render(sys.stdin.buffer.read(MAX_BYTES + 1)), allow_nan=False))
+        return True, json.dumps(render(data), allow_nan=False).encode("utf-8")
     except ImageRejected as error:
-        print(json.dumps({"error": str(error)}))
-        sys.exit(1)
+        return False, json.dumps({"error": str(error)}).encode("utf-8")
+    except MemoryError:
+        raise
     except Exception:
-        print('{"error":"render_rejected"}')
-        sys.exit(1)
+        return False, b'{"error":"render_rejected"}'
+
+
+if __name__ == "__main__":
+    if "--worker" in sys.argv[1:]:
+        apply_worker_limits()
+        serve_worker(_handle_worker_request, error_payload=b'{"error":"render_rejected"}')
+    else:
+        try:
+            if sys.platform == "linux":
+                import resource
+
+                resource.setrlimit(resource.RLIMIT_CPU, (40, 40))
+                resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
+            print(json.dumps(render(sys.stdin.buffer.read(MAX_BYTES + 1)), allow_nan=False))
+        except ImageRejected as error:
+            print(json.dumps({"error": str(error)}))
+            sys.exit(1)
+        except Exception:
+            print('{"error":"render_rejected"}')
+            sys.exit(1)

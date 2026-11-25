@@ -93,10 +93,23 @@ public sealed class UploadTests : IDisposable
         Assert.False(intent.IsValid());
     }
 
-    [Fact]
-    public void Valid_intent_is_accepted()
+    [Theory]
+    [InlineData("photo.jpg", "image/jpeg")]
+    [InlineData("book.pdf", "application/pdf")]
+    [InlineData("book.epub", "application/epub+zip")]
+    [InlineData("movie.mkv", "video/x-matroska")]
+    [InlineData("album.flac", "audio/flac")]
+    public void Valid_intent_is_accepted(string fileName, string mediaType)
     {
-        Assert.True(new UploadIntent(Guid.NewGuid(), Guid.NewGuid(), "photo.jpg", "image/jpeg", 4, new string('a', 64)).IsValid());
+        Assert.True(new UploadIntent(Guid.NewGuid(), Guid.NewGuid(), fileName, mediaType, 4, new string('a', 64)).IsValid());
+    }
+
+    [Theory]
+    [InlineData("vector.svg", "image/svg+xml")]
+    [InlineData("script.js", "application/javascript")]
+    public void Active_web_script_media_types_remain_rejected(string fileName, string mediaType)
+    {
+        Assert.False(new UploadIntent(Guid.NewGuid(), Guid.NewGuid(), fileName, mediaType, 4, new string('a', 64)).IsValid());
     }
 
     [Fact]
@@ -136,6 +149,26 @@ public sealed class UploadTests : IDisposable
             3, new string('0', 64), "verifying", null, false, null, DateTimeOffset.UtcNow);
         await Assert.ThrowsAsync<UploadConflictException>(() => volume.AssembleAsync(upload, default));
         Assert.False(File.Exists(volume.OriginalPath(upload.ExpectedHash)));
+    }
+
+    [Fact]
+    public async Task Sharded_previews_fallback_to_legacy_flat_paths_and_remove_both_safely()
+    {
+        byte[] original = [5, 6, 7, 8];
+        var hash = Convert.ToHexStringLower(SHA256.HashData(original));
+        var originalPath = volume.OriginalPath(hash);
+        Directory.CreateDirectory(Path.GetDirectoryName(originalPath)!);
+        await File.WriteAllBytesAsync(originalPath, original);
+        var legacy = Path.Combine(root, "previews", hash + ".jpg");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+        await File.WriteAllBytesAsync(legacy, [0xff, 0xd8, 0xff, 0xd9]);
+
+        Assert.Equal(legacy, volume.ResolvePreviewPath(hash, 512));
+        Assert.Contains(Path.Combine("previews", hash[..2], hash + ".jpg"), volume.PreviewPath(hash, 512));
+
+        volume.RemoveBlob(hash);
+        Assert.False(File.Exists(legacy));
+        Assert.False(File.Exists(originalPath));
     }
 
     public void Dispose() => Directory.Delete(root, true);

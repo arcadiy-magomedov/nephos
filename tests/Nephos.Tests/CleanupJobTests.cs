@@ -59,6 +59,27 @@ public sealed class CleanupJobTests
         Assert.Contains("POST storage/internal/v1/cleanup/gc", handler.Calls);
     }
 
+    [Fact]
+    public async Task Cleanup_dispatches_configured_domain_hooks_and_optional_history_compaction()
+    {
+        var claim = new CleanupClaim(Guid.NewGuid(), "owner", Guid.NewGuid());
+        using var handler = new Handler(claim);
+        using var client = new HttpClient(handler);
+        var job = new CleanupJob(client,
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Services:Library"] = "http://library",
+                ["Services:Storage"] = "http://storage",
+                ["Services:Faces"] = "http://faces",
+                ["Cleanup:AssetHooks:0"] = "http://books/internal/v1/books/assets",
+                ["Cleanup:CompactHistory"] = "true",
+                ["Services:Key"] = new string('k', 32)
+            }).Build(), NullLogger<CleanupJob>.Instance);
+        await job.RunAsync(default);
+        Assert.Contains($"DELETE books/internal/v1/books/assets/{claim.AssetId}", handler.Calls);
+        Assert.Contains("POST library/internal/v1/cleanup/compact-history", handler.Calls);
+    }
+
     private static CleanupJob Job(HttpClient client) => new(client,
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -79,6 +100,8 @@ public sealed class CleanupJobTests
             Assert.Equal(new string('k', 32), Assert.Single(request.Headers.GetValues("X-Nephos-Service-Key")));
             if (uri.AbsolutePath.EndsWith("/gc", StringComparison.Ordinal))
                 return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { collected = 0 }) };
+            if (uri.AbsolutePath.EndsWith("/compact-history", StringComparison.Ordinal))
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { expiredSnapshots = 0, prunedVersions = 0, prunedChanges = 0 }) };
             if (timedOut) throw new TaskCanceledException("Simulated HTTP timeout");
             if (uri.Host == failedService) return new(HttpStatusCode.ServiceUnavailable);
             if (uri.AbsolutePath.EndsWith("/claim", StringComparison.Ordinal))

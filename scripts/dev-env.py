@@ -36,4 +36,5 @@ with os.fdopen(fd, "w") as output:
         output.write(f"{name}={secrets.token_hex(24)}\n")
     output.write(f"NEPHOS_QR_DELIVERY_KEY={base64.b64encode(secrets.token_bytes(32)).decode()}\n")
     output.write("NEPHOS_QR_KEY_VERSION=1\n")
+    output.write("COMPOSE_PROFILES=observability\n")
 print("Created ignored .env with owner-only permissions. Existing files are never overwritten.")

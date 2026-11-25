@@ -40,6 +40,39 @@ public sealed class AnalysisTests
             $"{prefix}/analysis/owners/other/assets/{factory.Analysis.AssetId}")).StatusCode);
     }
 
+    [Fact]
+    public async Task Internal_owner_access_and_batch_asset_authorization_require_service_key_and_bound_batch_size()
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/internal/v1/analysis/owners/known/access")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PostAsJsonAsync("/internal/v1/analysis/owners/known/assets/authorize",
+                new { assetIds = new[] { factory.Analysis.AssetId } })).StatusCode);
+
+        client.DefaultRequestHeaders.Add("X-Nephos-Service-Key", ApiFactory.InternalKey);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.GetAsync("/internal/v1/analysis/owners/known/access")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.GetAsync("/internal/v1/analysis/owners/unknown/access")).StatusCode);
+
+        var other = Guid.NewGuid();
+        var batchResponse = await client.PostAsJsonAsync("/internal/v1/analysis/owners/known/assets/authorize",
+            new { assetIds = new[] { factory.Analysis.AssetId, other, factory.Analysis.AssetId } });
+        Assert.Equal(HttpStatusCode.OK, batchResponse.StatusCode);
+        var result = await batchResponse.Content.ReadFromJsonAsync<BatchAuthorizePayload>();
+        Assert.Equal([factory.Analysis.AssetId], result!.AuthorizedIds);
+        Assert.Equal(1, factory.Analysis.Reads);
+
+        var oversized = Enumerable.Range(0, 101).Select(_ => Guid.NewGuid()).ToArray();
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.PostAsJsonAsync("/internal/v1/analysis/owners/known/assets/authorize",
+                new { assetIds = oversized })).StatusCode);
+    }
+
+    private sealed record BatchAuthorizePayload(Guid[] AuthorizedIds);
+
     [Theory]
     [InlineData(202)]
     [InlineData(404)]
@@ -138,6 +171,14 @@ internal sealed class FakeAnalysisRepository : IAnalysisRepository
         return Task.FromResult(subject == "known" && assetId == AssetId
             ? new AnalysisSource(AssetId, Guid.NewGuid(), subject, "image/jpeg", 123, new string('a', 64))
             : null);
+    }
+
+    public Task<IReadOnlySet<Guid>> FilterAuthorizedSourcesAsync(string subject, IReadOnlyList<Guid> assetIds, CancellationToken token)
+    {
+        Reads++;
+        var authorized = new HashSet<Guid>();
+        if (subject == "known" && assetIds.Contains(AssetId)) authorized.Add(AssetId);
+        return Task.FromResult<IReadOnlySet<Guid>>(authorized);
     }
 
     public Task<FacePublication?> ClaimAsync(CancellationToken token)

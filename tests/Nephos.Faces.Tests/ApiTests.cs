@@ -22,10 +22,20 @@ namespace Nephos.Faces.Tests;
 public sealed class ControlledSource : IAnalysisSourceClient
 {
     public bool Enabled = true;
+    public int BatchAuthorizeCalls { get; private set; }
     public readonly Dictionary<Guid, (AnalysisSource Source, byte[] Bytes)> Sources = [];
     public Task<bool> IsEnabledAsync(HttpContext context, CancellationToken ct) => Task.FromResult(Enabled);
     public Task<AnalysisSource?> SourceAsync(string owner, Guid assetId, CancellationToken ct) =>
         Task.FromResult(Enabled && Sources.TryGetValue(assetId, out var item) && item.Source.Subject == owner ? item.Source : null);
+    public Task<IReadOnlySet<Guid>> AuthorizeSourcesAsync(string owner, IReadOnlyList<Guid> assetIds, CancellationToken ct)
+    {
+        BatchAuthorizeCalls++;
+        var allowed = new HashSet<Guid>();
+        if (Enabled)
+            foreach (var id in assetIds)
+                if (Sources.TryGetValue(id, out var item) && item.Source.Subject == owner) allowed.Add(id);
+        return Task.FromResult<IReadOnlySet<Guid>>(allowed);
+    }
     public Task<byte[]> OriginalAsync(AnalysisSource source, CancellationToken ct) => Task.FromResult(Sources[source.Id].Bytes);
 }
 

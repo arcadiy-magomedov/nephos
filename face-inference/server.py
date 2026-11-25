@@ -1,23 +1,44 @@
-import hmac
 import hashlib
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import subprocess
+import signal
 import sys
 import threading
 
-MAX_BYTES = 20 * 1024 * 1024
-gate = threading.BoundedSemaphore(1)
+root = Path(__file__).resolve().parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
+
+from worker_pool import (  # noqa: E402
+    MAX_BYTES,
+    WorkerBusyError,
+    WorkerFailedError,
+    WorkerPool,
+    WorkerPoolClosedError,
+    WorkerTimeoutError,
+    parse_max_requests,
+    parse_worker_count,
+)
+
 key = os.environ["INFERENCE_KEY"]
 if len(key) < 32:
     raise RuntimeError("INFERENCE_KEY must contain at least 32 characters")
-root = Path(__file__).resolve().parent
 manifest = json.loads((root / "models.json").read_text())
 for model in manifest["models"]:
     if hashlib.sha256((root / "models" / model["file"]).read_bytes()).hexdigest() != model["sha256"]:
         raise RuntimeError("Model checksum failed at startup")
+
+workers = parse_worker_count("INFERENCE_WORKERS", default=1, minimum=1, maximum=4)
+max_requests = parse_max_requests()
+pool = WorkerPool(
+    [sys.executable, str(root / "infer.py"), "--worker"],
+    workers=workers,
+    timeout=45,
+    max_requests=max_requests,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -36,9 +57,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.connection.settimeout(15)
-        if self.path not in ("/v1/infer", "/infer") or not hmac.compare_digest(
-            self.headers.get("X-Nephos-Inference-Key", ""), key
-        ):
+        supplied = self.headers.get("X-Nephos-Inference-Key", "")
+        if self.path not in ("/v1/infer", "/infer") or not hmac.compare_digest(supplied.encode(), key.encode()):
             self.reply(403, b"{}")
             return
         try:
@@ -48,28 +68,47 @@ class Handler(BaseHTTPRequestHandler):
         if not 0 < length <= MAX_BYTES or self.headers.get("Transfer-Encoding"):
             self.reply(413, b"{}")
             return
-        if not gate.acquire(blocking=False):
+        try:
+            with pool.slot():
+                data = self.rfile.read(length)
+                if len(data) != length:
+                    self.reply(400, b"{}")
+                    return
+                result = pool.execute(data, acquired=True)
+        except WorkerBusyError:
             self.reply(429, b"{}")
             return
-        try:
-            data = self.rfile.read(length)
-            if len(data) != length:
-                self.reply(400, b"{}")
-                return
-            result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("infer.py"))],
-                input=data,
-                capture_output=True,
-                timeout=45,
-                check=False,
-            )
-            self.reply(200 if result.returncode == 0 else 422, result.stdout or b'{"error":"inference_rejected"}')
-        except subprocess.TimeoutExpired:
+        except WorkerPoolClosedError:
+            self.reply(503, b'{"error":"service_shutting_down"}')
+            return
+        except WorkerTimeoutError:
             self.reply(422, b'{"error":"inference_timeout"}')
+            return
+        except WorkerFailedError:
+            self.reply(422, b'{"error":"inference_rejected"}')
+            return
         except (OSError, ValueError):
             self.reply(400, b'{"error":"invalid_request"}')
-        finally:
-            gate.release()
+            return
+        self.reply(200 if result.ok else 422, result.payload or b'{"error":"inference_rejected"}')
 
 
-ThreadingHTTPServer(("0.0.0.0", 8090), Handler).serve_forever()
+def run_server():
+    httpd = None
+    try:
+        pool.warm()
+        httpd = ThreadingHTTPServer(("0.0.0.0", 8090), Handler)
+
+        def _shutdown(*_):
+            threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+        signal.signal(signal.SIGTERM, _shutdown)
+        httpd.serve_forever()
+    finally:
+        if httpd is not None:
+            httpd.server_close()
+        pool.close()
+
+
+if __name__ == "__main__":
+    run_server()

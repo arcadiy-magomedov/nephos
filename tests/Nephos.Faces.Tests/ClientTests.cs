@@ -87,4 +87,26 @@ public sealed class ClientTests
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             original.OriginalAsync(source with { Size = bytes.Length, Sha256 = new string('f', 64) }, default));
     }
+
+    [Fact]
+    public async Task BatchAssetAuthorizationIssuesOneInternalRequestPerBatchAndFiltersForeignIds()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var forged = Guid.NewGuid();
+        var calls = 0;
+        var client = new AnalysisSourceClient(new Factory(request =>
+        {
+            calls++;
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/internal/v1/analysis/owners/owner/assets/authorize", request.RequestUri!.AbsolutePath);
+            Assert.Equal(new string('s', 64), request.Headers.GetValues("X-Nephos-Service-Key").Single());
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { authorizedIds = new[] { first, forged } }) };
+        }), Config);
+
+        var allowed = await client.AuthorizeSourcesAsync("owner", [first, second, first], default);
+
+        Assert.Equal(1, calls);
+        Assert.Equal([first], allowed.ToArray());
+    }
 }

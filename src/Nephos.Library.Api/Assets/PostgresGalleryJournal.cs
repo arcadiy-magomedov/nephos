@@ -35,7 +35,7 @@ internal static class PostgresGalleryJournal
             var (asset, visible) = changes[index];
             var body = JsonSerializer.Serialize(asset, Json);
             await using (var close = Command(connection, transaction,
-                "UPDATE gallery_versions SET to_revision=$2 WHERE asset_id=$1 AND to_revision IS NULL", asset.Id, revision))
+                "UPDATE gallery_versions SET to_revision=$2,closed_at=now() WHERE asset_id=$1 AND to_revision IS NULL", asset.Id, revision))
                 await close.ExecuteNonQueryAsync(token);
             await using (var version = Command(connection, transaction, """
                 INSERT INTO gallery_versions(library_id,asset_id,from_revision,visible,created_at,body)

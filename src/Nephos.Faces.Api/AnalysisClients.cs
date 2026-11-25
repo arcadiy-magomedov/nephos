@@ -8,11 +8,14 @@ public interface IAnalysisSourceClient
 {
     Task<bool> IsEnabledAsync(HttpContext context, CancellationToken ct);
     Task<AnalysisSource?> SourceAsync(string owner, Guid assetId, CancellationToken ct);
+    Task<IReadOnlySet<Guid>> AuthorizeSourcesAsync(string owner, IReadOnlyList<Guid> assetIds, CancellationToken ct);
     Task<byte[]> OriginalAsync(AnalysisSource source, CancellationToken ct);
 }
 
 public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfiguration configuration) : IAnalysisSourceClient
 {
+    private sealed record BatchAuthorizeResponse(Guid[] AuthorizedIds);
+
     private HttpRequestMessage Internal(HttpMethod method, string path)
     {
         var request = new HttpRequestMessage(method, path);
@@ -22,12 +25,34 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
 
     public async Task<bool> IsEnabledAsync(HttpContext context, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/v1/analysis/access");
-        request.Headers.TryAddWithoutValidation("Authorization", context.Request.Headers.Authorization.ToString());
+        var subject = context.User.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(subject)) return false;
+        using var request = Internal(HttpMethod.Get, $"/internal/v1/analysis/owners/{Uri.EscapeDataString(subject)}/access");
         using var response = await factory.CreateClient("library").SendAsync(request, ct);
         if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
         return response.StatusCode == HttpStatusCode.NoContent;
+    }
+
+    public async Task<IReadOnlySet<Guid>> AuthorizeSourcesAsync(string owner, IReadOnlyList<Guid> assetIds, CancellationToken ct)
+    {
+        var allowed = new HashSet<Guid>();
+        var distinct = assetIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        if (distinct.Length == 0) return allowed;
+        foreach (var batch in distinct.Chunk(100))
+        {
+            using var request = Internal(HttpMethod.Post, $"/internal/v1/analysis/owners/{Uri.EscapeDataString(owner)}/assets/authorize");
+            request.Content = JsonContent.Create(new { assetIds = batch });
+            using var response = await factory.CreateClient("library").SendAsync(request, ct);
+            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+                return new HashSet<Guid>();
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<BatchAuthorizeResponse>(ct);
+            if (result?.AuthorizedIds is not null)
+                foreach (var id in result.AuthorizedIds)
+                    if (batch.Contains(id)) allowed.Add(id);
+        }
+        return allowed;
     }
 
     public async Task<AnalysisSource?> SourceAsync(string owner, Guid assetId, CancellationToken ct)

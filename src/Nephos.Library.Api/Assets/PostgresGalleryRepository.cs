@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -7,6 +8,7 @@ namespace Nephos.Library.Api.Assets;
 
 public sealed record GallerySnapshot(Guid Id, long Revision, long AccessGeneration, DateTimeOffset ExpiresAt, long TotalCount);
 public sealed record GalleryDelta(long FromRevision, long ToRevision, long TargetRevision, bool HasMore, IReadOnlyList<GalleryChange> Changes);
+public sealed record HistoryCompactionResult(int ExpiredSnapshots, int PrunedVersions, int PrunedChanges);
 public sealed class GalleryExpiredException() : Exception("The retained gallery view expired or its access generation changed. Request a new snapshot.");
 public sealed class GalleryAccessException() : Exception("Library access is unavailable.");
 public sealed class ResourceConflictException(string message) : Exception(message);
@@ -17,6 +19,8 @@ public interface IGalleryRepository
     Task<AssetPage> PageAsync(string subject, Guid library, Guid snapshot, AssetCursor? before, int limit, CancellationToken token);
     Task<IReadOnlyList<TimelineBucket>> TimelineAsync(string subject, Guid library, Guid snapshot, int? year, int? month, CancellationToken token);
     Task<GalleryDelta> ChangesAsync(string subject, Guid library, long after, long through, int limit, CancellationToken token);
+    Task<HistoryCompactionResult> CompactHistoryAsync(CancellationToken token) =>
+        Task.FromResult(new HistoryCompactionResult(0, 0, 0));
 }
 
 public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGalleryRepository
@@ -49,45 +53,70 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
     public async Task<GallerySnapshot> CreateAsync(string subject, Guid library, CancellationToken token)
     {
         await using var connection = await source.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(token);
-        var generation = await GenerationAsync(connection, transaction, subject, library, token);
-        var revision = await LockAsync(connection, transaction, library, token);
-        await using (var cleanup = Command(connection, transaction,
-            "DELETE FROM gallery_snapshots WHERE library_id=$1 AND subject=$2 AND (expires_at<=now() OR access_generation<>$3)", library, subject, generation))
+        var currentGeneration = await GenerationAsync(connection, null, subject, library, token);
+        // Prune expired or superseded snapshots in READ COMMITTED before pinning the REPEATABLE READ snapshot
+        // so concurrent snapshot creations or compaction never collide with SQLSTATE 40001.
+        await using (var cleanup = Command(connection, null,
+            "DELETE FROM gallery_snapshots WHERE library_id=$1 AND subject=$2 AND (expires_at<=now() OR access_generation<>$3)",
+            library, subject, currentGeneration))
             await cleanup.ExecuteNonQueryAsync(token);
-        await using (var reuse = Command(connection, transaction, """
-            SELECT id,revision,access_generation,expires_at,total_count FROM gallery_snapshots
-            WHERE library_id=$1 AND subject=$2 AND revision=$3 AND access_generation=$4 AND expires_at>now()+interval '1 hour' LIMIT 1
-            """, library, subject, revision, generation))
-        await using (var reader = await reuse.ExecuteReaderAsync(token))
+
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            if (await reader.ReadAsync(token))
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
+            try
             {
-                var existing = Read(reader);
-                await reader.DisposeAsync();
+                var generation = await GenerationAsync(connection, transaction, subject, library, token);
+                long revision;
+                await using (var readRevision = Command(connection, transaction,
+                    "SELECT revision FROM gallery_frontiers WHERE library_id=$1", library))
+                    revision = await readRevision.ExecuteScalarAsync(token) is long value ? value : 0;
+                await using (var reuse = Command(connection, transaction, """
+                    SELECT id,revision,access_generation,expires_at,total_count FROM gallery_snapshots
+                    WHERE library_id=$1 AND subject=$2 AND revision=$3 AND access_generation=$4 AND expires_at>now()+interval '1 hour' LIMIT 1
+                    """, library, subject, revision, generation))
+                await using (var reader = await reuse.ExecuteReaderAsync(token))
+                {
+                    if (await reader.ReadAsync(token))
+                    {
+                        var existing = Read(reader);
+                        await reader.DisposeAsync();
+                        await transaction.CommitAsync(token);
+                        return existing;
+                    }
+                }
+                await using (var quota = Command(connection, transaction,
+                    "SELECT count(*) FROM gallery_snapshots WHERE library_id=$1 AND subject=$2", library, subject))
+                    if ((long)(await quota.ExecuteScalarAsync(token))! >= 20000)
+                        throw new ResourceConflictException("Active gallery snapshot budget reached. Reuse an existing retained view.");
+                await using var insert = Command(connection, transaction, """
+                    WITH auth AS (
+                        SELECT EXISTS(
+                            SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                            WHERE p.subject=$3 AND p.enabled AND m.library_id=$2
+                        ) AS is_member
+                    )
+                    INSERT INTO gallery_snapshots(id,library_id,subject,revision,access_generation,total_count)
+                    SELECT $1,$2,$3,$4,$5,count(*) FROM gallery_versions
+                    WHERE library_id=$2 AND visible AND from_revision<=$4 AND (to_revision IS NULL OR to_revision>$4)
+                        AND ((SELECT is_member FROM auth) OR can_read_asset($3,asset_id))
+                    RETURNING id,revision,access_generation,expires_at,total_count
+                    """, Guid.NewGuid(), library, subject, revision, generation);
+                GallerySnapshot result;
+                await using (var reader = await insert.ExecuteReaderAsync(token))
+                {
+                    await reader.ReadAsync(token);
+                    result = Read(reader);
+                }
                 await transaction.CommitAsync(token);
-                return existing;
+                return result;
+            }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure && attempt < 2)
+            {
+                await transaction.RollbackAsync(token);
             }
         }
-        await using (var quota = Command(connection, transaction,
-            "SELECT count(*) FROM gallery_snapshots WHERE library_id=$1 AND subject=$2", library, subject))
-            if ((long)(await quota.ExecuteScalarAsync(token))! >= 20000)
-                throw new ResourceConflictException("Active gallery snapshot budget reached. Reuse an existing retained view.");
-        await using var insert = Command(connection, transaction, """
-            INSERT INTO gallery_snapshots(id,library_id,subject,revision,access_generation,total_count)
-            SELECT $1,$2,$3,$4,$5,count(*) FROM gallery_versions
-            WHERE library_id=$2 AND visible AND from_revision<=$4 AND (to_revision IS NULL OR to_revision>$4)
-                AND can_read_asset($3,asset_id)
-            RETURNING id,revision,access_generation,expires_at,total_count
-            """, Guid.NewGuid(), library, subject, revision, generation);
-        GallerySnapshot result;
-        await using (var reader = await insert.ExecuteReaderAsync(token))
-        {
-            await reader.ReadAsync(token);
-            result = Read(reader);
-        }
-        await transaction.CommitAsync(token);
-        return result;
+        throw new InvalidOperationException("Snapshot creation exhausted serialization retries.");
     }
 
     public async Task<AssetPage> PageAsync(string subject, Guid library, Guid snapshot, AssetCursor? before, int limit, CancellationToken token)
@@ -95,10 +124,16 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
         await using var connection = await source.OpenConnectionAsync(token);
         var view = await SnapshotAsync(connection, subject, library, snapshot, token);
         await using var query = Command(connection, null, """
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$6 AND p.enabled AND m.library_id=$1
+                ) AS is_member
+            )
             SELECT v.body::text,CASE WHEN a.uploaded_by<>$6 THEN coalesce(owner.display_name,'Known user') END
             FROM gallery_versions v JOIN assets a ON a.id=v.asset_id JOIN principals owner ON owner.subject=a.uploaded_by
             WHERE v.library_id=$1 AND v.visible AND v.from_revision<=$2 AND (v.to_revision IS NULL OR v.to_revision>$2)
-            AND a.deleted_at IS NULL AND can_read_asset($6,a.id)
+            AND a.deleted_at IS NULL AND ((SELECT is_member FROM auth) OR can_read_asset($6,a.id))
             AND ($3::timestamptz IS NULL OR (v.created_at,v.asset_id)<($3,$4))
             ORDER BY v.created_at DESC,v.asset_id DESC LIMIT $5
             """, library, view.Revision);
@@ -121,10 +156,17 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
         var start = new DateTimeOffset(year ?? 1800, month ?? 1, 1, 0, 0, 0, TimeSpan.Zero);
         var end = month is not null ? start.AddMonths(1) : year is not null ? start.AddYears(1) : new DateTimeOffset(2201, 1, 1, 0, 0, 0, TimeSpan.Zero);
         await using var query = Command(connection, null, """
-            SELECT to_char(date_trunc($3,created_at AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS bucket,count(*)
-            FROM gallery_versions WHERE library_id=$1 AND visible AND from_revision<=$2 AND (to_revision IS NULL OR to_revision>$2)
-            AND EXISTS(SELECT 1 FROM assets a WHERE a.id=gallery_versions.asset_id AND a.deleted_at IS NULL)
-            AND can_read_asset($6,asset_id) AND created_at >= $4 AND created_at < $5
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$6 AND p.enabled AND m.library_id=$1
+                ) AS is_member
+            )
+            SELECT to_char(date_trunc($3,v.created_at AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS bucket,count(*)
+            FROM gallery_versions v
+            WHERE v.library_id=$1 AND v.visible AND v.from_revision<=$2 AND (v.to_revision IS NULL OR v.to_revision>$2)
+            AND EXISTS(SELECT 1 FROM assets a WHERE a.id=v.asset_id AND a.deleted_at IS NULL)
+            AND ((SELECT is_member FROM auth) OR can_read_asset($6,v.asset_id)) AND v.created_at >= $4 AND v.created_at < $5
             GROUP BY bucket ORDER BY bucket DESC
             """, library, view.Revision, month is not null ? "day" : year is not null ? "month" : "year", start, end, subject);
         await using var reader = await query.ExecuteReaderAsync(token);
@@ -146,8 +188,14 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
             if (!(bool)(await valid.ExecuteScalarAsync(token))!) throw new GalleryExpiredException();
         var revisions = new List<long>();
         await using (var query = Command(connection, null, """
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$5 AND p.enabled AND m.library_id=$1
+                ) AS is_member
+            )
             SELECT DISTINCT revision FROM gallery_changes WHERE library_id=$1 AND revision>$2 AND revision<=$3
-            AND can_read_asset($5,asset_id)
+            AND ((SELECT is_member FROM auth) OR can_read_asset($5,asset_id))
             ORDER BY revision LIMIT $4
             """, library, after, through, limit + 1, subject))
         await using (var reader = await query.ExecuteReaderAsync(token))
@@ -156,10 +204,18 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
         var last = more ? revisions[limit - 1] : through;
         var batches = new SortedDictionary<long, List<AssetChange>>();
         await using (var query = Command(connection, null, """
+            WITH auth AS (
+                SELECT EXISTS(
+                    SELECT 1 FROM principals p JOIN library_members m ON m.subject=p.subject
+                    WHERE p.subject=$4 AND p.enabled AND m.library_id=$1
+                ) AS is_member
+            )
             SELECT c.revision,c.operation,c.asset_id,c.body::text,
                 CASE WHEN a.uploaded_by<>$4 THEN coalesce(owner.display_name,'Known user') END
             FROM gallery_changes c JOIN assets a ON a.id=c.asset_id JOIN principals owner ON owner.subject=a.uploaded_by
-            WHERE c.library_id=$1 AND c.revision>$2 AND c.revision<=$3 AND can_read_asset($4,a.id) ORDER BY c.revision,c.ordinal
+            WHERE c.library_id=$1 AND c.revision>$2 AND c.revision<=$3
+            AND ((SELECT is_member FROM auth) OR can_read_asset($4,a.id))
+            ORDER BY c.revision,c.ordinal
             """, library, after, last, subject))
         await using (var reader = await query.ExecuteReaderAsync(token))
             while (await reader.ReadAsync(token))
@@ -170,5 +226,52 @@ public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGaller
                     JsonSerializer.Deserialize<Asset>(reader.GetString(3), Json)! with { SharedBy = reader.IsDBNull(4) ? null : reader.GetString(4) }));
             }
         return new(after, last, through, more, batches.Select(pair => new GalleryChange(pair.Key, pair.Value)).ToArray());
+    }
+
+    public async Task<HistoryCompactionResult> CompactHistoryAsync(CancellationToken token)
+    {
+        await using var connection = await source.OpenConnectionAsync(token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        int expiredSnapshots;
+        await using (var pruneSnapshots = Command(connection, transaction,
+            "DELETE FROM gallery_snapshots WHERE expires_at <= now()"))
+            expiredSnapshots = await pruneSnapshots.ExecuteNonQueryAsync(token);
+
+        // Only prune superseded history strictly below every active snapshot revision and older than 30 days.
+        int prunedVersions;
+        await using (var pruneVersions = Command(connection, transaction, """
+            WITH floors AS (
+                SELECT f.library_id,
+                    least(f.revision, coalesce((SELECT min(s.revision) FROM gallery_snapshots s
+                        WHERE s.library_id=f.library_id AND s.expires_at > now()), f.revision)) AS safe_floor
+                FROM gallery_frontiers f
+            )
+            DELETE FROM gallery_versions v
+            USING floors fl
+            WHERE v.library_id=fl.library_id
+              AND v.to_revision IS NOT NULL
+              AND v.to_revision <= fl.safe_floor
+              AND v.closed_at < now() - interval '30 days'
+            """))
+            prunedVersions = await pruneVersions.ExecuteNonQueryAsync(token);
+
+        int prunedChanges;
+        await using (var pruneChanges = Command(connection, transaction, """
+            WITH floors AS (
+                SELECT f.library_id,
+                    least(f.revision, coalesce((SELECT min(s.revision) FROM gallery_snapshots s
+                        WHERE s.library_id=f.library_id AND s.expires_at > now()), f.revision)) AS safe_floor
+                FROM gallery_frontiers f
+            )
+            DELETE FROM gallery_changes c
+            USING floors fl
+            WHERE c.library_id=fl.library_id
+              AND c.revision <= fl.safe_floor
+              AND c.created_at < now() - interval '30 days'
+            """))
+            prunedChanges = await pruneChanges.ExecuteNonQueryAsync(token);
+
+        await transaction.CommitAsync(token);
+        return new(expiredSnapshots, prunedVersions, prunedChanges);
     }
 }

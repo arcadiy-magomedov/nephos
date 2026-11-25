@@ -50,12 +50,12 @@ public sealed class CleanupJob(HttpClient client, IConfiguration configuration, 
                     using (var release = await SendAsync(HttpMethod.Delete, Endpoint("Storage", $"cleanup/{claim.AssetId}"),
                         new { claim.Subject }, token))
                         release.EnsureSuccessStatusCode();
-                    // Never mark complete when a configured Faces service failed to remove its data.
-                    if (!string.IsNullOrWhiteSpace(configuration["Services:Faces"]))
+                    // Notify every configured downstream domain hook before marking the claim complete.
+                    foreach (var hook in AssetCleanupHooks())
                     {
-                        using var faces = await SendAsync(HttpMethod.Delete, Endpoint("Faces", $"faces/assets/{claim.AssetId}"),
+                        using var hookResponse = await SendAsync(HttpMethod.Delete, hook + claim.AssetId,
                             new { claim.Subject }, token);
-                        faces.EnsureSuccessStatusCode();
+                        hookResponse.EnsureSuccessStatusCode();
                     }
                     using (var complete = await SendAsync(HttpMethod.Post, Endpoint("Library", $"cleanup/{claim.AssetId}/complete"),
                         new { claim.LeaseId }, token))
@@ -87,7 +87,26 @@ public sealed class CleanupJob(HttpClient client, IConfiguration configuration, 
             if (result.Collected is < 0 or > 100) throw new InvalidDataException("Storage returned an invalid GC result.");
             if (result.Collected < 100) break;
         }
+        if (configuration.GetValue("Cleanup:CompactHistory", false))
+        {
+            using var compact = await SendAsync(HttpMethod.Post, Endpoint("Library", "cleanup/compact-history"), null, token);
+            compact.EnsureSuccessStatusCode();
+        }
         logger.LogInformation("Cleanup run completed {Completed} Library claims", completed);
         if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    private IEnumerable<string> AssetCleanupHooks()
+    {
+        if (!string.IsNullOrWhiteSpace(configuration["Services:Faces"]))
+            yield return Endpoint("Faces", "faces/assets/");
+        foreach (var child in configuration.GetSection("Cleanup:AssetHooks").GetChildren())
+        {
+            var raw = child.Value;
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+                throw new InvalidOperationException("Cleanup:AssetHooks entries must be absolute HTTP(S) URLs.");
+            yield return raw.TrimEnd('/') + "/";
+        }
     }
 }
