@@ -241,6 +241,8 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         Directory.CreateDirectory(workDirectory);
         if (mediaType is "image/jpeg" or "image/png" or "image/webp" or "image/heic" or "image/heif")
             return await RenderImagesToTempAsync(sourcePath, hash, leaseId, workDirectory, token);
+        if (mediaType is not ("video/mp4" or "video/quicktime" or "video/x-matroska" or "video/webm" or "image/gif"))
+            return null;
         var temporary = Path.Combine(workDirectory, $"{hash}.{leaseId:N}.{targetSize}.jpg");
         try
         {
@@ -254,11 +256,16 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
                 }
             };
             foreach (var argument in new[] { "-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe",
-                "-format_whitelist", "mov,png_pipe,jpeg_pipe,webp_pipe,gif",
+                "-format_whitelist", "mov,matroska,webm,png_pipe,jpeg_pipe,webp_pipe,gif",
                 "-threads", "1", "-i", sourcePath, "-frames:v", "1", "-vf", $"scale={targetSize}:{targetSize}:force_original_aspect_ratio=decrease",
                 "-threads", "1", "-y", temporary })
                 process.StartInfo.ArgumentList.Add(argument);
-            process.Start();
+            try { process.Start(); }
+            catch (Win32Exception)
+            {
+                logger.LogWarning("Video preview tool is unavailable; original remains stored without a preview");
+                return null;
+            }
             var errorDrain = process.StandardError.BaseStream.CopyToAsync(Stream.Null, token);
             var outputDrain = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, token);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
