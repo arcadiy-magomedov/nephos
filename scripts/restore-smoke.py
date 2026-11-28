@@ -2,11 +2,11 @@
 """Cold-restore a real pending media publication without exposing restored services."""
 
 import importlib.util
-from pathlib import Path
+import runpy
 import secrets
 import shutil
-import runpy
 import uuid
+from pathlib import Path
 
 import backup
 import smoke
@@ -78,7 +78,8 @@ try:
         )
         assert [asset["id"] for asset in restored_page["items"]] == [resources[0]["assetId"]]
         print(
-            "PASS: cold snapshot restores originals, complete manifests, frozen gallery views and pending publication; source resumes normally"
+            "PASS: cold snapshot restores originals, complete manifests, frozen gallery views "
+            "and pending publication; source resumes normally"
         )
 finally:
     if destination.exists():

@@ -29,7 +29,10 @@ actor UploadPhotoLibrary: UploadPhotoSource {
                     ) where item.phase != .succeeded {
                         item.phase = .failed
                         item.error =
-                            "This item was removed from Photos or is no longer accessible. Restore access before retrying."
+                            """
+                            This item was removed from Photos or is no longer accessible. \
+                            Restore access before retrying.
+                            """
                         try await repository.update(item)
                     }
                 }
@@ -130,6 +133,19 @@ actor UploadPhotoLibrary: UploadPhotoSource {
                 mediaType: supported.contains(mediaType) ? mediaType : "application/octet-stream",
                 isPrimary: resource === primary)
         }
+        let kind = kind(resources)
+        let revision = try UploadSourceRevision.make(
+            localIdentifier: asset.localIdentifier,
+            metadata: UploadSourceRevision.Metadata(
+                capturedAt: asset.creationDate, modifiedAt: asset.modificationDate,
+                width: asset.pixelWidth, height: asset.pixelHeight, duration: asset.duration),
+            resources: resources)
+        return UploadCandidate(
+            localIdentifier: asset.localIdentifier, sourceRevision: revision, kind: kind,
+            capturedAt: asset.creationDate, resources: resources)
+    }
+
+    private static func kind(_ resources: [UploadResourceDescriptor]) -> String {
         let roles = Set(resources.map(\.role))
         let kind: String
         if resources.count == 1 {
@@ -141,14 +157,11 @@ actor UploadPhotoLibrary: UploadPhotoSource {
         } else {
             kind = roles.contains(where: { $0.hasPrefix("unknown-") }) ? "archive" : "edited"
         }
-        let revision = try UploadSourceRevision.make(
-            localIdentifier: asset.localIdentifier, capturedAt: asset.creationDate, modifiedAt: asset.modificationDate,
-            width: asset.pixelWidth, height: asset.pixelHeight, duration: asset.duration, resources: resources)
-        return UploadCandidate(
-            localIdentifier: asset.localIdentifier, sourceRevision: revision, kind: kind,
-            capturedAt: asset.creationDate, resources: resources)
+        return kind
     }
 
+    // Exhaustive PhotoKit-to-wire mapping has no branching logic beyond the enum cases.
+    // swiftlint:disable:next cyclomatic_complexity
     private static func role(_ type: PHAssetResourceType) -> String {
         switch type {
         case .photo: "photo"

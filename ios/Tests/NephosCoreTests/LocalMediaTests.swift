@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import XCTest
 
 @testable import NephosCore
@@ -30,5 +31,19 @@ final class LocalMediaTests: XCTestCase {
     private func item(_ id: String, _ date: Date?) -> LocalMediaItem {
         LocalMediaItem(
             id: id, kind: .photo, capturedAt: date, modifiedAt: nil, duration: 0, pixelWidth: 100, pixelHeight: 100)
+    }
+}
+
+struct PlaybackTimeTests {
+    @Test(
+        "Playback time truncates fractional seconds at minute and hour boundaries",
+        arguments: [
+            (0.0, "0:00"), (59.9, "0:59"), (60.0, "1:00"), (3599.9, "59:59"),
+            (3600.0, "1:00:00"), (3601.9, "1:00:01"), (TimeInterval.infinity, "0:00"),
+        ])
+    func playbackTime(seconds: TimeInterval, expected: String) {
+        let formatted = LocalMediaItem.playbackTime(seconds)
+
+        #expect(formatted == expected)
     }
 }

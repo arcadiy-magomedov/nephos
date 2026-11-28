@@ -40,8 +40,8 @@ EXPECTED_FIXTURES = ["obama-2009", "obama-2012", "biden-2013", "biden-2021", "tr
 def face_sql(statement, subject):
     uuid.UUID(subject)
     result = subprocess.run(
-        COMPOSE
-        + [
+        [
+            *COMPOSE,
             "exec",
             "-T",
             "faces-postgres",
@@ -207,7 +207,7 @@ def face_for(token, asset_id):
 
 def restart_faces(token):
     subprocess.run(
-        COMPOSE + ["restart", "faces-api", "faces-worker"], cwd=ROOT, check=True, capture_output=True, timeout=60
+        [*COMPOSE, "restart", "faces-api", "faces-worker"], cwd=ROOT, check=True, capture_output=True, timeout=60
     )
     smoke.wait(
         "face API/worker restart preserves real JWT-authorized availability",
@@ -259,7 +259,9 @@ def live_similarities(subject, fixtures, assets):
 
     def cosine(left, right):
         assert len(left) == len(right) == 128
-        return sum(a * b for a, b in zip(left, right)) / math.sqrt(sum(v * v for v in left) * sum(v * v for v in right))
+        return sum(a * b for a, b in zip(left, right, strict=True)) / math.sqrt(
+            sum(v * v for v in left) * sum(v * v for v in right)
+        )
 
     matrix = [[round(cosine(vectors[a["id"]], vectors[b["id"]]), 6) for b in assets] for a in assets]
     same, different = [], []
@@ -282,7 +284,10 @@ def main():
     started = time.monotonic()
     report = {
         "status": "running",
-        "boundary": "Real Keycloak JWT -> upload/hash/storage/RabbitMQ/Library projection -> automatic jobs -> private CPU inference",
+        "boundary": (
+            "Real Keycloak JWT -> upload/hash/storage/RabbitMQ/Library projection "
+            "-> automatic jobs -> private CPU inference"
+        ),
         "sourceLabels": "Publisher metadata only; no visual identity inference.",
         "inference": "Actual pinned YuNet/SFace container; no fake detector or fixture authorization adapter.",
     }
@@ -290,10 +295,10 @@ def main():
     fixtures = json.loads((ROOT / "face-inference/fixtures/provenance.json").read_text())
     assert [row["id"] for row in fixtures] == EXPECTED_FIXTURES
     originals = [(ROOT / "face-inference/fixtures/photos" / (row["id"] + ".jpg")).read_bytes() for row in fixtures]
-    for fixture, data in zip(fixtures, originals):
+    for fixture, data in zip(fixtures, originals, strict=True):
         assert hashlib.sha256(data).hexdigest() == fixture["sha256"]
         assert len(data) == fixture["bytes"] and len(data) <= 20 * 1024 * 1024
-    report["fixtures"] = [{key: value for key, value in row.items()} for row in fixtures]
+    report["fixtures"] = [row.copy() for row in fixtures]
     heic_manifest = json.loads((ROOT / "face-inference/fixtures/heic/provenance.json").read_text())
     heic_fixtures = {row["id"]: row for row in heic_manifest["fixtures"]}
     heic_bytes = {}
@@ -325,7 +330,7 @@ def main():
                 request(API + "/v1/faces/people?limit=101", token=owner, expected=400)
                 assets = [
                     upload(owner, library, uploads, data, fixture["id"] + ".jpg")
-                    for fixture, data in zip(fixtures, originals)
+                    for fixture, data in zip(fixtures, originals, strict=True)
                 ]
                 # Automatic delivery is established before exercising any manual enqueue route.
                 jobs = automatic_jobs(owner, assets)
@@ -334,7 +339,7 @@ def main():
                 REPORT.write_text(json.dumps(report, indent=2) + "\n")
                 faces = [face_for(owner, asset["id"]) for asset in assets]
                 identities = {}
-                for fixture, asset, face in zip(fixtures, assets, faces):
+                for fixture, asset, face in zip(fixtures, assets, faces, strict=True):
                     assert face["sourceSha256"] == asset["sha256"]
                     label = fixture["label"]
                     if label in identities:
@@ -361,7 +366,8 @@ def main():
                     assert manual["id"] == next(job["id"] for job in jobs if job["assetId"] == asset["id"])
                 assert len(page_all("/v1/faces/jobs", owner)) == 6
                 print(
-                    "PASS: six exact originals, automatic real inference, three publisher-labelled clusters and idempotent enqueue"
+                    "PASS: six exact originals, automatic real inference, "
+                    "three publisher-labelled clusters and idempotent enqueue"
                 )
 
                 smoke.sql(
@@ -490,7 +496,7 @@ def main():
                     for index, fixture in enumerate(fixtures)
                 ]
                 automatic_jobs(owner, heic_assets)
-                for fixture, asset, jpeg_face in zip(fixtures, heic_assets, faces):
+                for fixture, asset, jpeg_face in zip(fixtures, heic_assets, faces, strict=True):
                     observed = face_for(owner, asset["id"])
                     assert observed["personId"] == identities[fixture["label"]]
                     assert observed["sourceSha256"] == asset["sha256"]
@@ -532,7 +538,7 @@ def main():
                 assert request(API + "/v1/assets/" + large["id"], token=owner)["sha256"] == large["sha256"]
                 request(API + "/v1/assets/" + large["id"], token=outsider, expected=404)
                 subprocess.run(
-                    COMPOSE + ["stop", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
+                    [*COMPOSE, "stop", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
                 )
                 try:
                     deferred_preview = upload(
@@ -546,7 +552,7 @@ def main():
                     request(API + f"/v1/assets/{deferred_preview['id']}/preview?size=2560", token=owner, expected=503)
                 finally:
                     subprocess.run(
-                        COMPOSE + ["start", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
+                        [*COMPOSE, "start", "image-derivatives"], cwd=ROOT, check=True, capture_output=True, timeout=60
                     )
                 smoke.wait(
                     "previously unavailable preview is generated on demand after renderer recovery",
@@ -626,13 +632,14 @@ def main():
                     assert page_all("/v1/faces/observations?assetId=" + assets[0]["id"], owner) == []
                 finally:
                     smoke.sql(
-                        "INSERT INTO library_members(subject,library_id) VALUES(:'subject',:'library'::uuid) ON CONFLICT DO NOTHING;",
+                        "INSERT INTO library_members(subject,library_id) VALUES(:'subject',:'library'::uuid) "
+                        "ON CONFLICT DO NOTHING;",
                         subject=owner_id,
                         library=library,
                     )
                 # This outage is restricted to the optional face ingress. Media,
                 # identity, broker and base Library/Storage processes keep running.
-                subprocess.run(COMPOSE + ["stop", "faces-api"], cwd=ROOT, check=True, capture_output=True, timeout=30)
+                subprocess.run([*COMPOSE, "stop", "faces-api"], cwd=ROOT, check=True, capture_output=True, timeout=30)
                 try:
                     no_face = upload(owner, library, uploads, blank_png(), "blank-no-face.png", "image/png")
                     smoke.wait(
@@ -647,7 +654,7 @@ def main():
                     smoke.sql("DELETE FROM face_publications WHERE asset_id=:'asset'::uuid;", asset=legacy_heic["id"])
                 finally:
                     subprocess.run(
-                        COMPOSE + ["start", "faces-api"], cwd=ROOT, check=True, capture_output=True, timeout=30
+                        [*COMPOSE, "start", "faces-api"], cwd=ROOT, check=True, capture_output=True, timeout=30
                     )
                 smoke.wait(
                     "optional face ingress recovers", lambda: request(API + "/v1/faces/jobs?limit=1", token=owner)
@@ -675,7 +682,9 @@ def main():
                     "source": camera_source,
                     "result": "no_faces",
                     "exactOriginalUnchanged": True,
-                    "boundary": "Published iPhone original uploaded through API; not a physical-device Photos round trip.",
+                    "boundary": (
+                        "Published iPhone original uploaded through API; not a physical-device Photos round trip."
+                    ),
                 }
                 print("PASS: older HEIC backfill, hidden compound exclusion and exact public iPhone-camera original")
                 report["sourceAuthorization"] = {
@@ -691,7 +700,8 @@ def main():
                     "automaticallyRecovered": True,
                 }
                 print(
-                    "PASS: pending/hidden-companion and revoked-membership denial; committed primary indexing; actual no-face handling"
+                    "PASS: pending/hidden-companion and revoked-membership denial; "
+                    "committed primary indexing; actual no-face handling"
                 )
 
                 admin_access(owner_id, False)
@@ -736,7 +746,8 @@ def main():
                 report["originalUnmodifiedAfterAnalysisAndCorrections"] = True
                 report["status"] = "passed"
                 print(
-                    "PASS: private-admin disablement immediately denies existing JWTs; independent owner remains isolated"
+                    "PASS: private-admin disablement immediately denies existing JWTs; "
+                    "independent owner remains isolated"
                 )
             finally:
                 try:

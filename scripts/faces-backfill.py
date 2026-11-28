@@ -2,9 +2,9 @@
 """Requeue eligible committed primary photos; safe to repeat after enabling faces or changing models."""
 
 import json
-from pathlib import Path
 import subprocess
 import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 

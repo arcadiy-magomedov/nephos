@@ -2,21 +2,33 @@ import CryptoKit
 import Foundation
 import Security
 
-// Wire DTOs retain the OIDC field names.
-// swift-format-ignore: AlwaysUseLowerCamelCase
 struct OIDCDiscovery: Decodable, Sendable {
     let issuer: String
-    let token_endpoint: URL
-    let jwks_uri: URL
-    let revocation_endpoint: URL?
+    let tokenEndpoint: URL
+    let jwksURI: URL
+    let revocationEndpoint: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case issuer
+        case tokenEndpoint = "token_endpoint"
+        case jwksURI = "jwks_uri"
+        case revocationEndpoint = "revocation_endpoint"
+    }
 }
-// swift-format-ignore: AlwaysUseLowerCamelCase
 struct TokenResponse: Decodable, Sendable {
-    let access_token: String
-    let refresh_token: String?
-    let id_token: String?
-    let expires_in: Double
-    let token_type: String
+    let accessToken: String
+    let refreshToken: String?
+    let idToken: String?
+    let expiresIn: Double
+    let tokenType: String
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case idToken = "id_token"
+        case expiresIn = "expires_in"
+        case tokenType = "token_type"
+    }
 }
 enum Keychain {
     private static let service = "app.nephos.ios.session"
@@ -153,26 +165,19 @@ final class AuthSession: AccessTokenProviding {
     }
 
     nonisolated static func discovery(_ connection: Connection) async throws -> OIDCDiscovery {
-        let issuer = try URLPolicy.validate(connection.config.issuer, allowDevelopmentHTTP: developmentHTTP(connection))
+        let issuer = try URLPolicy.validate(connection.config.issuer)
         let doc = try await HTTP.json(
             OIDCDiscovery.self, HTTP.request(issuer.appendingPathComponent(".well-known/openid-configuration")))
         guard doc.issuer == connection.config.issuer else {
             throw ClientError.invalid("OIDC issuer mismatch.")
         }
-        for endpoint in [doc.token_endpoint, doc.jwks_uri, doc.revocation_endpoint].compactMap({ $0 }) {
-            _ = try URLPolicy.validate(endpoint.absoluteString, allowDevelopmentHTTP: developmentHTTP(connection))
+        for endpoint in [doc.tokenEndpoint, doc.jwksURI, doc.revocationEndpoint].compactMap({ $0 }) {
+            _ = try URLPolicy.validate(endpoint.absoluteString)
             guard URLPolicy.sameOrigin(issuer, endpoint) else {
                 throw ClientError.invalid("OIDC endpoint is outside the approved issuer origin.")
             }
         }
         return doc
-    }
-    nonisolated static func developmentHTTP(_ connection: Connection) -> Bool {
-        #if DEBUG
-            return connection.allowDevelopmentHTTP
-        #else
-            return false
-        #endif
     }
     func accessToken() async throws -> String {
         guard let saved = credentials else { throw ClientError.signedOut }
@@ -221,21 +226,21 @@ final class AuthSession: AccessTokenProviding {
         let discovery = try await discovery(saved.connection)
         let key = try await proofKey(for: saved, store: store)
         let (data, response) = try await OAuthTransport.post(
-            discovery.token_endpoint,
+            discovery.tokenEndpoint,
             fields: [
                 "grant_type": "refresh_token", "refresh_token": refresh, "client_id": saved.connection.config.clientId,
             ], key: key)
         let tokens = try OAuthResponse.tokens(data, status: response.statusCode)
-        if let idToken = tokens.id_token {
+        if let idToken = tokens.idToken {
             _ = try await JWTVerifier.verify(
                 idToken, discovery: discovery, clientID: saved.connection.config.clientId,
                 purpose: .refresh(nonce: saved.nonce, subject: saved.subject))
         }
         try await JWTVerifier.verifyAccess(
-            tokens.access_token, discovery: discovery, clientID: saved.connection.config.clientId,
+            tokens.accessToken, discovery: discovery, clientID: saved.connection.config.clientId,
             subject: saved.subject)
         if let thumbprint = saved.dpopKeyThumbprint {
-            guard let replacement = tokens.refresh_token else {
+            guard let replacement = tokens.refreshToken else {
                 throw ClientError.invalid(
                     "The server omitted the bound renewal credential. Your session has been kept.")
             }
@@ -244,14 +249,14 @@ final class AuthSession: AccessTokenProviding {
                 subject: saved.subject, thumbprint: thumbprint)
         }
         var updated = saved
-        updated.accessToken = tokens.access_token
-        updated.refreshToken = tokens.refresh_token ?? saved.refreshToken
-        updated.expiresAt = Date().addingTimeInterval(tokens.expires_in)
+        updated.accessToken = tokens.accessToken
+        updated.refreshToken = tokens.refreshToken ?? saved.refreshToken
+        updated.expiresAt = Date().addingTimeInterval(tokens.expiresIn)
         return updated
     }
     nonisolated static func revokeCredentials(_ saved: Credentials, store: any SessionStorage) async throws {
         let discovery = try await discovery(saved.connection)
-        guard let endpoint = discovery.revocation_endpoint, let refresh = saved.refreshToken else {
+        guard let endpoint = discovery.revocationEndpoint, let refresh = saved.refreshToken else {
             throw ClientError.invalid("Remote sign-out is unavailable. You can still sign out on this device only.")
         }
         let key = try await proofKey(for: saved, store: store)
@@ -310,8 +315,9 @@ enum JWTVerifier {
         let claims = try await verifiedClaims(token, discovery: discovery)
         return try IdentityTokenClaims.validate(claims, issuer: discovery.issuer, clientID: clientID, purpose: purpose)
     }
-    static func verifyAccess(_ token: String, discovery: OIDCDiscovery, clientID: String, subject: String) async throws
-    {
+    static func verifyAccess(
+        _ token: String, discovery: OIDCDiscovery, clientID: String, subject: String
+    ) async throws {
         let claims = try await verifiedClaims(token, discovery: discovery)
         guard claims["iss"] as? String == discovery.issuer, claims["sub"] as? String == subject,
             claims["azp"] as? String == clientID, claims["typ"] as? String == "Bearer", claims["cnf"] == nil,
@@ -334,7 +340,7 @@ enum JWTVerifier {
             header["alg"] as? String == "RS256", header["crit"] == nil,
             let kid = header["kid"] as? String
         else { throw ClientError.invalid("Only signed RS256 identity tokens are supported.") }
-        let keys = try await HTTP.json(Keys.self, HTTP.request(discovery.jwks_uri))
+        let keys = try await HTTP.json(Keys.self, HTTP.request(discovery.jwksURI))
         let matching = keys.keys.filter {
             $0.kid == kid && $0.kty == "RSA" && ($0.use == nil || $0.use == "sig")
                 && ($0.alg == nil || $0.alg == "RS256")

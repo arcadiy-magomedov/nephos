@@ -81,7 +81,7 @@ app.MapGet("/v1/libraries", async (
     var items = rows.Take(pageSize).ToArray();
     Guid? next = rows.Count > pageSize ? items[^1].Id : null;
     requests.Add(1);
-    logger.LogInformation("Library page served with {ItemCount} items", items.Length);
+    LibraryLog.PageServed(logger, items.Length);
     return Results.Ok(new LibraryPage(items, next));
 }).RequireAuthorization();
 

@@ -41,7 +41,11 @@ actor SQLiteUploadRepository: UploadRepository {
     func setPolicy(_ policy: UploadPolicy, scope: String) throws {
         try ensure(scope)
         try database.execute(
-            "UPDATE upload_scopes SET policy=?,scanning=CASE WHEN ?='disabled' THEN 0 ELSE scanning END WHERE scope=?",
+            """
+            UPDATE upload_scopes
+            SET policy=?,paused=0,scanning=CASE WHEN ?='disabled' THEN 0 ELSE scanning END
+            WHERE scope=?
+            """,
             [.text(policy.rawValue), .text(policy.rawValue), .text(scope)])
     }
 
@@ -83,44 +87,43 @@ actor SQLiteUploadRepository: UploadRepository {
         try ensure(scope)
         let account = try settings(scope)
         if account.policy != .disabled {
-            for candidate in candidates {
-                if try database.rows(
-                    "SELECT id FROM upload_items WHERE scope=? AND local_id=? AND revision=?",
-                    [.text(scope), .text(candidate.localIdentifier), .text(candidate.sourceRevision)]
-                ).isEmpty {
-                    if var previous = try decode(
-                        database.rows(
-                            """
-                            SELECT payload FROM upload_items WHERE scope=? AND local_id=? AND phase<>'succeeded'
-                            ORDER BY updated DESC LIMIT 1
-                            """, [.text(scope), .text(candidate.localIdentifier)]
-                        ).first)
-                    {
-                        previous.sourceRevision = candidate.sourceRevision
-                        previous.resourceSetID = UploadIdentity.resourceSet(scope: scope, candidate: candidate)
-                        previous.generation = UUID()
-                        previous.kind = candidate.kind
-                        previous.capturedAt = candidate.capturedAt
-                        previous.resources = UploadIdentity.resources(scope: scope, candidate: candidate)
-                        previous.phase = candidate.discoveryError == nil ? .queued : .failed
-                        previous.committed = false
-                        previous.error = candidate.discoveryError
-                        previous.updatedAt = now()
-                        try save(previous)
-                        continue
-                    }
-                    let batchID = try activeBatch(scope)
-                    let item = UploadItem(
-                        id: UploadIdentity.resourceSet(scope: scope, candidate: candidate),
-                        batchID: batchID, scope: scope,
-                        resourceSetID: UploadIdentity.resourceSet(scope: scope, candidate: candidate),
-                        localIdentifier: candidate.localIdentifier, sourceRevision: candidate.sourceRevision,
-                        kind: candidate.kind, capturedAt: candidate.capturedAt,
-                        resources: UploadIdentity.resources(scope: scope, candidate: candidate),
-                        phase: candidate.discoveryError == nil ? .queued : .failed,
-                        error: candidate.discoveryError, createdAt: now(), updatedAt: now())
-                    try save(item)
+            for candidate in candidates
+            where try database.rows(
+                "SELECT id FROM upload_items WHERE scope=? AND local_id=? AND revision=?",
+                [.text(scope), .text(candidate.localIdentifier), .text(candidate.sourceRevision)]
+            ).isEmpty {
+                if var previous = try decode(
+                    database.rows(
+                        """
+                        SELECT payload FROM upload_items WHERE scope=? AND local_id=? AND phase<>'succeeded'
+                        ORDER BY updated DESC LIMIT 1
+                        """, [.text(scope), .text(candidate.localIdentifier)]
+                    ).first)
+                {
+                    previous.sourceRevision = candidate.sourceRevision
+                    previous.resourceSetID = UploadIdentity.resourceSet(scope: scope, candidate: candidate)
+                    previous.generation = UUID()
+                    previous.kind = candidate.kind
+                    previous.capturedAt = candidate.capturedAt
+                    previous.resources = UploadIdentity.resources(scope: scope, candidate: candidate)
+                    previous.phase = candidate.discoveryError == nil ? .queued : .failed
+                    previous.committed = false
+                    previous.error = candidate.discoveryError
+                    previous.updatedAt = now()
+                    try save(previous)
+                    continue
                 }
+                let batchID = try activeBatch(scope)
+                let item = UploadItem(
+                    id: UploadIdentity.resourceSet(scope: scope, candidate: candidate),
+                    batchID: batchID, scope: scope,
+                    resourceSetID: UploadIdentity.resourceSet(scope: scope, candidate: candidate),
+                    localIdentifier: candidate.localIdentifier, sourceRevision: candidate.sourceRevision,
+                    kind: candidate.kind, capturedAt: candidate.capturedAt,
+                    resources: UploadIdentity.resources(scope: scope, candidate: candidate),
+                    phase: candidate.discoveryError == nil ? .queued : .failed,
+                    error: candidate.discoveryError, createdAt: now(), updatedAt: now())
+                try save(item)
             }
         }
     }
@@ -255,14 +258,22 @@ actor SQLiteUploadRepository: UploadRepository {
             pendingCount: Int(try integer(counts[2])))
     }
 
+}
+
+extension SQLiteUploadRepository {
     private func ensure(_ scope: String) throws {
         guard !scope.isEmpty else { throw ClientError.invalid("The upload account is missing.") }
         try database.execute("INSERT OR IGNORE INTO upload_scopes(scope) VALUES(?)", [.text(scope)])
     }
 
-    private func settings(_ scope: String) throws
-        -> (policy: UploadPolicy, paused: Bool, scanning: Bool, notice: String?)
-    {
+    private struct ScopeSettings {
+        let policy: UploadPolicy
+        let paused: Bool
+        let scanning: Bool
+        let notice: String?
+    }
+
+    private func settings(_ scope: String) throws -> ScopeSettings {
         guard
             let row = try database.rows(
                 "SELECT policy,paused,scanning,notice FROM upload_scopes WHERE scope=?", [.text(scope)]
@@ -270,7 +281,8 @@ actor SQLiteUploadRepository: UploadRepository {
         else { throw corrupt() }
         let notice: String?
         if case .null = row[3] { notice = nil } else { notice = try string(row[3]) }
-        return (policy, try integer(row[1]) != 0, try integer(row[2]) != 0, notice)
+        return ScopeSettings(
+            policy: policy, paused: try integer(row[1]) != 0, scanning: try integer(row[2]) != 0, notice: notice)
     }
 
     private func activeBatch(_ scope: String) throws -> UUID {
@@ -323,11 +335,10 @@ actor SQLiteUploadRepository: UploadRepository {
     }
 
     private func load(
-        _ predicate: String, _ values: [UploadDatabase.Value], limit: Int, oldestFirst: Bool = false
+        _ predicate: String, _ values: [UploadDatabase.Value], limit: Int
     ) throws -> [UploadItem] {
-        let direction = oldestFirst ? "ASC" : "DESC"
         return try database.rows(
-            "SELECT payload FROM upload_items WHERE \(predicate) ORDER BY updated \(direction),id LIMIT ?",
+            "SELECT payload FROM upload_items WHERE \(predicate) ORDER BY updated DESC,id LIMIT ?",
             values + [.integer(Int64(max(0, limit)))]
         ).map {
             guard let item = try decode($0) else { throw corrupt() }

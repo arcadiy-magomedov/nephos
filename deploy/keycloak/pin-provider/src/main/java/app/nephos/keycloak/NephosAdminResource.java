@@ -149,13 +149,6 @@ public final class NephosAdminResource extends EnrollmentResource implements Rea
         return Response.ok(Map.of("expiresIn", expiresIn)).header("Cache-Control", "no-store").build();
     }
 
-    static Response failure(int status, String error) {
-        Response.ResponseBuilder response = Response.status(status).entity(Map.of("error", error))
-                .header("Cache-Control", "no-store");
-        if (status == 429) response.header("Retry-After", "60");
-        return response.build();
-    }
-
     @POST
     @Path("users/{userId}/pin")
     @Produces(MediaType.APPLICATION_JSON)
@@ -257,13 +250,6 @@ public final class NephosAdminResource extends EnrollmentResource implements Rea
             return Stream.concat(online, offline)
                     .filter(item -> item.getId().equals(id)).findFirst().orElse(null);
         }
-    }
-
-    private boolean isDeviceSession(UserSessionModel userSession) {
-        return userSession.getNote(PinSupport.DEVICE_ID_NOTE) != null
-                && userSession.getAuthenticatedClientSessions() != null
-                && userSession.getAuthenticatedClientSessions().values().stream()
-                .anyMatch(clientSession -> "nephos-ios".equals(clientSession.getClient().getClientId()));
     }
 
     private boolean authorized(HttpHeaders headers) { return authorized(headers, session); }

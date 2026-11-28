@@ -24,7 +24,7 @@ public interface IAdministrationRepository
     Task<bool> RetryAsync(Guid id, CancellationToken token, string? operatorSubject = null);
     Task<AdminOperation?> AbandonAsync(Guid id, string operatorSubject, CancellationToken token);
     Task<AdminOperation?> ClaimAsync(CancellationToken token);
-    Task AdvanceAsync(AdminOperation operation, string step, long providerRevision, CancellationToken token);
+    Task AdvanceAsync(AdminOperation operation, string nextStep, long providerRevision, CancellationToken token);
     Task FailAsync(AdminOperation operation, string code, bool retryable, CancellationToken token);
     Task RebaseAsync(AdminOperation operation, long providerRevision, CancellationToken token);
 }

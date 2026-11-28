@@ -3,11 +3,11 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tarfile
 import urllib.request
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 sources = root / "native-sources"

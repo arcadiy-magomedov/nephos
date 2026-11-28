@@ -26,6 +26,7 @@ struct AppRootView: View {
             }
         }
         .task {
+            uploads.onSessionRevoked = { [model] in await model.handleExternalSignOut() }
             if model.screen == .restoring { await model.restore() }
             if model.screen == .signedIn, scenePhase == .active { uploads.foreground() }
         }
@@ -64,7 +65,10 @@ struct AppRootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "You will need a new QR code to sign in again. Device-only sign-out removes saved credentials but does not revoke the server session."
+                """
+                You will need a new QR code to sign in again. Device-only sign-out removes saved credentials \
+                but does not revoke the server session.
+                """
             )
         }
     }

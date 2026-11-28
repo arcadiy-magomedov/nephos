@@ -128,7 +128,7 @@ Use the approved mobile QR flow: Sign in, Scan or Choose QR from Photos,
 Connecting, and a recoverable QR error. Only an administrator can provision the
 user and issue the single-use invitation. Follow the strict HTTPS origin,
 device-proof, immutable request journal, and bounded initial-delivery recovery
-contract in [QR enrollment](../deploy/keycloak/QR-ENROLLMENT.md). There is no
+contract in [QR enrollment](qr-enrollment.md). There is no
 email/PIN, browser, public registration, or password form in the rebuilt client.
 Legacy backend PIN compatibility does not change this mobile flow.
 
@@ -169,7 +169,7 @@ design for new QR sign-ins. Server and native Simulator integration cover
 bounded loss/restart, revocation, and the 180-day session policy; separate
 real-service tests cover existing-realm upgrade and cross-replica replay rejection.
 Physical-device acceptance and live-deployment qualification remain separate. See the
-[server qualification status and wire contract](../deploy/keycloak/QR-ENROLLMENT.md#persistent-login-and-dpop-feasibility).
+[server qualification status and wire contract](qr-enrollment.md#persistent-login-and-dpop-feasibility).
 Persist its key before requesting bound credentials. A fresh proof is required
 for every retry; never replay a previously signed proof. If nonces are requested,
 handle bounded retry with the correct server nonce and preserve the session.

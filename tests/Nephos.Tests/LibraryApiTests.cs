@@ -86,6 +86,21 @@ public sealed class LibraryApiTests
         Assert.Equal(0, factory.Repository.Calls);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("{\"active\":\"true\"}")]
+    [InlineData("{")]
+    public async Task Malformed_introspection_is_unavailable_not_a_revoked_session(string response)
+    {
+        await using var factory = new ApiFactory { IntrospectionResponse = response };
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.Token("known"));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/v1/libraries")).StatusCode);
+        Assert.Equal(0, factory.Repository.Calls);
+    }
+
     [Fact]
     public async Task Pages_are_bounded_and_use_an_explicit_continuation()
     {
@@ -200,6 +215,7 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
     public FakeAssetRepository Assets { get; } = new();
     public bool IntrospectionActive { get; set; } = true;
     public bool IntrospectionUnavailable { get; set; }
+    public string? IntrospectionResponse { get; set; }
     public TaskCompletionSource? IntrospectionGate { get; set; }
     public TaskCompletionSource IntrospectionStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int introspectionCalls;
@@ -265,7 +281,7 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    $"{{\"active\":{factory.IntrospectionActive.ToString().ToLowerInvariant()}}}", Encoding.UTF8, "application/json")
+                    factory.IntrospectionResponse ?? $"{{\"active\":{factory.IntrospectionActive.ToString().ToLowerInvariant()}}}", Encoding.UTF8, "application/json")
             };
         }
     }

@@ -1,4 +1,4 @@
-# Optional overlay; start only the services listed in face-inference/README.md.
+# Optional overlay; start only the services listed in specs/face-analysis.md.
 services:
   admin-console:
     environment:

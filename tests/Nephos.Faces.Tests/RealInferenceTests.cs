@@ -42,7 +42,7 @@ public sealed class ActualLocalInference(string root) : IInferenceClient
             process.StandardInput.Close();
             await process.WaitForExitAsync(ct);
             if (process.ExitCode != 0) throw new InvalidDataException("Actual inference failed: " + await error);
-            return JsonSerializer.Deserialize<InferenceResult>(await output, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            return JsonSerializer.Deserialize<InferenceResult>(await output, JsonSerializerOptions.Web)!;
         }
         finally { if (!process.HasExited) process.Kill(true); }
     }
@@ -52,6 +52,8 @@ public sealed class ActualLocalInference(string root) : IInferenceClient
 [Trait("Category", "RealInference")]
 public sealed class RealInferenceTests
 {
+    private static readonly JsonSerializerOptions ReportJson = new() { WriteIndented = true };
+
     [RealPhotoFact]
     public async Task SixRealPortraitJobsClusterThenPersistNamesMergesAndCorrectiveSplitsAcrossRestart()
     {
@@ -120,6 +122,6 @@ public sealed class RealInferenceTests
         }
         Directory.CreateDirectory(Path.Combine(root, "face-inference/results"));
         await File.WriteAllTextAsync(Path.Combine(root, "face-inference/results/pipeline-verification.json"),
-            JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(report, ReportJson));
     }
 }

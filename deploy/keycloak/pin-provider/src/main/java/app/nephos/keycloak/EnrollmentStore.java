@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.keycloak.connections.jpa.JpaConnectionProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.util.JsonSerialization;
@@ -22,7 +23,8 @@ final class EnrollmentStore {
     Map<String, Object> data(EnrollmentRecord record) {
         try {
             if (record == null) return new LinkedHashMap<>();
-            return new LinkedHashMap<>(JsonSerialization.readValue(record.payload, Map.class));
+            return new LinkedHashMap<>(JsonSerialization.readValue(record.payload,
+                    new TypeReference<Map<String, Object>>() {}));
         } catch (java.io.IOException exception) { throw new IllegalStateException(exception); }
     }
     void save(String id, String kind, String subject, long expiry, Map<String, Object> data) {

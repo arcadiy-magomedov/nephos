@@ -28,7 +28,10 @@ struct MediaSettingsView: View {
                 Text("Automatic upload")
             } footer: {
                 Text(
-                    "Back up permitted photos and videos to your Nephos server. Transfers can continue when you leave the app. iOS chooses when background checks run; reopening Nephos checks for new media."
+                    """
+                    Back up permitted photos and videos to your Nephos server. Transfers can continue when you leave \
+                    the app. iOS chooses when background checks run; reopening Nephos checks for new media.
+                    """
                 )
             }
             Section("Upload library") {
@@ -63,7 +66,10 @@ struct MediaSettingsView: View {
                 .frame(minHeight: 44)
             } footer: {
                 Text(
-                    "Uploads includes completed files, failures with error details, and scheduled work. Removing an item from Photos does not delete its server backup."
+                    """
+                    Uploads includes completed files, failures with error details, and scheduled work. \
+                    Removing an item from Photos does not delete its server backup.
+                    """
                 )
             }
         }

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace Nephos.Faces.Api;
 
@@ -31,7 +30,9 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
         using var response = await factory.CreateClient("library").SendAsync(request, ct);
         if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
-        return response.StatusCode == HttpStatusCode.NoContent;
+        if (response.StatusCode != HttpStatusCode.NoContent)
+            throw new HttpRequestException("Library returned an invalid owner access response.");
+        return true;
     }
 
     public async Task<IReadOnlySet<Guid>> AuthorizeSourcesAsync(string owner, IReadOnlyList<Guid> assetIds, CancellationToken ct)
@@ -48,9 +49,10 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
                 return new HashSet<Guid>();
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<BatchAuthorizeResponse>(ct);
-            if (result?.AuthorizedIds is not null)
-                foreach (var id in result.AuthorizedIds)
-                    if (batch.Contains(id)) allowed.Add(id);
+            if (result?.AuthorizedIds is null)
+                throw new HttpRequestException("Library returned an invalid authorization response.");
+            foreach (var id in result.AuthorizedIds)
+                if (batch.Contains(id)) allowed.Add(id);
         }
         return allowed;
     }
@@ -64,8 +66,8 @@ public sealed class AnalysisSourceClient(IHttpClientFactory factory, IConfigurat
         var source = await response.Content.ReadFromJsonAsync<AnalysisSource>(ct);
         if (source is null || source.Id != assetId || source.Subject != owner || source.Size is <= 0 or > Pipeline.MaxBytes ||
             !Pipeline.SupportsMediaType(source.MediaType) ||
-            source.Sha256.Length != 64 || !source.Sha256.All(char.IsAsciiHexDigit))
-            return null;
+            source.Sha256 is not { Length: 64 } || !source.Sha256.All(char.IsAsciiHexDigit))
+            throw new HttpRequestException("Library returned an invalid analysis source.");
         return source with { Sha256 = source.Sha256.ToLowerInvariant() };
     }
 
@@ -110,17 +112,5 @@ public sealed class InferenceClient(IHttpClientFactory factory, IConfiguration c
             throw new InvalidDataException("inference_rejected");
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<InferenceResult>(ct) ?? throw new InvalidDataException("empty_inference");
-    }
-}
-
-public static class ServiceAuthentication
-{
-    public static bool Valid(HttpContext context, IConfiguration configuration)
-    {
-        var expected = configuration["Services:Key"] ?? "";
-        var supplied = context.Request.Headers["X-Nephos-Service-Key"].ToString();
-        return expected.Length >= 32 && supplied.Length <= 512 &&
-            CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(expected)),
-                SHA256.HashData(Encoding.UTF8.GetBytes(supplied)));
     }
 }

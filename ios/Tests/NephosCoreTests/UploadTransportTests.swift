@@ -107,4 +107,134 @@ struct UploadTransportTests {
         try await recreated.acknowledge(try #require(receipts.first))
         #expect(try await recreated.receipts(scope: "fixture").isEmpty)
     }
+
+    @Test
+    func revokedSessionPropagatesSignedOutWithoutMarkingPendingItemsFailed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nephos-signout-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = try UploadDestination.fixture()
+        let repository = try SQLiteUploadRepository(url: directory.appendingPathComponent("queue.sqlite"))
+        let coordinator = UploadCoordinator(
+            destination: destination, repository: repository,
+            source: UploadPhotoSourceFake([.fixture()]), client: SignedOutUploadRemote(),
+            transport: UploadTransportFake(), files: UploadFileStore(directory: directory),
+            events: UploadEventStore(directory: directory))
+        try await repository.setPolicy(.allNetworks, scope: destination.scope)
+
+        await #expect(throws: ClientError.self) {
+            try await coordinator.process(discover: true, allowsPreparation: true)
+        }
+        let snapshot = try await repository.snapshot(scope: destination.scope, limit: 10)
+        #expect(snapshot.failedCount == 0)
+        #expect(snapshot.pendingCount == 1)
+    }
+
+    @Test
+    func unauthorizedReceiptAcknowledgesBeforeRefreshAndNeverBlocksLaterReceipts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nephos-401-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = try UploadDestination.fixture()
+        let repository = try SQLiteUploadRepository(url: directory.appendingPathComponent("queue.sqlite"))
+        let remote = FailingRefreshRemote()
+        let transport = UploadTransportFake()
+        let events = UploadEventStore(directory: directory)
+        let coordinator = UploadCoordinator(
+            destination: destination, repository: repository,
+            source: UploadPhotoSourceFake([.fixture(live: true)]), client: remote,
+            transport: transport, files: UploadFileStore(directory: directory), events: events)
+        try await repository.setPolicy(.allNetworks, scope: destination.scope)
+
+        try await coordinator.process(discover: true, allowsPreparation: true)
+        let transfers = await transport.active()
+        #expect(transfers.count == 2)
+        try events.record(
+            UploadTransferReceipt(
+                transfer: transfers[0], status: 401, error: nil, cancelled: false, completedAt: Date()))
+        try events.record(
+            UploadTransferReceipt(
+                transfer: transfers[1], status: 204, error: nil, cancelled: false, completedAt: Date()))
+
+        try await coordinator.process(discover: false, allowsPreparation: true)
+        #expect(try await events.receipts(scope: destination.scope).isEmpty)
+        let snapshot = try await repository.snapshot(scope: destination.scope, limit: 10)
+        let item = try #require(snapshot.pending.first)
+        let confirmed = item.resources.first { $0.id == transfers[1].resourceID }
+        #expect(confirmed?.confirmedParts.contains(transfers[1].part) == true)
+        #expect(snapshot.notice?.contains("sign-in") == true)
+    }
+
+    @Test
+    func transientIdpHttpErrorKeepsPendingItemsAndRetriesWithoutFailing() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("nephos-503-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = try UploadDestination.fixture()
+        let repository = try SQLiteUploadRepository(url: directory.appendingPathComponent("queue.sqlite"))
+        let coordinator = UploadCoordinator(
+            destination: destination, repository: repository,
+            source: UploadPhotoSourceFake([.fixture()]), client: TransientHTTP503Remote(),
+            transport: UploadTransportFake(), files: UploadFileStore(directory: directory),
+            events: UploadEventStore(directory: directory))
+        try await repository.setPolicy(.allNetworks, scope: destination.scope)
+
+        try await coordinator.process(discover: true, allowsPreparation: true)
+        let snapshot = try await repository.snapshot(scope: destination.scope, limit: 10)
+        #expect(snapshot.failedCount == 0)
+        #expect(snapshot.pendingCount == 1)
+        #expect(snapshot.notice?.contains("503") == true)
+    }
+}
+
+private actor TransientHTTP503Remote: UploadRemote {
+    func create(_ resource: UploadResource, item: UploadItem, library: UUID) throws -> UploadResourceStatus {
+        throw ClientError.http(503, "Identity service unavailable.")
+    }
+    func retry(_ resource: UploadResource, item: UploadItem, library: UUID) throws -> UploadResourceStatus {
+        throw ClientError.http(503, "Identity service unavailable.")
+    }
+    func complete(_ resource: UploadResource) throws -> UploadResourceStatus {
+        throw ClientError.http(503, "Identity service unavailable.")
+    }
+    func uploadRequest(_ resource: UploadResource, part: Int, policy: UploadPolicy) throws -> URLRequest {
+        throw ClientError.http(503, "Identity service unavailable.")
+    }
+    func manifest(_ item: UploadItem) -> UploadResourceSetManifest? { nil }
+    func commit(_ item: UploadItem, library: UUID) throws {
+        throw ClientError.http(503, "Identity service unavailable.")
+    }
+    func refreshAuthorization() throws { throw ClientError.http(503, "Identity service unavailable.") }
+}
+
+private actor SignedOutUploadRemote: UploadRemote {
+    func create(_ resource: UploadResource, item: UploadItem, library: UUID) throws -> UploadResourceStatus {
+        throw ClientError.signedOut
+    }
+    func retry(_ resource: UploadResource, item: UploadItem, library: UUID) throws -> UploadResourceStatus {
+        throw ClientError.signedOut
+    }
+    func complete(_ resource: UploadResource) throws -> UploadResourceStatus { throw ClientError.signedOut }
+    func uploadRequest(_ resource: UploadResource, part: Int, policy: UploadPolicy) throws -> URLRequest {
+        throw ClientError.signedOut
+    }
+    func manifest(_ item: UploadItem) -> UploadResourceSetManifest? { nil }
+    func commit(_ item: UploadItem, library: UUID) throws { throw ClientError.signedOut }
+    func refreshAuthorization() throws { throw ClientError.signedOut }
+}
+
+private actor FailingRefreshRemote: UploadRemote {
+    private let base = UploadRemoteFake()
+    func create(_ resource: UploadResource, item: UploadItem, library: UUID) async throws -> UploadResourceStatus {
+        try await base.create(resource, item: item, library: library)
+    }
+    func retry(_ resource: UploadResource, item: UploadItem, library: UUID) async throws -> UploadResourceStatus {
+        try await base.retry(resource, item: item, library: library)
+    }
+    func complete(_ resource: UploadResource) async throws -> UploadResourceStatus {
+        try await base.complete(resource)
+    }
+    func uploadRequest(_ resource: UploadResource, part: Int, policy: UploadPolicy) async throws -> URLRequest {
+        try await base.uploadRequest(resource, part: part, policy: policy)
+    }
+    func manifest(_ item: UploadItem) async -> UploadResourceSetManifest? { await base.manifest(item) }
+    func commit(_ item: UploadItem, library: UUID) async throws { try await base.commit(item, library: library) }
+    func refreshAuthorization() throws { throw URLError(.notConnectedToInternet) }
 }

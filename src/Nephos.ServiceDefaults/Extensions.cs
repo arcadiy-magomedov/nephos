@@ -113,10 +113,12 @@ public static class Extensions
                                     using var body = await JsonDocument.ParseAsync(
                                         await response.Content.ReadAsStreamAsync(ct),
                                         cancellationToken: ct);
-                                    return body.RootElement.TryGetProperty("active", out var active) &&
-                                        active.ValueKind == JsonValueKind.True
-                                        ? IntrospectionOutcome.Active
-                                        : IntrospectionOutcome.Inactive;
+                                    if (body.RootElement.ValueKind != JsonValueKind.Object ||
+                                        !body.RootElement.TryGetProperty("active", out var active) ||
+                                        active.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                                        return IntrospectionOutcome.Unavailable;
+                                    return active.ValueKind == JsonValueKind.True
+                                        ? IntrospectionOutcome.Active : IntrospectionOutcome.Inactive;
                                 }
                                 catch (OperationCanceledException) { return IntrospectionOutcome.Unavailable; }
                                 catch (HttpRequestException) { return IntrospectionOutcome.Unavailable; }

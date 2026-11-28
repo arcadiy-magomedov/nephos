@@ -4,8 +4,8 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-import requests
 import admin_status
+import requests
 
 
 class AdminStatusTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class AdminStatusTests(unittest.TestCase):
             ("NaN", time.time(), "Collection error", None),
         ):
 
-            def get(_url, params, **_kwargs):
+            def get(_url, params, *, timestamp=timestamp, value=value, **_kwargs):
                 observed = timestamp if "timestamp(" in params["query"] else value
                 samples = [] if observed is None else [{"value": [time.time(), str(observed)]}]
                 return Mock(json=Mock(return_value={"status": "success", "data": {"result": samples}}))
@@ -55,3 +55,31 @@ class AdminStatusTests(unittest.TestCase):
     def test_failed_collection_reports_error(self):
         with patch.object(admin_status.requests, "get", side_effect=requests.ConnectionError):
             self.assertTrue(all(item["state"] == "Collection error" for item in admin_status.broker_metrics()))
+
+    def test_malformed_metric_samples_are_collection_errors_not_unhandled_exceptions(self):
+        for samples in ([{}], [{"value": []}], [{"value": [1]}], [{"value": [1, None]}], [None], "invalid", None):
+            payload = {"status": "success", "data": {"result": samples}}
+            with (
+                self.subTest(samples=samples),
+                patch.object(admin_status.requests, "get", return_value=Mock(json=Mock(return_value=payload))),
+                self.assertLogs(admin_status.logger, level="WARNING"),
+            ):
+                metrics = admin_status.broker_metrics()
+            self.assertTrue(
+                all(metric["state"] == "Collection error" and metric["value"] is None for metric in metrics)
+            )
+
+    def test_malformed_observation_time_is_reported_without_partial_values(self):
+        valid = {"status": "success", "data": {"result": [{"value": [time.time(), "2"]}]}}
+        invalid = {"status": "success", "data": {"result": [{"value": []}]}}
+
+        def get(_url, params, **_kwargs):
+            payload = invalid if "timestamp(" in params["query"] else valid
+            return Mock(json=Mock(return_value=payload))
+
+        with (
+            patch.object(admin_status.requests, "get", side_effect=get),
+            self.assertLogs(admin_status.logger, level="WARNING"),
+        ):
+            metrics = admin_status.broker_metrics()
+        self.assertTrue(all(metric["state"] == "Collection error" and metric["value"] is None for metric in metrics))

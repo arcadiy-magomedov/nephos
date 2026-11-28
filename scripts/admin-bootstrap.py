@@ -3,11 +3,11 @@
 
 import json
 import os
-from pathlib import Path
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from admin_config import CALLBACK, CLIENT_ID, IDENTITY_PUBLIC_URL
 

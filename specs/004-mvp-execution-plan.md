@@ -77,8 +77,8 @@ analysis and semantic/person combined search are still outstanding.
 Native People/correction and known-user sharing screens are now implemented,
 along with the approved media-first navigation and System/Light/Dark setting.
 Server albums remain unavailable; the native Albums tab exposes libraries and
-sharing without inventing album data. See `face-inference/README.md` and
-the current [native feature inventory](../ios/README.md#remaining-features).
+sharing without inventing album data. See [face analysis](face-analysis.md) and
+the current [native feature inventory](ios-client.md).
 
 The custom platform administration UI and APNs delivery deserve explicit scope
 decisions. Keycloak supplies identity administration, not library/storage

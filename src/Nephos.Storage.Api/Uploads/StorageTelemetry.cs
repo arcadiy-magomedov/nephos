@@ -35,7 +35,7 @@ public sealed class StorageTelemetry(IUploadRepository repository, IConfiguratio
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception) when (exception is Npgsql.NpgsqlException or IOException or TimeoutException)
             {
-                logger.LogError("Storage operational metrics could not be refreshed ({ErrorType})", exception.GetType().Name);
+                StorageLog.MetricsFailed(logger, exception.GetType().Name);
             }
             await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
         }

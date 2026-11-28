@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import collections
 import contextlib
-from dataclasses import dataclass
+import logging
+import math
 import os
 import selectors
 import signal
@@ -13,7 +14,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 MAX_BYTES = 20 * 1024 * 1024
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
@@ -23,6 +25,7 @@ DEFAULT_TIMEOUT_SECONDS = 45.0
 DEFAULT_MAX_REQUESTS = 200
 _DEFAULT_TOTAL_MEMORY_BYTES = int(1.2 * 1024**3)
 _CHUNK_SIZE = 65536
+logger = logging.getLogger(__name__)
 
 SAFE_ENV_KEYS = (
     "PATH",
@@ -188,7 +191,8 @@ def serve_worker(
             ok, body = handler(payload)
         except MemoryError:
             raise
-        except Exception:
+        except Exception as error:
+            logger.error("Worker handler failed (%s)", type(error).__name__)
             ok, body = False, error_payload
         try:
             write_response_frame(out_stream, ok, body, max_response_bytes=max_response_bytes)
@@ -313,12 +317,14 @@ class _Worker:
         if self._proc.poll() is None:
             try:
                 os.killpg(self._proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
+            except OSError as error:
+                if not isinstance(error, ProcessLookupError) and self._proc.poll() is None:
+                    logger.warning("Worker group termination failed (%s)", type(error).__name__)
             try:
                 self._proc.kill()
-            except (ProcessLookupError, OSError):
-                pass
+            except OSError as error:
+                if not isinstance(error, ProcessLookupError) and self._proc.poll() is None:
+                    logger.warning("Worker termination failed (%s)", type(error).__name__)
 
     def wait_reaped(self) -> None:
         try:
@@ -335,8 +341,8 @@ class _Worker:
             if pipe is not None:
                 try:
                     pipe.close()
-                except OSError:
-                    pass
+                except OSError as error:
+                    logger.warning("Worker pipe close failed (%s)", type(error).__name__)
 
     def kill(self) -> None:
         self.terminate()
@@ -347,8 +353,8 @@ class _Worker:
         if self._proc.stdin is not None:
             try:
                 self._proc.stdin.close()
-            except OSError:
-                pass
+            except OSError as error:
+                logger.warning("Worker input close failed (%s)", type(error).__name__)
         try:
             self._proc.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
@@ -374,8 +380,8 @@ class WorkerPool:
     ):
         if workers < 1:
             raise ValueError("workers must be at least 1")
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be finite and positive")
         if max_requests < 1:
             raise ValueError("max_requests must be at least 1")
         if max_bytes < 1 or max_response_bytes < 1:
@@ -448,8 +454,11 @@ class WorkerPool:
     def execute(self, payload: bytes, *, timeout: float | None = None, acquired: bool = False) -> WorkerResult:
         if not isinstance(payload, (bytes, bytearray, memoryview)):
             raise ValueError("payload_must_be_bytes")
-        if len(payload) > self._max_bytes:
+        payload_size = payload.nbytes if isinstance(payload, memoryview) else len(payload)
+        if payload_size > self._max_bytes:
             raise ValueError("payload_limit")
+        if isinstance(payload, memoryview):
+            payload = payload.tobytes()
         if not acquired:
             with self.slot():
                 return self._dispatch(payload, timeout=timeout)
@@ -457,8 +466,8 @@ class WorkerPool:
 
     def _dispatch(self, payload: bytes, *, timeout: float | None = None) -> WorkerResult:
         effective_timeout = self._timeout if timeout is None else float(timeout)
-        if effective_timeout <= 0:
-            raise ValueError("timeout must be positive")
+        if not math.isfinite(effective_timeout) or effective_timeout <= 0:
+            raise ValueError("timeout must be finite and positive")
         worker: _Worker | None = None
         dead: list[_Worker] = []
         with self._lock:

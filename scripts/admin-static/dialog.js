@@ -6,10 +6,17 @@ if (dialog && typeof dialog.showModal === "function") {
   dialog.showModal();
   dialog.querySelector("[data-initial-focus]")?.focus();
   dialog.addEventListener("keydown", (event) => {
-    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
-    const focusable = [...dialog.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )].filter((element) => element.getClientRects().length && getComputedStyle(element).visibility !== "hidden");
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey)
+      return;
+    const focusable = [
+      ...dialog.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter(
+      (element) =>
+        element.getClientRects().length &&
+        getComputedStyle(element).visibility !== "hidden",
+    );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) {

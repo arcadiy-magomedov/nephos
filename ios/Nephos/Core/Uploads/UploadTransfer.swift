@@ -23,7 +23,10 @@ struct UploadTransfer: Codable, Equatable, Identifiable, Sendable {
 
     func taskDescription() throws -> String {
         guard isValid else { throw ClientError.invalid("Invalid background upload task.") }
-        return String(decoding: try JSONEncoder().encode(self), as: UTF8.self)
+        guard let description = String(bytes: try JSONEncoder().encode(self), encoding: .utf8) else {
+            throw ClientError.invalid("Unable to encode the background upload identity.")
+        }
+        return description
     }
 
     static func parse(_ description: String?) throws -> Self {

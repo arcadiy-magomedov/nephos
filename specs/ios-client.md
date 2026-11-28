@@ -134,7 +134,7 @@ types, then resumes it and checks persisted completion results. No Photos access
 personal files or live Nephos deployment are involved.
 
 The optional real-enrollment test skips without a fresh invitation image.
-[Real-service qualification](../deploy/native-qr-ci.md) provisions an isolated
+[Real-service qualification](native-qr-ci.md) provisions an isolated
 Keycloak/Library fixture and supplies that image; it exercises a persisted request,
 a deliberately lost exchange response, cold restoration, and actual token refresh.
 It never injects bearer tokens or bypasses TLS. Use a disposable simulator for the
@@ -169,7 +169,7 @@ Existing saved legacy sessions remain usable without being silently rebound.
 Realm import alone does not upgrade existing deployments: the idempotent
 `admin-init` bootstrap installs the mobile policy and 180-day timeout while
 preserving users, sessions, and unrelated policies. See
-[the server contract](../deploy/keycloak/QR-ENROLLMENT.md) for upgrade details.
+[the server contract](qr-enrollment.md) for upgrade details.
 
 - Only documented terminal session/account/credential-expiry errors (not every `invalid_grant`)
   or rejection after one authenticated refresh retry require sign-in again.

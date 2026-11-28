@@ -7,7 +7,6 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import ssl
@@ -16,10 +15,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from dpop_proof import b64, claims, proof, thumbprint
 
 spec = importlib.util.spec_from_file_location("native_fixture", Path(__file__).with_name("native-qr-ci.py"))

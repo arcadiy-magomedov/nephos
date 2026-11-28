@@ -2,9 +2,10 @@
 """Fault-inject only the explicitly named development administration containers."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+
 import smoke
 
 

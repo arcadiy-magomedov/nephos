@@ -6,7 +6,6 @@ import hashlib
 import http.server
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import ssl
@@ -14,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 from onboarding_qualification import BUNDLE, IOS, project
 
@@ -194,7 +194,8 @@ def main():
             if result != {"completed": 3}:
                 raise RuntimeError("Native upload completion failed: " + str(result))
             print(
-                "Passed: PDF, EPUB and empty custom file; exact bytes/MIME; uploads continued with the app process stopped."
+                "Passed: PDF, EPUB and empty custom file; exact bytes/MIME; "
+                "uploads continued with the app process stopped."
             )
         finally:
             gate.set()

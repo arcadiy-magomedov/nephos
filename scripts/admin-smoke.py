@@ -128,14 +128,16 @@ with smoke.AdminSession(base) as admin:
         assert not smoke.request(admin_url + "/users/" + subject, token=smoke.admin_token())["enabled"]
         assert "The account is disabled" in admin.request("/users/" + subject)
         print(
-            "PASS: persistent create/replay/profile/search, real QR issuance/cancel, library create/rename, overview/services and disable"
+            "PASS: persistent create/replay/profile/search, real QR issuance/cancel, "
+            "library create/rename, overview/services and disable"
         )
     finally:
         if subject:
             smoke.sql(
                 """
                 CREATE TEMP TABLE fixture_libraries AS SELECT library_id FROM library_members WHERE subject=:'subject';
-                DELETE FROM administration_events WHERE operation_id IN(SELECT id FROM administration_operations WHERE subject=:'subject');
+                DELETE FROM administration_events WHERE operation_id IN(
+                    SELECT id FROM administration_operations WHERE subject=:'subject');
                 DELETE FROM administration_operations WHERE subject=:'subject';
                 DELETE FROM library_members WHERE subject=:'subject';
                 DELETE FROM personal_libraries WHERE subject=:'subject';

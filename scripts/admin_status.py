@@ -1,10 +1,10 @@
 """Bounded private service probes and fixed broker telemetry queries."""
 
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
-import os
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 import requests
 
@@ -12,7 +12,7 @@ logger = logging.getLogger("nephos.administration.status")
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def probe(item):
@@ -64,6 +64,25 @@ def services():
         return list(executor.map(probe, items))
 
 
+def _sample_value(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid metric response")
+    data = payload.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("result"), list):
+        raise ValueError("Invalid metric result")
+    samples = data["result"]
+    if not samples:
+        return None
+    if len(samples) != 1 or not isinstance(samples[0], dict):
+        raise ValueError("Invalid aggregate metric sample")
+    value = samples[0].get("value")
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError("Invalid metric sample value")
+    if not isinstance(value[1], (str, int, float)) or isinstance(value[1], bool):
+        raise ValueError("Invalid metric sample number")
+    return value[1]
+
+
 def broker_metrics():
     base = os.environ.get("ADMIN_PROMETHEUS_URL", "http://prometheus:9090").rstrip("/")
     definitions = [
@@ -83,11 +102,11 @@ def broker_metrics():
             )
             response.raise_for_status()
             payload = response.json()
-            if payload.get("status") != "success":
+            if not isinstance(payload, dict) or payload.get("status") != "success":
                 result["state"] = "Collection error"
                 return result
-            samples = payload["data"]["result"]
-            if not samples:
+            value = _sample_value(payload)
+            if value is None:
                 return result
             response = requests.get(
                 base + "/api/v1/query",
@@ -97,17 +116,18 @@ def broker_metrics():
             )
             response.raise_for_status()
             timestamps = response.json()
-            if timestamps.get("status") != "success" or not timestamps["data"]["result"]:
+            if not isinstance(timestamps, dict) or timestamps.get("status") != "success":
                 result["state"] = "Observation time unavailable"
                 return result
-            timestamp = float(timestamps["data"]["result"][0]["value"][1])
-            value = samples[0]["value"][1]
-            if time.time() - float(timestamp) > 60:
+            observed = _sample_value(timestamps)
+            if observed is None:
+                result["state"] = "Observation time unavailable"
+                return result
+            timestamp = float(observed)
+            if time.time() - timestamp > 60:
                 result["state"] = "Data is stale"
                 return result
-            result.update(
-                value=int(float(value)), observedAt=datetime.fromtimestamp(float(timestamp), timezone.utc).isoformat()
-            )
+            result.update(value=int(float(value)), observedAt=datetime.fromtimestamp(timestamp, UTC).isoformat())
         except requests.Timeout:
             logger.warning("Administration metric query timed out", extra={"metric": metric})
             result["state"] = "Timed out"

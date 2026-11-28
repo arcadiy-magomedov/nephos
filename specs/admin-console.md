@@ -23,6 +23,20 @@ JavaScript. QR countdown/status refresh is progressive enhancement; without
 JavaScript the user detail page supplies authoritative invitation/device state.
 No records are seeded and no browser-local model stands in for persistence.
 
+### Browser asset quality checks
+
+Use Node.js 22.13 or newer (or Node.js 20.19+) to install the locked development
+dependencies and run ESLint's recommended preset and Stylelint's standard preset:
+
+```sh
+npm ci --prefix scripts/admin-static
+npm --prefix scripts/admin-static run lint
+```
+
+`npm --prefix scripts/admin-static run format` formats the maintained assets with
+Prettier and applies Stylelint's safe fixes. These tools do not ship in the
+console image; it copies only runtime CSS and JavaScript.
+
 Creating a user requires a login and display name, not email. Logins are
 lowercased immutable identifiers of up to 64 ASCII letters/digits, dot,
 underscore or hyphen, beginning with a letter or digit. A personal library is

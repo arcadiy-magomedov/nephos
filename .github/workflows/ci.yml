@@ -31,14 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
         with:
           global-json-file: global.json
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - name: Install checksum-pinned scanners
@@ -59,11 +59,19 @@ jobs:
       - run: python3 -m pip install -r scripts/admin-requirements.txt
       - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: python3 -m unittest discover -s ios -p 'test_*.py'
+      - name: Model-free inference transport and worker tests
+        run: PYTHONPATH=face-inference python3 -m unittest test_worker_pool test_api_versions
       - run: python3 -m pip install -r scripts/quality-requirements.txt
       - run: pip-audit -r scripts/admin-requirements.txt
       - run: pip-audit -r scripts/qr-identity-requirements.txt
       - run: ruff check . && ruff format --check .
-      - run: node --check scripts/admin-static/invitation.js && node --check scripts/admin-static/dialog.js
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: scripts/admin-static/package-lock.json
+      - name: JavaScript and CSS recommended rules
+        run: npm ci --prefix scripts/admin-static && npm run lint --prefix scripts/admin-static
       - run: yamllint -s .github compose*.yaml deploy tests/alert-rules.test.yaml .yamllint.yaml
       - run: actionlint -color
       - run: shellcheck .githooks/pre-commit .githooks/pre-push
@@ -75,10 +83,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
         with:
           global-json-file: global.json
       - run: dotnet restore Nephos.slnx --locked-mode
@@ -86,19 +94,19 @@ jobs:
       - run: dotnet test Nephos.slnx -c Release --no-build --logger trx --results-directory artifacts/test-results
         env:
           OTEL_SDK_DISABLED: "true"
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961  # v5
         with:
           distribution: temurin
           java-version: "21"
       - name: Build and test the pinned identity provider
-        run: mvn -B -q -f deploy/keycloak/pin-provider/pom.xml package
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        run: mvn -B -q -f deploy/keycloak/pin-provider/pom.xml clean verify
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         with:
           name: qr-provider
           path: deploy/keycloak/pin-provider/target/nephos-keycloak-pin-provider.jar
           if-no-files-found: error
           retention-days: 2
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         if: always()
         with:
           name: backend-test-results
@@ -114,18 +122,19 @@ jobs:
       COMPOSE_FILE: compose.yaml:deploy/admin-qualification.compose.yaml
       COMPOSE_PROFILES: observability
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
         with:
           global-json-file: global.json
       - run: python3 scripts/admin-tests.py
       - run: python3 scripts/dev-env.py
-      - run: python3 scripts/cleanup-tests.py
+      - name: Complete backend contracts on isolated databases
+        run: python3 tests/run_backend_integration.py
       - run: python3 scripts/admin-test-tls.py
       - name: Use the generated qualification trust bundle
         run: |
@@ -193,13 +202,13 @@ jobs:
     env:
       OTEL_SDK_DISABLED: "true"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
         with:
           global-json-file: global.json
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
       - run: dotnet restore Nephos.slnx --locked-mode
@@ -211,14 +220,29 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           persist-credentials: false
       - name: Swift formatting
         run: swift format lint --strict --recursive ios/Nephos ios/Tests ios/Qualification ios/Package.swift
+      - name: Install checksum-pinned SwiftLint
+        run: |
+          mkdir -p "$RUNNER_TEMP/swiftlint"
+          curl --fail --silent --show-error --location --retry 3 \
+            -o "$RUNNER_TEMP/swiftlint.zip" \
+            https://github.com/realm/SwiftLint/releases/download/0.65.1/portable_swiftlint.zip
+          echo "c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0  $RUNNER_TEMP/swiftlint.zip" \
+            | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/swiftlint.zip" -d "$RUNNER_TEMP/swiftlint"
+          echo "$RUNNER_TEMP/swiftlint" >> "$GITHUB_PATH"
+      - name: Swift recommended rules
+        run: swiftlint lint --strict --config .swiftlint.yml
       - name: Deterministic Swift tests
         working-directory: ios
-        run: env -u NEPHOS_NATIVE_E2E -u NEPHOS_E2E_BEARER swift test --scratch-path .build
+        run: |
+          env -u NEPHOS_NATIVE_E2E -u NEPHOS_E2E_BEARER swift test --scratch-path .build
+          env -u NEPHOS_NATIVE_E2E -u NEPHOS_E2E_BEARER swift test \
+            -c release --scratch-path .build-release
       - name: Signing-disabled simulator builds
         working-directory: ios
         run: |
@@ -263,16 +287,16 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1  # v5
         with:
           global-json-file: global.json
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5
         with:
           name: qr-provider
           path: artifacts/native-qr-input

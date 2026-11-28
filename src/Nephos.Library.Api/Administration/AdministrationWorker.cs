@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
 using Npgsql;
 
 namespace Nephos.Library.Api.Administration;
@@ -18,7 +17,7 @@ public sealed class AdministrationWorker(IAdministrationRepository repository, I
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception e) when (e is NpgsqlException or HttpRequestException or TimeoutException)
             {
-                logger.LogWarning("Administration reconciliation unavailable ({ErrorType})", e.GetType().Name);
+                LibraryLog.AdministrationFailed(logger, e.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }

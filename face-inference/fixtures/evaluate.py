@@ -1,9 +1,10 @@
 """Actual YuNet/SFace evaluation. Labels come exclusively from source metadata."""
 
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
+
 import numpy as np
 
 root = Path(__file__).resolve().parents[1]

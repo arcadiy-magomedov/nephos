@@ -36,7 +36,7 @@ public interface IFaceRepository
     Task<FaceJob> EnqueueAsync(string owner, AnalysisSource source, CancellationToken ct);
     Task<FaceJob?> ClaimAsync(CancellationToken ct);
     Task CompleteAsync(FaceJob job, InferenceResult result, CancellationToken ct);
-    Task FailAsync(FaceJob job, string error, bool permanent, CancellationToken ct);
+    Task FailAsync(FaceJob job, string errorCode, bool permanent, CancellationToken ct);
     Task<IReadOnlyList<FaceJob>> JobsAsync(string owner, Guid? after, int limit, CancellationToken ct);
     Task<FaceJob?> JobAsync(string owner, Guid id, CancellationToken ct);
     Task<bool> RetryAsync(string owner, Guid id, CancellationToken ct);

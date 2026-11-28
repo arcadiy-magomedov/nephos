@@ -12,6 +12,7 @@ import urllib.parse
 import uuid
 
 import smoke
+from service_diagnostics import print_service_diagnostics
 
 prefix = "nephos-identity-smoke-" + uuid.uuid4().hex
 database, identity, network = prefix + "-db", prefix + "-identity", prefix + "-network"
@@ -471,7 +472,7 @@ try:
     )
 except Exception:
     if identity in containers:
-        print(docker("logs", "--tail", "30", identity))
+        print_service_diagnostics(docker("logs", "--tail", "30", identity))
     raise
 finally:
     for container in reversed(containers):

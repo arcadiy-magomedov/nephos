@@ -56,7 +56,7 @@ struct UploadsView: View {
         ) {
             Task { await uploads.togglePause() }
         }
-        .frame(minHeight: 44).disabled(uploads.snapshot.pendingCount == 0)
+        .frame(minHeight: 44).disabled(!uploads.snapshot.paused && uploads.snapshot.pendingCount == 0)
     }
 
     private var retryButton: some View {

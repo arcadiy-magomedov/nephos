@@ -3,8 +3,8 @@
 
 import json
 import os
-from pathlib import Path
 import secrets
+from pathlib import Path
 
 
 def main():

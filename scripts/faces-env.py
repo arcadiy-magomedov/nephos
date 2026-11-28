@@ -1,8 +1,8 @@
 """Create only optional faces credentials; never modify the platform .env."""
 
-from pathlib import Path
 import os
 import secrets
+from pathlib import Path
 
 destination = Path(".env.faces")
 legacy = Path("deploy/faces/.env")

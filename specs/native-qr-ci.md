@@ -11,7 +11,7 @@ first (`actions/setup-java`, `distribution: temurin`, `java-version: '21'`); Mav
 is available on the hosted Ubuntu runner.
 
 ```sh
-mvn -B -q -f deploy/keycloak/pin-provider/pom.xml package
+mvn -B -q -f deploy/keycloak/pin-provider/pom.xml clean verify
 # Upload only deploy/keycloak/pin-provider/target/nephos-keycloak-pin-provider.jar.
 ```
 

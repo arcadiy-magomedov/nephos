@@ -48,8 +48,8 @@ enum OAuthResponse {
             throw ClientError.http(status, "Session renewal failed. Your saved session has been kept; retry later.")
         }
         let tokens = try JSONDecoder().decode(TokenResponse.self, from: data)
-        guard tokens.token_type.lowercased() == "bearer", tokens.expires_in.isFinite,
-            tokens.expires_in > 0, !tokens.access_token.isEmpty, tokens.refresh_token?.isEmpty != true
+        guard tokens.tokenType.lowercased() == "bearer", tokens.expiresIn.isFinite,
+            tokens.expiresIn > 0, !tokens.accessToken.isEmpty, tokens.refreshToken?.isEmpty != true
         else { throw ClientError.invalid("Unsupported token response. Your saved session has been kept.") }
         return tokens
     }

@@ -13,7 +13,7 @@ public sealed class DatabaseFactAttribute : FactAttribute
 }
 
 [CollectionDefinition("face-database", DisableParallelization = true)]
-public sealed class DatabaseCollection;
+public sealed class FaceDatabaseFixture;
 
 [Collection("face-database")]
 public sealed class PersistenceTests
@@ -269,6 +269,33 @@ public sealed class PersistenceTests
         var facesAfter = await r.FacesAsync(owner, null, null, null, 100, default);
         Assert.Equal(p1, facesAfter.Single(f => f.AssetId == s3.Id).PersonId);
         Assert.Equal(p2, facesAfter.Single(f => f.AssetId == s4.Id).PersonId);
+    }
+
+    [DatabaseFact]
+    public async Task AssigningToRedirectedPersonResolvesToRootAndSurvivesUnmerge()
+    {
+        await using var db = Open();
+        var r = new PostgresFaceRepository(db);
+        var owner = "assign-root-" + Guid.NewGuid();
+        var s1 = Source(owner);
+        var s2 = Source(owner);
+        var s3 = Source(owner);
+        await r.EnqueueAsync(owner, s1, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s1.Sha256, axis: 0), default);
+        await r.EnqueueAsync(owner, s2, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s2.Sha256, axis: 1), default);
+        await r.EnqueueAsync(owner, s3, default);
+        await r.CompleteAsync((await r.ClaimAsync(default))!, Result(s3.Sha256, axis: 2), default);
+        var faces = await r.FacesAsync(owner, null, null, null, 100, default);
+        var root = faces.Single(f => f.AssetId == s1.Id).PersonId!.Value;
+        var redirected = faces.Single(f => f.AssetId == s2.Id).PersonId!.Value;
+        var movedFace = faces.Single(f => f.AssetId == s3.Id);
+
+        Assert.True(await r.MergeAsync(owner, redirected, root, default));
+        Assert.True(await r.AssignAsync(owner, movedFace.Id, new(redirected), default));
+        Assert.True(await r.MergeAsync(owner, redirected, null, default));
+        var updated = await r.FacesAsync(owner, s3.Id, null, null, 10, default);
+        Assert.Equal(root, Assert.Single(updated).PersonId);
     }
 
     [DatabaseFact]

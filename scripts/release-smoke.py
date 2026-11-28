@@ -125,7 +125,8 @@ def main():
         finally:
             media["compose"]("exec", "-T", "storage-api", "mv", "--", missing_path, original_path)
         print(
-            "PASS: incomplete compounds hidden; immutable complete manifest, all-resource retention and one atomic gallery transition"
+            "PASS: incomplete compounds hidden; immutable complete manifest, "
+            "all-resource retention and one atomic gallery transition"
         )
 
         for _ in range(3):
@@ -164,10 +165,12 @@ def main():
         )
         request(prefix + "/snapshots/" + refreshed["id"] + "/assets", token=token, expected=410)
         print(
-            "PASS: retained pages/counts, fixed-target paged deltas, concurrent arrivals, account isolation, generation fencing and expiry"
+            "PASS: retained pages/counts, fixed-target paged deltas, concurrent arrivals, "
+            "account isolation, generation fencing and expiry"
         )
     print(
-        "Release gallery/resource-set acceptance passed. Synthetic compound bytes test protocol completeness, not PhotoKit restoration."
+        "Release gallery/resource-set acceptance passed. "
+        "Synthetic compound bytes test protocol completeness, not PhotoKit restoration."
     )
 
 

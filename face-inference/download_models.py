@@ -2,8 +2,8 @@
 
 import hashlib
 import json
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 manifest = json.loads((root / "models.json").read_text())

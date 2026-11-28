@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Real media-path acceptance checks against the disposable local Compose stack."""
 
-from contextlib import contextmanager
 import hashlib
 import json
 import secrets
@@ -12,6 +11,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zlib
+from contextlib import contextmanager
 
 import smoke
 
@@ -102,7 +102,8 @@ def account():
         )
         statement = """
             BEGIN;
-            CREATE TEMP TABLE cleanup_hashes AS SELECT sha256 FROM uploads WHERE subject=:'subject' AND sha256 IS NOT NULL;
+            CREATE TEMP TABLE cleanup_hashes AS SELECT sha256 FROM uploads
+            WHERE subject=:'subject' AND sha256 IS NOT NULL;
             DELETE FROM retention_holds WHERE asset_id IN (SELECT id FROM uploads WHERE subject=:'subject');
             DELETE FROM outbox WHERE id IN (SELECT id FROM uploads WHERE subject=:'subject');
             DELETE FROM upload_parts WHERE upload_id IN (SELECT id FROM uploads WHERE subject=:'subject');
@@ -266,10 +267,11 @@ def main():
         )
         assert request(API + "/v1/uploads", token=token, data={**value, "id": str(uuid.uuid4())})["id"] == identifier
         print(
-            "PASS: out-of-order immutable chunks, restart/resume, broker recovery, exact original/range, isolation and retention"
+            "PASS: out-of-order immutable chunks, restart/resume, broker recovery, "
+            "exact original/range, isolation and retention"
         )
 
-        duplicate, second = intent(other, other_library, other_uploads, data)
+        _duplicate, second = intent(other, other_library, other_uploads, data)
         assert second["state"] == "uploading", "Cross-user hash knowledge must not skip proof of bytes"
         for part, body in enumerate(chunks):
             raw("/v1/uploads/" + second["id"] + "/parts/" + str(part), other, body, "PUT", 204)
@@ -323,7 +325,7 @@ def main():
         request(API + "/v1/libraries/" + library + "/assets", token=other, expected=404)
         print("PASS: real PNG preview, capture-date chronology, layered counts, pages and cross-library authorization")
 
-        bad, bad_status = intent(token, library, uploads, b"expected")
+        _bad, bad_status = intent(token, library, uploads, b"expected")
         raw("/v1/uploads/" + bad_status["id"] + "/parts/0", token, b"tampered", "PUT", 204)
         request(API + "/v1/uploads/" + bad_status["id"] + "/complete", token=token, method="POST", expected=202)
         smoke.wait(

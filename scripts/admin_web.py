@@ -1,38 +1,37 @@
 """Private operator UI: Keycloak OIDC, server-side sessions, and CSRF-protected actions."""
 
-from datetime import datetime, timedelta, timezone
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 
+import admin_status
+import qrcode
+import requests
+from admin_config import CALLBACK, CLIENT_ID, IDENTITY_PUBLIC_URL, ISSUER, PUBLIC_URL
+from admin_telemetry import instrument, logger, propagator, tracer
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.flask_client import OAuth
 from flask import Flask, Response, abort, flash, g, redirect, render_template, request, session
 from flask_session.redis import RedisSessionInterface
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from joserfc.errors import JoseError
+from opentelemetry.trace import SpanKind
+from qrcode.image.svg import SvgPathImage
 from redis import Redis
 from redis.backoff import NoBackoff
 from redis.exceptions import LockError, RedisError
 from redis.retry import Retry
 from requests.exceptions import RequestException
-import requests
-import qrcode
-from qrcode.image.svg import SvgPathImage
-import admin_status
 from werkzeug.exceptions import HTTPException
-
-from admin_config import CALLBACK, CLIENT_ID, IDENTITY_PUBLIC_URL, ISSUER, PUBLIC_URL
-from admin_telemetry import instrument, logger, propagator, tracer
-from opentelemetry.trace import SpanKind
 
 IDENTITY = os.environ["IDENTITY_URL"].rstrip("/")
 LIBRARY = os.environ["LIBRARY_ADMIN_URL"].rstrip("/")
@@ -136,11 +135,7 @@ def operator_context():
 def datetime_utc(value):
     if not value:
         return "No data"
-    return (
-        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        .astimezone(timezone.utc)
-        .strftime("%d %b %Y, %H:%M UTC")
-    )
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(UTC).strftime("%d %b %Y, %H:%M UTC")
 
 
 @app.template_filter("operation_status")
@@ -163,6 +158,7 @@ def invitation_status(value):
         "consumed": "Device connected",
         "expired": "Expired",
         "cancelled": "Cancelled",
+        "revoked": "Revoked",
     }.get(value, "Status unconfirmed")
 
 
@@ -608,14 +604,26 @@ def user_access(subject):
 def revoke_device(subject, device):
     operator_token()
     subject, device = str(subject), str(device)
-    devices = identity_call("/users/" + subject + "/devices")["devices"]
-    record = next((item for item in devices if item["id"] == device), None)
     if request.method == "POST":
         form_values()
+        try:
+            devices = identity_call("/users/" + subject + "/devices")["devices"]
+        except (urllib.error.URLError, TimeoutError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code < 500:
+                raise
+            logger.warning("Device list unavailable during revocation", extra={"error_type": type(error).__name__})
+            fallback = {"id": device, "name": "Selected device", "lastAccess": None}
+            return render_template(
+                "device-revoke.html", **user_context(subject), device=fallback, revoke_failed=True
+            ), 503
+        record = next((item for item in devices if item["id"] == device), None)
         if record:
             try:
                 identity_call("/users/" + subject + "/devices/" + device, method="DELETE")
             except (urllib.error.URLError, TimeoutError) as error:
+                if isinstance(error, urllib.error.HTTPError) and error.code == 404:
+                    flash("This device is no longer connected. Other sessions and stored media were not changed.")
+                    return redirect("/users/" + subject, code=303)
                 if isinstance(error, urllib.error.HTTPError) and error.code < 500:
                     raise
                 logger.warning("Device revocation could not be confirmed", extra={"error_type": type(error).__name__})
@@ -626,6 +634,8 @@ def revoke_device(subject, device):
         else:
             flash("This device is no longer connected. Other sessions and stored media were not changed.")
         return redirect("/users/" + subject, code=303)
+    devices = identity_call("/users/" + subject + "/devices")["devices"]
+    record = next((item for item in devices if item["id"] == device), None)
     if not record:
         abort(404, description="The device is no longer connected or could not be found.")
     return render_template("device-revoke.html", **user_context(subject), device=record, revoke_failed=False)
@@ -680,7 +690,13 @@ def invitation_state(subject, invite):
 def cancel_invitation(subject, invite):
     operator_token()
     form_values()
-    identity_call("/users/" + str(subject) + "/invitations/" + str(invite), method="DELETE")
+    try:
+        identity_call("/users/" + str(subject) + "/invitations/" + str(invite), method="DELETE")
+    except urllib.error.HTTPError as error:
+        if error.code == 409:
+            flash("This QR code was already used, expired, or revoked. Check the devices list below.")
+            return redirect("/users/" + str(subject), code=303)
+        raise
     flash("Invitation cancelled. This QR code no longer grants access.")
     return redirect("/users/" + str(subject), code=303)
 
@@ -741,17 +757,25 @@ def abandon_operation(operation_id):
     operator_token()
     operation_id = str(operation_id)
     operation = library_call("/operations/" + operation_id)
-    if operation["kind"] == "provision" or operation["status"] not in ("failed", "abandoned"):
-        abort(409, description="Only a failed profile or access change can be abandoned.")
+    if (operation["kind"] == "provision" and operation.get("step") != "reserved") or operation["status"] not in (
+        "failed",
+        "abandoned",
+    ):
+        abort(409, description="Only a failed profile, access, or unstarted provision operation can be abandoned.")
     if request.method == "POST":
         form_values()
         library_call("/operations/" + operation_id + "/abandon", method="POST")
         return redirect("/operations/" + operation_id, code=303)
+    explanation = (
+        "No user or library was created. Abandoning releases the reserved username so you can submit a new user."
+        if operation["kind"] == "provision"
+        else "Existing access is not restored. After abandoning, open the user and submit a corrected action."
+    )
     return render_template(
         "confirm.html",
         section="users",
         heading="Abandon this incomplete change?",
-        explanation="Existing access is not restored. After abandoning, open the user and submit a corrected action.",
+        explanation=explanation,
         fields={},
         button="Abandon change",
         destructive=True,
@@ -942,7 +966,7 @@ def overview_page():
         identity_synced_at=summary.get("identitySyncedAt"),
         identity_stale=not summary.get("identitySyncedAt")
         or (
-            datetime.now(timezone.utc) - datetime.fromisoformat(summary["identitySyncedAt"].replace("Z", "+00:00"))
+            datetime.now(UTC) - datetime.fromisoformat(summary["identitySyncedAt"].replace("Z", "+00:00"))
         ).total_seconds()
         > 90,
     )

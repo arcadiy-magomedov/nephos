@@ -4,9 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from PIL import Image, ImageOps
 import numpy as np
 import pillow_heif
+from PIL import Image, ImageOps
 
 pillow_heif.register_heif_opener()
 ROOT = Path(__file__).resolve().parent

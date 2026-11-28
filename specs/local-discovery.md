@@ -1,8 +1,9 @@
 # Local server discovery
 
-The iOS wizard offers **Find nearby servers** using Bonjour/DNS-SD over mDNS.
-Discovery is optional and user-initiated; manual URLs remain available. Selecting
-a result performs HTTPS and OIDC preflight, then asks for explicit server trust.
+Server announcement tooling supports Bonjour/DNS-SD over mDNS for compatible
+clients. The current native iOS app uses the HTTPS origin in its QR enrollment
+payload, not a discovery wizard or manually entered URL. A discovery-capable
+client must perform HTTPS/OIDC preflight and obtain explicit server trust.
 DNS-SD is not an authentication mechanism and never provisions an account or CA.
 
 ## Announce from the gateway host
@@ -20,7 +21,7 @@ stays in the foreground; stopping it withdraws the record. A deployment can
 supervise this command with launchd/systemd. It does not modify global DNS,
 open ports, trust certificates or install an automatic startup job.
 
-For persistent Linux advertising, edit the port and URL in `nephos.service`,
+For persistent Linux advertising, edit the port and URL in `deploy/discovery/nephos.service`,
 then install it in `/etc/avahi/services/nephos.service` on the gateway host.
 Avahi loads service files automatically. Do not run both publishers for the
 same instance. Removing the service file withdraws the persistent announcement.
@@ -39,7 +40,7 @@ CAs still require explicit OS trust; public certificates avoid that setup step.
   Maximum 251 UTF-8 bytes, leaving room for `url=` in a 255-byte TXT entry.
 - Never advertise credentials, invitation links, tokens, user lists or media.
 
-iOS reads the canonical hostname from TXT rather than turning an SRV result into
+A discovery-capable client must read the canonical hostname from TXT rather than turning an SRV result into
 an IP-based HTTPS URL. Invalid/unsupported records are omitted with a notice.
 Results are deduplicated by URL, capped at 32, updated when services disappear,
 and cleared when browsing stops. Queued callbacks cannot repopulate a stopped
@@ -48,6 +49,6 @@ search. Selection never sends credentials to an unapproved discovered server.
 Multicast normally stays on one LAN. Guest Wi-Fi isolation, VLAN boundaries,
 firewalls and most VPNs can block it. Allow mDNS UDP 5353 on the intended LAN
 only; do not expose it to the internet. No multicast entitlement is needed for
-the system Bonjour browsing API; both iOS configurations declare the service
-type and explain Local Network access. Discovery stops when the wizard leaves
-the server step, disappears, or goes to the background.
+the system Bonjour browsing API. An iOS discovery implementation must declare the
+service type and explain Local Network access in its app configuration. A discovery
+client should stop browsing when it leaves the server step or goes to the background.

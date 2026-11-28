@@ -2,12 +2,12 @@
 
 import contextlib
 import io
-from pathlib import Path
 import secrets
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import secret_scan

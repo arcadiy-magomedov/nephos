@@ -2,9 +2,9 @@
 """Generate a throwaway localhost CA and edge certificate, never disable TLS verification."""
 
 import os
-from pathlib import Path
-import subprocess
 import ssl
+import subprocess
+from pathlib import Path
 
 
 def main():

@@ -23,7 +23,7 @@ public sealed class FaceWorker(IFaceRepository repository, IAnalysisSourceClient
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                logger.LogWarning("Face worker unavailable ({ErrorType}); retrying", exception.GetType().Name);
+                FaceLog.WorkerUnavailable(logger, exception.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
@@ -55,7 +55,7 @@ public sealed class FaceWorker(IFaceRepository repository, IAnalysisSourceClient
             var error = permanent ? "invalid_media_or_provenance" : exception is OperationCanceledException ? "timeout" : "dependency_unavailable";
             await repository.FailAsync(job, error, permanent, stoppingToken);
             Outcomes.Add(1, new KeyValuePair<string, object?>("outcome", error));
-            logger.LogWarning("Face analysis unsuccessful ({ErrorCode}); attempt {Attempt}", error, job.Attempts);
+            FaceLog.AnalysisFailed(logger, error, job.Attempts);
         }
     }
 }

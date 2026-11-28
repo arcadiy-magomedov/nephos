@@ -10,6 +10,11 @@ indent_style = space
 [*.cs]
 indent_size = 4
 csharp_style_namespace_declarations = file_scoped:warning
+dotnet_diagnostic.IDE0005.severity = warning
 
 [*.{json,yml,yaml,csproj,props}]
 indent_size = 2
+
+[tests/**/*.cs]
+# Descriptive xUnit test names intentionally separate scenario words with underscores.
+dotnet_diagnostic.CA1707.severity = none

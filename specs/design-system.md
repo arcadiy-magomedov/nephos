@@ -58,12 +58,12 @@ marked gallery section. The path runs Sign in → Scan → Signing in; invalid o
 branch from Scan to QR error, and Retry returns to Scan. The error states have
 separate prototype starts because the prototype does not simulate conditional
 scan outcomes. Existing static previews predate the theme-aware consolidation:
-[entire mobile canvas](previews/mobile-app-canvas.png)
-and [mobile QR flow](previews/mobile-qr-flow.png).
+[entire mobile canvas](../design/penpot/previews/mobile-app-canvas.png)
+and [mobile QR flow](../design/penpot/previews/mobile-qr-flow.png).
 
 **Approved baseline:** The original light/dark mobile sign-in flow, including its scan and error
 states, was approved on 2026-11-08. Its named Penpot snapshot and
-[approved export](exports/nephos-mobile-sign-in-approved.penpot) preserve the
+[approved export](../design/penpot/exports/nephos-mobile-sign-in-approved.penpot) preserve the
 baseline. The export contains the whole file, but approval covers only sign-in.
 The current theme-aware consolidation is a draft for review; the original
 interaction paths and both palettes are preserved.
@@ -72,8 +72,8 @@ The user-app boards preserve the gallery, filters, source and sharing
 indicators, selection, and navigation as visual examples. They use public-domain
 sample photos credited on the board. The new palette and components are **draft**
 designs and have not yet been adopted by the shipped iOS app. Portable previews:
-[foundations](previews/user-foundations.png), [components](previews/user-components.png),
-and [gallery](previews/user-app-previews.png).
+[foundations](../design/penpot/previews/user-foundations.png), [components](../design/penpot/previews/user-components.png),
+and [gallery](../design/penpot/previews/user-app-previews.png).
 
 The mobile gallery uses twelve complete, linked **MediaThumbnail** instances.
 The component on **04 · User components** contains the image, source/shared
@@ -116,12 +116,12 @@ Video uses a static
 poster and playback-control illustration, not an embedded playback engine.
 
 Current portable previews:
-[gallery](previews/mobile-gallery.png),
-[photo viewer](previews/mobile-photo-viewer.png),
-[video viewer](previews/mobile-video-viewer.png),
-[anchored menu](previews/mobile-media-menu.png),
-[menu variants](previews/mobile-media-menu-variants.png), and
-[deletion confirmations](previews/mobile-delete-confirmations.png).
+[gallery](../design/penpot/previews/mobile-gallery.png),
+[photo viewer](../design/penpot/previews/mobile-photo-viewer.png),
+[video viewer](../design/penpot/previews/mobile-video-viewer.png),
+[anchored menu](../design/penpot/previews/mobile-media-menu.png),
+[menu variants](../design/penpot/previews/mobile-media-menu-variants.png), and
+[deletion confirmations](../design/penpot/previews/mobile-delete-confirmations.png).
 These show the current Dark appearance; the new viewer/dialog states have not
 been visually rechecked in Light. The separate mobile theme preview currently
 contains sign-in and gallery only, not the new viewer and deletion flows.
@@ -129,7 +129,7 @@ contains sign-in and gallery only, not the new viewer and deletion flows.
 The separate admin canvas includes user creation, QR enrollment,
 connected devices, and device revocation with confirmation, pending, success,
 and failure/retry states. The arrows document the flows, and View mode has
-clickable prototype paths. See the [admin flow preview](previews/admin-flow.png).
+clickable prototype paths. See the [admin flow preview](../design/penpot/previews/admin-flow.png).
 Revocation dialogs use a **selected-session template**: the target name and
 session details must come from the selected device, not a hardcoded example.
 The success screen removes that selected session while retaining other sessions.

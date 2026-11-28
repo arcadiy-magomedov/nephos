@@ -1,16 +1,16 @@
-extends: relaxed
+extends: default
 ignore: |
   **/bin/
   **/obj/
   **/.venv/
+  **/node_modules/
+  **/target/
   ios/.build/
   ios/.derivedData/
   artifacts/
 rules:
+  document-start: disable
   line-length: disable
-  trailing-spaces: enable
-  empty-lines:
-    max: 2
   truthy:
     allowed-values: ['true', 'false']
     check-keys: false

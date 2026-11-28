@@ -1,6 +1,5 @@
 """Deterministic session, browser-boundary and signed OIDC claim regressions."""
 
-from contextlib import ExitStack
 import logging
 import os
 import re
@@ -10,6 +9,7 @@ import time
 import types
 import unittest
 import urllib.error
+from contextlib import ExitStack
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -452,8 +452,8 @@ class AdminAuthTests(unittest.TestCase):
                 exchange.assert_not_called()
 
     def test_provider_outage_and_session_write_failure_do_not_redirect_to_login(self):
-        from requests.exceptions import ConnectionError
         from redis.exceptions import ConnectionError as StoreError
+        from requests.exceptions import ConnectionError
 
         with patch.object(self.web.provider, "load_server_metadata", side_effect=ConnectionError):
             self.assertEqual(self.get("/login").status_code, 503)
@@ -505,8 +505,8 @@ class AdminAuthTests(unittest.TestCase):
 
     def test_real_signed_claim_validation_checks_issuer_audience_nonce_expiry_and_signature(self):
         from joserfc import jwt
-        from joserfc.jwk import RSAKey
         from joserfc.errors import JoseError
+        from joserfc.jwk import RSAKey
 
         key = RSAKey.generate_key()
         claims = {
@@ -542,3 +542,93 @@ class AdminAuthTests(unittest.TestCase):
                     parse({**claims, **changed})
             with self.assertRaises(JoseError):
                 parse(claims, RSAKey.generate_key())
+
+    def test_revoked_invitation_renders_terminal_and_cancel_409_redirects(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        invite = "00000000-0000-0000-0000-000000000002"
+        user = {"subject": subject, "login": "known", "displayName": "Known", "enabled": True}
+        revoked = {"inviteId": invite, "status": "revoked", "expiresAt": "2026-11-01T15:30:00Z"}
+
+        def identity(path, data=None, method=None):
+            if method == "DELETE":
+                raise urllib.error.HTTPError(path, 409, "Conflict", {}, None)
+            if data:
+                return revoked
+            if path.endswith("/devices"):
+                return {"devices": []}
+            return {"invitations": [revoked]}
+
+        with (
+            patch.object(self.web, "library_call", return_value={"user": user, "libraries": [], "memberships": []}),
+            patch.object(self.web, "identity_call", side_effect=identity),
+        ):
+            path = f"/users/{subject}/invitations/new"
+            page = self.get(path).get_data(as_text=True)
+            csrf = re.search(r'name="csrf" value="([^"]+)"', page)[1]
+            command = re.findall(r'name="command" value="([^"]+)"', page)[-1]
+            response = self.client.post(
+                path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf, "command": command}
+            )
+            html = response.get_data(as_text=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Revoked", html)
+            self.assertRegex(html, r'<form id="cancel-invitation"[^>]+hidden>')
+            self.assertRegex(html, r'id="invitation-finished-actions"\s*><a[^>]+>Close</a>')
+            self.assertNotIn('<img class="qr"', html)
+
+            cancelled = self.client.post(
+                f"/users/{subject}/invitations/{invite}/cancel",
+                base_url=self.origin,
+                headers={"Origin": self.origin},
+                data={"csrf": csrf},
+            )
+            self.assertEqual(cancelled.status_code, 303)
+            self.assertEqual(cancelled.headers["Location"], "/users/" + subject)
+            body = self.get(cancelled.headers["Location"]).get_data(as_text=True)
+            self.assertIn("already used, expired, or revoked", body)
+
+    def test_device_revoke_handles_precheck_outage_and_concurrent_404(self):
+        self.seed()
+        subject = "00000000-0000-0000-0000-000000000001"
+        selected = "00000000-0000-0000-0000-000000000002"
+        user = {"subject": subject, "login": "known", "displayName": "Known", "enabled": True}
+        device = {"id": selected, "name": "Selected phone", "lastAccess": "2026-11-01T15:30:00Z"}
+        mode = {"value": "ok"}
+
+        def identity(path, data=None, method=None):
+            if method == "DELETE":
+                raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
+            if path.endswith("/devices"):
+                if mode["value"] == "outage":
+                    raise urllib.error.URLError("identity unavailable")
+                return {"devices": [device]}
+            return {"invitations": []}
+
+        with (
+            patch.object(self.web, "library_call", return_value={"user": user, "libraries": [], "memberships": []}),
+            patch.object(self.web, "identity_call", side_effect=identity),
+        ):
+            path = f"/users/{subject}/devices/{selected}/revoke"
+            csrf = re.search(r'name="csrf" value="([^"]+)"', self.get(path).get_data(as_text=True))[1]
+            mode["value"] = "outage"
+            outage = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf})
+            self.assertEqual(outage.status_code, 503)
+            self.assertIn("Revocation not confirmed", outage.get_data(as_text=True))
+
+            mode["value"] = "ok"
+            gone = self.client.post(path, base_url=self.origin, headers={"Origin": self.origin}, data={"csrf": csrf})
+            self.assertEqual(gone.status_code, 303)
+            self.assertEqual(gone.headers["Location"], "/users/" + subject)
+            self.assertIn("no longer connected", self.get(gone.headers["Location"]).get_data(as_text=True))
+
+    def test_abandon_allows_unstarted_failed_provision_and_rejects_started_provision(self):
+        self.seed()
+        op_id = "00000000-0000-0000-0000-000000000009"
+        base = {"id": op_id, "kind": "provision", "status": "failed"}
+        with patch.object(self.web, "library_call", return_value={**base, "step": "reserved"}):
+            response = self.get(f"/operations/{op_id}/abandon")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("releases the reserved username", response.get_data(as_text=True))
+        with patch.object(self.web, "library_call", return_value={**base, "step": "identity-created"}):
+            self.assertEqual(self.get(f"/operations/{op_id}/abandon").status_code, 409)

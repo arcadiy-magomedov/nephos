@@ -78,7 +78,7 @@ public sealed class ProjectionWorker : BackgroundService
                             using var activity = MediaProtocol.Activities.StartActivity("project verified asset", ActivityKind.Consumer, parent);
                             if (!await repository.ProjectAsync(message, sessionCts.Token))
                             {
-                                logger.LogError("Asset publication rejected because its destination membership no longer exists");
+                                LibraryLog.AssetMembershipMissing(logger);
                                 if (!sessionCts.IsCancellationRequested && channel.IsOpen)
                                     await channel.BasicNackAsync(deliveryTag, false, false, sessionCts.Token);
                             }
@@ -87,7 +87,7 @@ public sealed class ProjectionWorker : BackgroundService
                         }
                         catch (JsonException)
                         {
-                            logger.LogError("Malformed asset publication moved to the dead-letter queue");
+                            LibraryLog.AssetPublicationMalformed(logger);
                             if (!sessionCts.IsCancellationRequested && channel.IsOpen)
                                 await channel.BasicNackAsync(deliveryTag, false, false, sessionCts.Token);
                         }
@@ -95,7 +95,7 @@ public sealed class ProjectionWorker : BackgroundService
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
                 {
-                    logger.LogError("Projection worker consumer closed; reconnecting");
+                    LibraryLog.ProjectionConsumerClosed(logger);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
@@ -103,7 +103,7 @@ public sealed class ProjectionWorker : BackgroundService
                 RabbitMQ.Client.Exceptions.BrokerUnreachableException or RabbitMQ.Client.Exceptions.AlreadyClosedException or TimeoutException ||
                 MediaProtocol.IsForcedBrokerShutdown(exception))
             {
-                logger.LogError("Projection worker will reconnect after {ErrorType}", exception.GetType().Name);
+                LibraryLog.ProjectionFailed(logger, exception.GetType().Name);
             }
             await Task.Delay(2000, stoppingToken);
         }

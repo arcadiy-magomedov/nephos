@@ -13,13 +13,11 @@ public sealed record StagedOriginal(string Path, string Hash, long Size, bool Is
 public interface IVolumeStore
 {
     Task<string> SavePartAsync(Guid id, int part, Stream source, int size, CancellationToken token);
-    Task<string> AssembleAsync(Upload upload, CancellationToken token);
     Task<StagedOriginal> StageVerifiedAsync(Upload upload, Guid leaseId, CancellationToken token);
     Task<Dictionary<int, string>?> PreparePreviewsAsync(string sourcePath, string hash, string mediaType, Guid leaseId, CancellationToken token, int? singleSize = null);
     void PublishStaged(StagedOriginal staged, Dictionary<int, string>? preparedPreviews);
     void PublishPreparedPreviews(string hash, Dictionary<int, string> preparedPreviews);
     void CleanupPreparedPreviews(Dictionary<int, string>? preparedPreviews);
-    Task<bool> CreatePreviewAsync(string hash, string mediaType, CancellationToken token, int size = 512);
     string OriginalPath(string hash);
     string PreviewPath(string hash, int size = 512);
     string ResolvePreviewPath(string hash, int size = 512);
@@ -28,7 +26,7 @@ public interface IVolumeStore
     bool HasSpace(long bytes);
 }
 
-public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStore> logger, IHttpClientFactory clients) : IVolumeStore
+public sealed partial class VolumeStore(IConfiguration configuration, ILogger<VolumeStore> logger, IHttpClientFactory clients) : IVolumeStore
 {
     private readonly string root = Path.GetFullPath(configuration["Storage:Root"]
         ?? throw new InvalidOperationException("Storage:Root is required."));
@@ -194,7 +192,8 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         string? syncedShard = null;
         foreach (var (side, temporary) in preparedPreviews)
         {
-            if (!File.Exists(temporary)) continue;
+            if (!File.Exists(temporary))
+                throw new FileNotFoundException("Prepared preview is missing.", temporary);
             var destination = PreviewPath(hash, side);
             var shard = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(shard);
@@ -208,7 +207,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             catch (IOException) when (File.Exists(destination))
             {
                 if (File.Exists(temporary)) File.Delete(temporary);
-                logger.LogDebug("An immutable preview variant was already published concurrently");
+                StorageLog.PreviewPublishedConcurrently(logger);
             }
         }
         if (syncedShard is not null)
@@ -223,13 +222,6 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         if (preparedPreviews is null) return;
         foreach (var path in preparedPreviews.Values)
             if (File.Exists(path)) File.Delete(path);
-    }
-
-    public async Task<string> AssembleAsync(Upload upload, CancellationToken token)
-    {
-        var staged = await StageVerifiedAsync(upload, Guid.NewGuid(), token);
-        PublishStaged(staged, null);
-        return staged.Hash;
     }
 
     public async Task<Dictionary<int, string>?> PreparePreviewsAsync(
@@ -263,7 +255,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             try { process.Start(); }
             catch (Win32Exception)
             {
-                logger.LogWarning("Video preview tool is unavailable; original remains stored without a preview");
+                StorageLog.PreviewToolUnavailable(logger);
                 return null;
             }
             var errorDrain = process.StandardError.BaseStream.CopyToAsync(Stream.Null, token);
@@ -277,14 +269,14 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
                 await process.WaitForExitAsync(CancellationToken.None);
                 if (File.Exists(temporary)) File.Delete(temporary);
                 token.ThrowIfCancellationRequested();
-                logger.LogWarning("Preview generation exceeded its time budget");
+                StorageLog.PreviewTimedOut(logger);
                 return null;
             }
             await Task.WhenAll(errorDrain, outputDrain);
             if (process.ExitCode != 0 || !File.Exists(temporary))
             {
                 if (File.Exists(temporary)) File.Delete(temporary);
-                logger.LogWarning("Preview unavailable for an unsupported or undecodable resource");
+                StorageLog.PreviewUnsupported(logger);
                 return null;
             }
             return new Dictionary<int, string> { [targetSize] = temporary };
@@ -296,15 +288,6 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         }
     }
 
-    public async Task<bool> CreatePreviewAsync(string hash, string mediaType, CancellationToken token, int size = 512)
-    {
-        if (File.Exists(ResolvePreviewPath(hash, size))) return true;
-        var prepared = await PreparePreviewsAsync(OriginalPath(hash), hash, mediaType, Guid.NewGuid(), token, size);
-        if (prepared is null) return false;
-        PublishPreparedPreviews(hash, prepared);
-        return true;
-    }
-
     private sealed record Derivatives(string SourceSha256, int Width, int Height, Dictionary<string, byte[]> Variants);
 
     private async Task<Dictionary<int, string>?> RenderImagesToTempAsync(
@@ -314,7 +297,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
         var endpoint = configuration["Services:Derivatives"];
         if (string.IsNullOrEmpty(endpoint))
         {
-            logger.LogWarning("Image derivative service is not configured; original remains available");
+            StorageLog.DerivativesUnconfigured(logger);
             return null;
         }
         var written = new Dictionary<int, string>();
@@ -323,7 +306,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             await using var original = File.OpenRead(sourcePath);
             if (original.Length > 20 * 1024 * 1024)
             {
-                logger.LogWarning("Image exceeds the derivative input budget; original remains available");
+                StorageLog.DerivativeInputTooLarge(logger);
                 return null;
             }
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint + "/v1/render");
@@ -334,7 +317,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             using var response = await clients.CreateClient("derivatives").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.RequestEntityTooLarge)
             {
-                logger.LogWarning("Image derivative rejected an unsupported, corrupt or oversized image");
+                StorageLog.DerivativeRejected(logger);
                 return null;
             }
             response.EnsureSuccessStatusCode();
@@ -348,19 +331,19 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
                 if (output.Length + read > maximumResponse) throw new IOException("Derivative response exceeds budget.");
                 output.Write(buffer, 0, read);
             }
-            var result = JsonSerializer.Deserialize<Derivatives>(output.ToArray(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var result = JsonSerializer.Deserialize<Derivatives>(output.ToArray(), JsonSerializerOptions.Web);
             if (result is null || result.SourceSha256 != hash || result.Width <= 0 || result.Height <= 0 ||
                 (long)result.Width * result.Height > 64_000_000 || result.Variants is null ||
                 result.Variants.Count != PreviewSizes.All.Length ||
-                PreviewSizes.All.Any(side => !result.Variants.TryGetValue(side.ToString(), out var bytes) ||
+                PreviewSizes.All.Any(side => !result.Variants.TryGetValue(side.ToString(System.Globalization.CultureInfo.InvariantCulture), out var bytes) ||
                     bytes is not { Length: >= 4 and <= 8 * 1024 * 1024 } || bytes[0] != 0xff || bytes[1] != 0xd8))
                 throw new IOException("Invalid derivative provenance or variant response.");
             foreach (var side in PreviewSizes.All)
             {
                 if (File.Exists(PreviewPath(hash, side))) continue;
                 var temporary = Path.Combine(workDirectory, $"{hash}.{leaseId:N}.{side}.tmp");
-                await File.WriteAllBytesAsync(temporary, result.Variants[side.ToString()], token);
                 written[side] = temporary;
+                await File.WriteAllBytesAsync(temporary, result.Variants[side.ToString(System.Globalization.CultureInfo.InvariantCulture)], token);
             }
             return written;
         }
@@ -368,8 +351,7 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             error is OperationCanceledException && !token.IsCancellationRequested)
         {
             CleanupPreparedPreviews(written);
-            logger.LogWarning("Image derivatives unavailable ({ErrorType}); original is retained and preview requests may retry",
-                error.GetType().Name);
+            StorageLog.DerivativesUnavailable(logger, error.GetType().Name);
             return null;
         }
         catch
@@ -412,20 +394,28 @@ public sealed class VolumeStore(IConfiguration configuration, ILogger<VolumeStor
             throw new PlatformNotSupportedException("The volume durability adapter requires a Unix filesystem.");
         var descriptor = NativeOpen(path, 0);
         if (descriptor < 0) throw new IOException("Cannot open directory for durability flush.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        int closeResult;
+        int closeError;
         try
         {
             if (NativeFsync(descriptor) != 0)
                 throw new IOException("Directory durability flush failed.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }
-        finally { NativeClose(descriptor); }
+        finally
+        {
+            closeResult = NativeClose(descriptor);
+            closeError = Marshal.GetLastPInvokeError();
+        }
+        if (closeResult != 0)
+            throw new IOException("Cannot close directory durability descriptor.", new Win32Exception(closeError));
     }
 
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int NativeOpen(string path, int flags);
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int NativeOpen(string path, int flags);
     [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static extern int NativeFsync(int descriptor);
-    [DllImport("libc", EntryPoint = "close")]
+    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
     private static extern int NativeClose(int descriptor);
-    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
-    private static extern int NativeLink(string existingPath, string newPath);
+    [LibraryImport("libc", EntryPoint = "link", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int NativeLink(string existingPath, string newPath);
 }

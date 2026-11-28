@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Append new development settings without rotating existing credentials."""
 
-import os
 import base64
-from pathlib import Path
+import os
 import secrets
+from pathlib import Path
 
 path = Path(__file__).resolve().parents[1] / ".env"
 existing = {line.split("=", 1)[0] for line in path.read_text().splitlines() if "=" in line}

@@ -2,11 +2,13 @@
 
 import importlib.util
 import io
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+from service_diagnostics import print_service_diagnostics
 
 SPEC = importlib.util.spec_from_file_location("native_qr_ci", Path(__file__).with_name("native-qr-ci.py"))
 fixture_module = importlib.util.module_from_spec(SPEC)
@@ -14,6 +16,18 @@ SPEC.loader.exec_module(fixture_module)
 
 
 class FixtureTests(unittest.TestCase):
+    def test_shared_diagnostics_never_print_raw_service_failure_data(self):
+        with patch("sys.stderr", new_callable=io.StringIO) as output:
+            print_service_diagnostics(
+                "java.lang.IllegalStateException: bearer private-token\n"
+                "at app.nephos.keycloak.EnrollmentStore.save(EnrollmentStore.java:33)\n"
+                "SQL: private invitation secret\n"
+            )
+        self.assertIn("java.lang.IllegalStateException", output.getvalue())
+        self.assertIn("EnrollmentStore.java:33", output.getvalue())
+        self.assertNotIn("private-token", output.getvalue())
+        self.assertNotIn("private invitation", output.getvalue())
+
     def fixture(self):
         args = type("Args", (), {})()
         return fixture_module.Fixture(args)
@@ -61,9 +75,11 @@ class FixtureTests(unittest.TestCase):
     def test_failed_command_does_not_echo_service_secrets(self):
         fixture = self.fixture()
         completed = subprocess.CompletedProcess(["service"], 1, stdout=b"private bearer token")
-        with patch.object(fixture_module.subprocess, "run", return_value=completed):
-            with self.assertRaises(fixture_module.FixtureError) as error:
-                fixture.command(["service"])
+        with (
+            patch.object(fixture_module.subprocess, "run", return_value=completed),
+            self.assertRaises(fixture_module.FixtureError) as error,
+        ):
+            fixture.command(["service"])
         self.assertNotIn("private bearer token", str(error.exception))
 
     def test_cleanup_terminates_real_fixture_owned_group_and_removes_data(self):

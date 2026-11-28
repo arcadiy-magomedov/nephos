@@ -7,8 +7,6 @@ import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
-import re
 import secrets
 import shutil
 import signal
@@ -22,6 +20,9 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from pathlib import Path
+
+from service_diagnostics import print_service_diagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 KEYCLOAK_VERSION = "26.8.1"
@@ -123,10 +124,10 @@ class Fixture:
             raise FixtureError("This fixture requires macOS and an iOS Simulator.")
         for name in ("dotnet", "java", "initdb", "postgres", "psql", "openssl", "caddy", "xcrun"):
             if not shutil.which(name, path=self.env.get("PATH")):
-                raise FixtureError(f"Missing {name}; see deploy/native-qr-ci.md.")
+                raise FixtureError(f"Missing {name}; see specs/native-qr-ci.md.")
         try:
-            import qrcode  # noqa: F401
             import PIL.Image  # noqa: F401
+            import qrcode  # noqa: F401
         except ImportError:
             raise FixtureError("Missing qrcode[pil]==8.2; install the fixture requirements.") from None
         java = self.command(["java", "-version"]).decode()
@@ -204,17 +205,17 @@ class Fixture:
             ],
             env={
                 **self.env,
-                **{
-                    name: self.password
-                    for name in (
+                **dict.fromkeys(
+                    (
                         "PGPASSWORD",
                         "LIBRARY_OWNER_PASSWORD",
                         "LIBRARY_APP_PASSWORD",
                         "STORAGE_OWNER_PASSWORD",
                         "STORAGE_APP_PASSWORD",
                         "KEYCLOAK_DB_PASSWORD",
-                    )
-                },
+                    ),
+                    self.password,
+                ),
             },
         )
         for project in ("Nephos.Migrations", "Nephos.Library.Api"):
@@ -537,15 +538,9 @@ class Fixture:
             shutil.rmtree(self.work)
 
     def diagnostics(self):
-        # Exception classes and our Java source locations are useful without exposing
-        # log messages, request bodies, SQL parameters, URLs, tokens, or stack locals.
-        names = set()
-        for path in self.work.glob("process-*.log"):
-            text = path.read_text(errors="replace")
-            names.update(re.findall(r"\b([A-Za-z][\w.$]*(?:Exception|Error)):", text))
-            names.update(re.findall(r"\bat (app\.nephos\.keycloak\.[\w.$]+\([\w.]+\.java:\d+\))", text))
-        if names:
-            print("Sanitized service exception locations: " + ", ".join(sorted(names)), file=sys.stderr)
+        print_service_diagnostics(
+            "\n".join(path.read_text(errors="replace") for path in self.work.glob("process-*.log"))
+        )
 
     def run(self):
         self.preflight()

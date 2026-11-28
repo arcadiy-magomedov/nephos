@@ -10,7 +10,7 @@
             }
             try Keychain.remove()
             let qr = EnrollmentQR(
-                v: 1, origin: "https://native.example.test", inviteId: UUID().uuidString.lowercased(),
+                version: 1, origin: "https://native.example.test", inviteId: UUID().uuidString.lowercased(),
                 secret: Hashing.base64URL(Data(repeating: 11, count: 32)))
             let connection = Connection(
                 baseURL: URL(string: qr.origin)!,
@@ -31,6 +31,11 @@
             guard status == errSecSuccess, try Keychain.load()?.subject == "legacy" else {
                 throw ClientError.invalid("Legacy session did not migrate.")
             }
+            try checkRecovery(qr: qr, connection: connection, legacy: legacy)
+            try Keychain.remove()
+        }
+
+        private static func checkRecovery(qr: EnrollmentQR, connection: Connection, legacy: Credentials) throws {
             let first = try Keychain.prepare(qr: qr, connection: connection)
             let resumed = try Keychain.prepare(qr: qr, connection: connection)
             guard first.requestID == resumed.requestID, first.privateKey == resumed.privateKey,
@@ -60,7 +65,6 @@
                 try Keychain.refresh(legacy, previous: legacy)
                 throw ClientError.invalid("An old account's refresh replaced the newly enrolled account.")
             } catch is CancellationError {}
-            try Keychain.remove()
         }
     }
 #endif

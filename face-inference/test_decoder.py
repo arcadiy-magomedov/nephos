@@ -4,19 +4,18 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import runpy
 import struct
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
-from PIL import Image
-
-from decoder import ImageRejected, MAX_BYTES, MAX_PIXELS, decode_rgb
+from decoder import MAX_BYTES, MAX_PIXELS, ImageRejected, decode_rgb
 from infer import analyze
+from PIL import Image
 from worker_pool import WorkerTimeoutError
 
 ROOT = Path(__file__).resolve().parent
@@ -166,9 +165,11 @@ class HeifDecoderTests(unittest.TestCase):
             for position in (8, 16):
                 data = bytearray(self.data)
                 data[position : position + 4] = brand
-                with self.subTest(brand=brand, position=position):
-                    with self.assertRaisesRegex(ImageRejected, "^unsupported_sequence$"):
-                        decode_rgb(bytes(data))
+                with (
+                    self.subTest(brand=brand, position=position),
+                    self.assertRaisesRegex(ImageRejected, "^unsupported_sequence$"),
+                ):
+                    decode_rgb(bytes(data))
         for box in (b"moov", b"moof", b"styp"):
             with self.subTest(box=box), self.assertRaisesRegex(ImageRejected, "^unsupported_sequence$"):
                 decode_rgb(self.data + struct.pack(">I4s", 8, box))
@@ -203,9 +204,11 @@ class HeifDecoderTests(unittest.TestCase):
         index = data.index(b"ispe")
         data[index + 8 : index + 16] = struct.pack(">II", 9000, 8000)
         self.assertGreater(9000 * 8000, MAX_PIXELS)
-        with patch("pillow_heif.as_plugin.HeifImageFile.load", side_effect=AssertionError("pixels decoded")):
-            with self.assertRaisesRegex(ImageRejected, "^pixel_limit$"):
-                decode_rgb(bytes(data))
+        with (
+            patch("pillow_heif.as_plugin.HeifImageFile.load", side_effect=AssertionError("pixels decoded")),
+            self.assertRaisesRegex(ImageRejected, "^pixel_limit$"),
+        ):
+            decode_rgb(bytes(data))
 
     def test_isolated_process_preserves_hash_and_rejects_bad_data(self):
         result = subprocess.run(

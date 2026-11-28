@@ -38,9 +38,9 @@ container. It does **not** make the entire platform complete.
 The face service **does not grant authority merely because the caller possesses
 the Storage service key**. The Library and gateway now implement these contracts:
 
-1. `GET /v1/analysis/access`, normal JWT, **204** only for a currently enabled
-   platform member, **403** otherwise. Faces forwards the original bearer token
-   on *every* public request (there is no authorization cache).
+1. Faces validates the public JWT and checks enabled membership through
+   `GET /internal/v1/analysis/owners/{subject}/access` with the service key.
+   There is no authorization cache or second public-token introspection.
 2. `GET /internal/v1/analysis/owners/{subject}/assets/{assetId}`,
    `X-Nephos-Service-Key`, **200**
    `{ "id": UUID, "libraryId": UUID, "subject": string, "mediaType": string,
@@ -50,9 +50,9 @@ the Storage service key**. The Library and gateway now implement these contracts
    equals subject. It must be visible, not trashed, not pending, and a committed
    primary image rather than a hidden companion. Return **404** otherwise.
    The face worker checks this both before reading and before committing results.
-3. Optional `GET /internal/v1/analysis/owners/{subject}/access` with the service key
-   can expose a standalone enabled check. Faces currently does not need it:
-   the source authorization endpoint must perform that check itself.
+3. `POST /internal/v1/analysis/owners/{subject}/assets/authorize` with the service
+   key reauthorizes up to 100 returned asset IDs in a single request. Source
+   authorization also checks that the owner remains enabled.
 4. On committed Library asset visibility, durably publish/retry
    `POST http://faces-api:8080/internal/v1/faces/jobs`,
    `X-Nephos-Service-Key`, JSON `{ "assetId": UUID, "subject": uploaded_by }`.
@@ -74,7 +74,7 @@ The Storage peer endpoint is
 `GET /internal/v1/assets/{assetId}/original` with `X-Nephos-Service-Key`.
 There is no arbitrary path/URL input to either face API or inference.
 Private image processing uses `/v1/infer` and `/v1/render`. Historical paths
-remain aliases of v1 only; see [API compatibility](../specs/005-api-compatibility.md)
+remain aliases of v1 only; see [API compatibility](005-api-compatibility.md)
 for coordinated deployment and future major-version rules.
 
 ## Start without disturbing the existing stack
@@ -221,10 +221,11 @@ are neither recalculated nor erased.
 Any future color-management or tone-mapping change needs a coordinated
 preprocessing-version bump and reprocessing policy.
 
-Inference concurrency is one; each request runs a killable child with a 45-second
-wall timeout, 40-second CPU and 2-GiB address-space ceiling. The container's
-1.5-GiB memory ceiling is stricter. Model checksums are verified on startup and
-per child. Native decoder isolation is resource containment, not a proof of
+Inference concurrency defaults to one pre-warmed, killable child with a
+45-second per-request wall timeout. Children recycle after 200 requests;
+Linux address-space budgets are divided across the configured workers.
+The container has a 1.5-GiB memory ceiling. Model checksums are verified on startup
+and when a worker loads its models. Native decoder isolation is resource containment, not a proof of
 absence of decoder vulnerabilities. Production needs ordinary dependency patching.
 HEIF uses one decode thread, keeps libheif's security limits enabled, and checks
 container structure/frame count and dimensions before pixel loading (and
@@ -242,7 +243,9 @@ OpenCV Zoo revision: `48b10fa505aeb51fbd127fc60a5c660040e823b7`.
 The pinned model-directory READMEs expressly say **all files in the directory**
 are licensed under the respective license; this covers the ONNX weights, not
 merely the OpenCV Python library. Those READMEs and full licenses are retained in
-`licenses/`; upstream provenance and lengths are in `models.json`.
+`face-inference/licenses/`; upstream provenance and lengths are in
+`face-inference/models.json`. Commands and source paths in this document are
+relative to the repository root.
 
 | Model | Weight license | Bytes | SHA-256 |
 |---|---|---:|---|
@@ -260,7 +263,7 @@ generalization is implied by the weights' license.
 Pinned Python binding: **pillow-heif 1.8.1**, BSD-3-Clause source. The upstream
 prebuilt wheels also bundle **GPLv2 x265 encoding**, in addition to LGPLv3
 libheif/libde265; calling the upstream wheel merely BSD would be incorrect.
-`requirements.txt` is convenient for **local tests/fixture generation**, whose
+`face-inference/requirements.txt` is convenient for **local tests/fixture generation**, whose
 encoder produces our derived fixtures. Do not copy that development environment
 into the production image.
 
@@ -269,11 +272,11 @@ The Dockerfile instead builds the binding from its checksum-pinned source,
 other external encoders/codecs and plugin loading disabled. A build assertion
 requires the only decoder to be `libde265` and no HEVC/AVIF encoder; libheif's
 internal mask helper is not a HEVC encoder. No GPL x265 wheel or library enters
-the final image. `heif-native.json` pins URLs, lengths and SHA-256 for all three
-source archives; `build_heif.py` is the reproducible build recipe.
+the final image. `face-inference/heif-native.json` pins URLs, lengths and SHA-256 for all three
+source archives; `face-inference/build_heif.py` is the reproducible build recipe.
 
-`licenses/pillow-heif-LICENSE.txt`, `licenses/pillow-heif-LICENSES_bundled.txt`,
-`licenses/libheif-COPYING` and `licenses/libde265-COPYING` retain unmodified
+`face-inference/licenses/pillow-heif-LICENSE.txt`, `face-inference/licenses/pillow-heif-LICENSES_bundled.txt`,
+`face-inference/licenses/libheif-COPYING` and `face-inference/licenses/libde265-COPYING` retain unmodified
 upstream notices. The bundled-wheel notice describes the **development wheels**,
 not the custom decoder-only build. The runtime also includes corresponding
 unmodified sources in `/opt/heif/share/sources` and notices in
@@ -287,7 +290,7 @@ HEVC patent rights are a separate question, not granted by these licenses.
 CPython 3.12 manylinux wheels for **amd64 and arm64**, including the other
 pinned Python requirements, were resolved explicitly. The source-built runtime
 is used instead to avoid the wheel's encoder license. See
-`fixtures/heic-build-verification.json` for actual architecture/build checks,
+`face-inference/fixtures/heic-build-verification.json` for actual architecture/build checks,
 distinct from wheel availability.
 
 ## Reproducible verification

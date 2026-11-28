@@ -2,7 +2,6 @@ extern alias storage;
 
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,7 +47,7 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         if (source is not null)
         {
             cleanup = new(source, volume);
-            uploads = new(source, volume);
+            uploads = new(source, volume, NullLogger<PostgresUploadRepository>.Instance);
         }
         return Task.CompletedTask;
     }
@@ -93,7 +92,7 @@ public sealed class CleanupStorageTests : IAsyncLifetime
         { Options = "-c role=storage_app" };
         await using var db = NpgsqlDataSource.Create(runtime.ConnectionString);
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:Root"] = root }).Build();
-        var repository = new StorageAdministrationRepository(db, new PostgresUploadRepository(db, volume), config);
+        var repository = new StorageAdministrationRepository(db, new PostgresUploadRepository(db, volume, NullLogger<PostgresUploadRepository>.Instance), config);
         var before = await repository.SummaryAsync(default);
         await StoredAsync(sent: false, state: "verifying");
         var after = await repository.SummaryAsync(default);

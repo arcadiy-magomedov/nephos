@@ -1,12 +1,12 @@
 import hashlib
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import signal
 import sys
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 if str(root) not in sys.path:
@@ -26,11 +26,6 @@ from worker_pool import (  # noqa: E402
 key = os.environ["INFERENCE_KEY"]
 if len(key) < 32:
     raise RuntimeError("INFERENCE_KEY must contain at least 32 characters")
-manifest = json.loads((root / "models.json").read_text())
-for model in manifest["models"]:
-    if hashlib.sha256((root / "models" / model["file"]).read_bytes()).hexdigest() != model["sha256"]:
-        raise RuntimeError("Model checksum failed at startup")
-
 workers = parse_worker_count("INFERENCE_WORKERS", default=1, minimum=1, maximum=4)
 max_requests = parse_max_requests()
 pool = WorkerPool(
@@ -96,6 +91,10 @@ class Handler(BaseHTTPRequestHandler):
 def run_server():
     httpd = None
     try:
+        manifest = json.loads((root / "models.json").read_text())
+        for model in manifest["models"]:
+            if hashlib.sha256((root / "models" / model["file"]).read_bytes()).hexdigest() != model["sha256"]:
+                raise RuntimeError("Model checksum failed at startup")
         pool.warm()
         httpd = ThreadingHTTPServer(("0.0.0.0", 8090), Handler)
 

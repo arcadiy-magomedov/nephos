@@ -36,6 +36,8 @@ enum QREnrollmentError: String, LocalizedError {
             "invite_expired": .inviteExpired, "invite_used": .inviteUsed, "invite_cancelled": .inviteCancelled,
             "user_disabled": .userDisabled, "recovery_expired": .recoveryExpired,
             "session_revoked": .sessionRevoked, "invalid_proof": .invalidProof,
+            "invalid_dpop_proof": .invalidProof, "dpop_proof_required": .invalidProof,
+            "dpop_key_mismatch": .invalidProof, "persistent_login_not_enabled": .invalidProof,
             "temporarily_unavailable": .unavailable,
             "invite_unavailable": .inviteUnavailable, "invalid_request": .invalidRequest,
             "invalid_scope": .invalidScope,
@@ -44,10 +46,15 @@ enum QREnrollmentError: String, LocalizedError {
 }
 
 struct EnrollmentQR: Codable, Equatable, Sendable {
-    let v: Int
+    let version: Int
     let origin: String
     let inviteId: String
     let secret: String
+
+    enum CodingKeys: String, CodingKey {
+        case version = "v"
+        case origin, inviteId, secret
+    }
 
     static func parse(_ raw: String) throws -> Self {
         guard raw.utf8.count <= 2048,
@@ -64,7 +71,7 @@ struct EnrollmentQR: Codable, Equatable, Sendable {
         return value
     }
     func validate() throws {
-        guard v == 1, let parts = URLComponents(string: origin),
+        guard version == 1, let parts = URLComponents(string: origin),
             parts.scheme == "https", parts.user == nil, parts.password == nil,
             parts.query == nil, parts.fragment == nil, parts.path.isEmpty,
             let host = parts.host, !host.isEmpty, host == host.lowercased(),
@@ -104,7 +111,7 @@ struct Credentials: Codable, Sendable {
     var accessToken: String
     var refreshToken: String?
     var expiresAt: Date
-    var dpopKeyThumbprint: String? = nil
+    var dpopKeyThumbprint: String?
 }
 
 struct PendingEnrollment: Codable, Sendable {

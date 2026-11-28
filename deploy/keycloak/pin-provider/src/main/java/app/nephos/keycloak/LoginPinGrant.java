@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.Set;
 
 import jakarta.ws.rs.core.Response;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;

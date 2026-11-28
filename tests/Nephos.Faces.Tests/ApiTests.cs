@@ -21,9 +21,9 @@ namespace Nephos.Faces.Tests;
 
 public sealed class ControlledSource : IAnalysisSourceClient
 {
-    public bool Enabled = true;
+    public bool Enabled { get; set; } = true;
     public int BatchAuthorizeCalls { get; private set; }
-    public readonly Dictionary<Guid, (AnalysisSource Source, byte[] Bytes)> Sources = [];
+    public Dictionary<Guid, (AnalysisSource Source, byte[] Bytes)> Sources { get; } = [];
     public Task<bool> IsEnabledAsync(HttpContext context, CancellationToken ct) => Task.FromResult(Enabled);
     public Task<AnalysisSource?> SourceAsync(string owner, Guid assetId, CancellationToken ct) =>
         Task.FromResult(Enabled && Sources.TryGetValue(assetId, out var item) && item.Source.Subject == owner ? item.Source : null);

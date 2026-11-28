@@ -150,6 +150,9 @@ struct UploadWakePolicyTests {
         #expect(!UploadWakePolicy.showsProgress(for: halfSecondAgo, now: now.addingTimeInterval(1.5)))
     }
 
+}
+
+extension UploadWakePolicyTests {
     @Test("Active uploading and preparing items return 1-second tick")
     func uploadingAndPreparingReturnActiveInterval() {
         let uploading = makeSnapshot(pending: [makeItem(phase: .uploading)])
@@ -198,22 +201,13 @@ struct UploadWakePolicyTests {
             makeItem(id: "late", phase: .scheduled, resources: [makeResource(retryAfter: now.addingTimeInterval(12))]),
             makeItem(id: "soon", phase: .scheduled, resources: [makeResource(retryAfter: now.addingTimeInterval(5))]),
         ])
-        let livePhotoWaiting = makeSnapshot(pending: [
-            makeItem(
-                phase: .scheduled,
-                resources: [
-                    makeResource(id: "photo", phase: .ready, retryAfter: nil),
-                    makeResource(id: "video", phase: .scheduled, retryAfter: now.addingTimeInterval(9)),
-                ])
-        ])
-        let livePhotoPartiallyReady = makeSnapshot(pending: [
-            makeItem(
-                phase: .scheduled,
-                resources: [
-                    makeResource(id: "photo", phase: .scheduled, retryAfter: nil),
-                    makeResource(id: "video", phase: .scheduled, retryAfter: now.addingTimeInterval(9)),
-                ])
-        ])
+        let readyPhoto = makeResource(id: "photo", phase: .ready, retryAfter: nil)
+        let waitingPhoto = makeResource(id: "photo", phase: .scheduled, retryAfter: nil)
+        let delayedVideo = makeResource(id: "video", phase: .scheduled, retryAfter: now.addingTimeInterval(9))
+        let livePhotoWaiting = makeSnapshot(
+            pending: [makeItem(phase: .scheduled, resources: [readyPhoto, delayedVideo])])
+        let livePhotoPartiallyReady = makeSnapshot(
+            pending: [makeItem(phase: .scheduled, resources: [waitingPhoto, delayedVideo])])
 
         #expect(UploadWakePolicy.nextWait(for: shortRetry, now: now) == UploadWakePolicy.minRetryInterval)
         #expect(UploadWakePolicy.nextWait(for: midRetry, now: now) == 7.5)

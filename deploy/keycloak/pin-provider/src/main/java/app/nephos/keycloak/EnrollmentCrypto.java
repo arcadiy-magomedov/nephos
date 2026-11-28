@@ -53,7 +53,6 @@ final class EnrollmentCrypto {
     static String fingerprint(String key) {
         try {
             byte[] bytes = decode(key);
-            if (bytes.length != 65 || bytes[0] != 4) throw new IllegalArgumentException();
             publicKey(bytes);
             return encode(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (java.security.GeneralSecurityException exception) { throw new IllegalArgumentException(exception); }
@@ -66,6 +65,7 @@ final class EnrollmentCrypto {
                 + encode(Arrays.copyOfRange(point, 33, 65)) + "\"}");
     }
     private static java.security.PublicKey publicKey(byte[] bytes) throws java.security.GeneralSecurityException {
+        if (bytes.length != 65 || bytes[0] != 4) throw new IllegalArgumentException("Invalid P-256 point");
         AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
         parameters.init(new ECGenParameterSpec("secp256r1"));
         return KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(new ECPoint(
