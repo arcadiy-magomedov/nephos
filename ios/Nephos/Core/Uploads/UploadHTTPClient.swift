@@ -81,12 +81,6 @@ actor UploadHTTPClient: UploadRemote {
         return status
     }
 
-    func status(_ resource: UploadResource, item: UploadItem) async throws -> UploadResourceStatus {
-        let status: UploadResourceStatus = try await decode("v1/uploads/\(resource.id.uuidString)")
-        try status.validate(resource: resource)
-        return status
-    }
-
     func complete(_ resource: UploadResource) async throws -> UploadResourceStatus {
         let status: UploadResourceStatus = try await decode(
             "v1/uploads/\(resource.id.uuidString)/complete", method: "POST")
@@ -185,6 +179,6 @@ actor UploadHTTPClient: UploadRemote {
             }
             return data
         }
-        throw UploadFailure(status: 401, message: "The server rejected the refreshed upload session.", retryable: false)
+        throw ClientError.signedOut
     }
 }

@@ -62,7 +62,7 @@ public sealed class CleanupJob(HttpClient client, IConfiguration configuration, 
                     {
                         if (complete.StatusCode == HttpStatusCode.Conflict)
                         {
-                            logger.LogWarning("Cleanup lease expired for {AssetId}; completion will retry with a new lease", claim.AssetId);
+                            CleanupLog.LeaseExpired(logger, claim.AssetId);
                             continue;
                         }
                         complete.EnsureSuccessStatusCode();
@@ -72,7 +72,7 @@ public sealed class CleanupJob(HttpClient client, IConfiguration configuration, 
                 catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
                 {
                     failure ??= error;
-                    logger.LogWarning("Cleanup failed for {AssetId} ({ErrorType}); its lease will retry", claim.AssetId, error.GetType().Name);
+                    CleanupLog.ClaimFailed(logger, claim.AssetId, error.GetType().Name);
                 }
             }
         }
@@ -92,7 +92,7 @@ public sealed class CleanupJob(HttpClient client, IConfiguration configuration, 
             using var compact = await SendAsync(HttpMethod.Post, Endpoint("Library", "cleanup/compact-history"), null, token);
             compact.EnsureSuccessStatusCode();
         }
-        logger.LogInformation("Cleanup run completed {Completed} Library claims", completed);
+        CleanupLog.Completed(logger, completed);
         if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 

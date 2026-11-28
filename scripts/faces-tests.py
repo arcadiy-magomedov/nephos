@@ -1,9 +1,9 @@
 """Run repository/API tests against only the optional face database, without exposing credentials."""
 
-from pathlib import Path
 import argparse
 import os
 import subprocess
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--real-inference", action="store_true", help="Opt in to local model/portrait qualification.")
@@ -23,8 +23,8 @@ compose = [
     "compose.faces.yaml",
 ]
 exists = subprocess.check_output(
-    compose
-    + [
+    [
+        *compose,
         "exec",
         "-T",
         "faces-postgres",
@@ -38,8 +38,8 @@ exists = subprocess.check_output(
 ).strip()
 if exists != "1":
     subprocess.check_call(
-        compose
-        + [
+        [
+            *compose,
             "exec",
             "-T",
             "faces-postgres",
@@ -51,8 +51,8 @@ if exists != "1":
         ]
     )
     subprocess.check_call(
-        compose
-        + [
+        [
+            *compose,
             "exec",
             "-T",
             "faces-postgres",
@@ -64,8 +64,8 @@ if exists != "1":
         ]
     )
     subprocess.check_call(
-        compose
-        + [
+        [
+            *compose,
             "exec",
             "-T",
             "faces-postgres",

@@ -90,7 +90,10 @@ struct MediaViewer: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text(
-                    "Deleting from Photos can also delete this item from iCloud and other devices. Any completed Nephos backup is kept. Check Uploads before deleting your only local copy."
+                    """
+                    Deleting from Photos can also delete this item from iCloud and other devices. \
+                    Any completed Nephos backup is kept. Check Uploads before deleting your only local copy.
+                    """
                 )
             }
         }
@@ -141,7 +144,11 @@ struct MediaViewer: View {
                     if let next, library.contains(next) { item = next } else { dismiss() }
                 }
             } catch {
-                self.error = error.localizedDescription
+                if !library.contains(item) {
+                    if let next, library.contains(next) { item = next } else { dismiss() }
+                } else {
+                    self.error = error.localizedDescription
+                }
             }
         }
     }

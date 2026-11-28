@@ -132,15 +132,15 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data, IFaceVectorInd
         return await reader.ReadAsync(ct) ? ReadJob(reader) : null;
     }
 
-    public async Task FailAsync(FaceJob job, string error, bool permanent, CancellationToken ct)
+    public async Task FailAsync(FaceJob job, string errorCode, bool permanent, CancellationToken ct)
     {
         await using var c = await data.OpenConnectionAsync(ct);
         await Execute(c, """
             UPDATE jobs SET status=$1,error=$2,lease_token=NULL,lease_until=NULL,
                 available_at=now()+make_interval(secs=>least(300,attempts*attempts*5))
             WHERE id=$3 AND lease_token=$4 AND status='running'
-            """, ct, permanent ? (error == "access_denied" ? "denied" : "error") : job.Attempts >= 5 ? "error" : "queued",
-            error, job.Id, job.LeaseToken);
+            """, ct, permanent ? (errorCode == "access_denied" ? "denied" : "error") : job.Attempts >= 5 ? "error" : "queued",
+            errorCode, job.Id, job.LeaseToken);
     }
 
     private sealed record Track(Guid Id, double X, double Y, double Width, double Height, bool Manual, Guid? Person);
@@ -356,9 +356,13 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data, IFaceVectorInd
             target = Guid.NewGuid();
             await Execute(c, "INSERT INTO people(id,owner) VALUES($1,$2)", ct, target, owner);
         }
-        else if (target is not null && await ScalarId(c, "SELECT id FROM people WHERE owner=$1 AND id=$2", ct, owner, target) is null)
-            return false;
+        else if (target is not null)
+        {
+            target = await ScalarId(c, "SELECT resolve_person($1,$2)", ct, owner, target);
+            if (target is null) return false;
+        }
         var previousPeople = new HashSet<Guid>();
+        var excludedPeople = new HashSet<Guid>();
         await using (var prev = Command(c, """
             SELECT t.manual_override, t.manual_person_id, o.generated_person_id
             FROM face_tracks t LEFT JOIN observations o ON o.track_id=t.id AND o.owner=t.owner
@@ -367,16 +371,23 @@ public sealed class PostgresFaceRepository(NpgsqlDataSource data, IFaceVectorInd
         await using (var reader = await prev.ExecuteReaderAsync(ct))
             while (await reader.ReadAsync(ct))
             {
-                var p = reader.GetBoolean(0)
-                    ? (reader.IsDBNull(1) ? (Guid?)null : reader.GetGuid(1))
-                    : (reader.IsDBNull(2) ? (Guid?)null : reader.GetGuid(2));
-                if (p is Guid pid) previousPeople.Add(pid);
+                var manual = reader.IsDBNull(1) ? (Guid?)null : reader.GetGuid(1);
+                var generated = reader.IsDBNull(2) ? (Guid?)null : reader.GetGuid(2);
+                var current = reader.GetBoolean(0) ? manual : generated;
+                if (current is Guid pid) previousPeople.Add(pid);
+                if (generated is Guid gid && gid != target) excludedPeople.Add(gid);
+                if (reader.GetBoolean(0) && manual is Guid mid && mid != target) excludedPeople.Add(mid);
             }
-        await Execute(c, """
-            INSERT INTO track_exclusions(owner,track_id,person_id)
-            SELECT $1,$2,generated_person_id FROM observations WHERE owner=$1 AND track_id=$2 AND generated_person_id IS NOT NULL
-            ON CONFLICT DO NOTHING
-            """, ct, owner, faceId);
+        foreach (var excluded in excludedPeople)
+            await Execute(c, """
+                INSERT INTO track_exclusions(owner,track_id,person_id) VALUES($1,$2,$3)
+                ON CONFLICT DO NOTHING
+                """, ct, owner, faceId, excluded);
+        if (target is Guid assigned)
+            await Execute(c, """
+                DELETE FROM track_exclusions WHERE owner=$1 AND track_id=$2
+                AND resolve_person(owner,person_id)=$3
+                """, ct, owner, faceId, assigned);
         await Execute(c, "UPDATE face_tracks SET manual_override=true,manual_person_id=$1 WHERE owner=$2 AND id=$3", ct, target, owner, faceId);
         if (target is Guid targetPerson) previousPeople.Add(targetPerson);
         foreach (var personId in previousPeople)

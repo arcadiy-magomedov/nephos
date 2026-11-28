@@ -81,7 +81,8 @@ try:
         assert "headroom" in result["title"]
         smoke.request(base + "/v1/uploads/" + identifier, token=token, expected=404)
         print(
-            "PASS: real insufficient-volume headroom rejects admission without creating a resumable upload or touching originals"
+            "PASS: real insufficient-volume headroom rejects admission "
+            "without creating a resumable upload or touching originals"
         )
 finally:
     if started:

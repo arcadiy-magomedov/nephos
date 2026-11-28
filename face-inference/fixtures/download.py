@@ -2,11 +2,11 @@
 
 import hashlib
 import json
-from pathlib import Path
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
-import time
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 (root / "photos").mkdir(exist_ok=True)

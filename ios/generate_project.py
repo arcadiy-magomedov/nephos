@@ -28,12 +28,14 @@ def generate():
         path = source.relative_to(ROOT).as_posix()
         add(
             path,
-            f"isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {quote(path)}; sourceTree = SOURCE_ROOT;",
+            "isa = PBXFileReference; lastKnownFileType = sourcecode.swift; "
+            f"path = {quote(path)}; sourceTree = SOURCE_ROOT;",
         )
         add("build:" + path, f"isa = PBXBuildFile; fileRef = {oid(path)};")
     add(
         "product",
-        "isa = PBXFileReference; explicitFileType = wrapper.application; path = Nephos.app; sourceTree = BUILT_PRODUCTS_DIR;",
+        "isa = PBXFileReference; explicitFileType = wrapper.application; "
+        "path = Nephos.app; sourceTree = BUILT_PRODUCTS_DIR;",
     )
     add("products", f'isa = PBXGroup; children = ({oid("product")},); name = Products; sourceTree = "<group>";')
     children = ",".join(oid(s.relative_to(ROOT).as_posix()) for s in sources)
@@ -41,21 +43,28 @@ def generate():
     builds = ",".join(oid("build:" + s.relative_to(ROOT).as_posix()) for s in sources)
     add(
         "sources",
-        f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({builds},); runOnlyForDeploymentPostprocessing = 0;",
+        "isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; "
+        f"files = ({builds},); runOnlyForDeploymentPostprocessing = 0;",
     )
     add(
         "frameworks",
-        "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
+        "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; "
+        "files = (); runOnlyForDeploymentPostprocessing = 0;",
     )
     add(
         "resources",
-        "isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
+        "isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; "
+        "files = (); runOnlyForDeploymentPostprocessing = 0;",
     )
     for config in ("Debug", "Release"):
         project_settings = {
             "SDKROOT": "iphoneos",
             "IPHONEOS_DEPLOYMENT_TARGET": "17.0",
             "SWIFT_VERSION": "5.0",
+            "SWIFT_TREAT_WARNINGS_AS_ERRORS": "YES",
+            # No App Intents are declared. Skip the unused extractor rather
+            # than adding a dummy framework dependency to silence its warning.
+            "LM_SKIP_METADATA_EXTRACTION": "YES",
             "CLANG_ENABLE_MODULES": "YES",
             "ENABLE_STRICT_OBJC_MSGSEND": "YES",
             "SWIFT_OPTIMIZATION_LEVEL": "-Onone" if config == "Debug" else "-O",
@@ -78,19 +87,31 @@ def generate():
         }
         for name, settings in (("project", project_settings), ("target", target_settings)):
             body = " ".join(f"{key} = {quote(value)};" for key, value in settings.items())
-            add(f"{name}:{config}", f"isa = XCBuildConfiguration; buildSettings = {{ {body} }}; name = {config};")
+            add(
+                f"{name}:{config}",
+                f"isa = XCBuildConfiguration; buildSettings = {{ {body} }}; name = {config};",
+            )
     for name in ("project", "target"):
         add(
             name + ":configs",
-            f"isa = XCConfigurationList; buildConfigurations = ({oid(name + ':Debug')},{oid(name + ':Release')},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;",
+            "isa = XCConfigurationList; "
+            f"buildConfigurations = ({oid(name + ':Debug')},{oid(name + ':Release')},); "
+            "defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;",
         )
     add(
         "target",
-        f'isa = PBXNativeTarget; buildConfigurationList = {oid("target:configs")}; buildPhases = ({oid("sources")},{oid("frameworks")},{oid("resources")},); buildRules = (); dependencies = (); name = Nephos; productName = Nephos; productReference = {oid("product")}; productType = "com.apple.product-type.application";',
+        f"isa = PBXNativeTarget; buildConfigurationList = {oid('target:configs')}; "
+        f"buildPhases = ({oid('sources')},{oid('frameworks')},{oid('resources')},); "
+        "buildRules = (); dependencies = (); name = Nephos; productName = Nephos; "
+        f'productReference = {oid("product")}; productType = "com.apple.product-type.application";',
     )
     add(
         "project",
-        f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2600; }}; buildConfigurationList = {oid("project:configs")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base,); mainGroup = {oid("main")}; productRefGroup = {oid("products")}; projectDirPath = ""; projectRoot = ""; targets = ({oid("target")},);',
+        "isa = PBXProject; attributes = { BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 2600; }; "
+        f'buildConfigurationList = {oid("project:configs")}; compatibilityVersion = "Xcode 14.0"; '
+        "developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base,); "
+        f"mainGroup = {oid('main')}; productRefGroup = {oid('products')}; "
+        f'projectDirPath = ""; projectRoot = ""; targets = ({oid("target")},);',
     )
     PROJECT.mkdir(exist_ok=True)
     (PROJECT / "project.pbxproj").write_text(
@@ -100,15 +121,33 @@ def generate():
     )
     scheme = PROJECT / "xcshareddata/xcschemes/Nephos.xcscheme"
     scheme.parent.mkdir(parents=True, exist_ok=True)
-    ref = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{oid("target")}" BuildableName="Nephos.app" BlueprintName="Nephos" ReferencedContainer="container:Nephos.xcodeproj"/>'
+    ref = (
+        f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{oid("target")}" '
+        'BuildableName="Nephos.app" BlueprintName="Nephos" ReferencedContainer="container:Nephos.xcodeproj"/>'
+    )
+    entry = (
+        '<BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" '
+        f'buildForArchiving="YES" buildForAnalyzing="YES">{ref}</BuildActionEntry>'
+    )
+    launch = (
+        '<LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" '
+        'selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" '
+        'ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" allowLocationSimulation="YES">'
+        f'<BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></LaunchAction>'
+    )
+    profile = (
+        '<ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" '
+        'useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">'
+        f'<BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></ProfileAction>'
+    )
     scheme.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="2600" version="1.3">
  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
-  <BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">{ref}</BuildActionEntry></BuildActionEntries>
+  <BuildActionEntries>{entry}</BuildActionEntries>
  </BuildAction>
  <TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="YES"/>
- <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" allowLocationSimulation="YES"><BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></LaunchAction>
- <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"><BuildableProductRunnable runnableDebuggingMode="0">{ref}</BuildableProductRunnable></ProfileAction>
+ {launch}
+ {profile}
  <AnalyzeAction buildConfiguration="Debug"/>
  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
@@ -125,7 +164,10 @@ def generate():
         "LSRequiresIPhoneOS": True,
         "NSCameraUsageDescription": "Scan your administrator's single-use Nephos sign-in QR code.",
         "NSLocalNetworkUsageDescription": "Connect to the Nephos server in your administrator's QR code.",
-        "NSPhotoLibraryUsageDescription": "Browse, share, and back up your photos and videos to your Nephos server. Automatic upload is off until you enable it. Delete items only when you confirm.",
+        "NSPhotoLibraryUsageDescription": (
+            "Browse, share, and back up your photos and videos to your Nephos server. "
+            "Automatic upload is off until you enable it. Delete items only when you confirm."
+        ),
         "UIBackgroundModes": ["fetch", "processing"],
         "BGTaskSchedulerPermittedIdentifiers": [
             "app.nephos.ios.upload-refresh",

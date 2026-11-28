@@ -4,7 +4,6 @@
 import base64
 import hashlib
 import html
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
 import secrets
@@ -12,10 +11,10 @@ import subprocess
 import threading
 import urllib.parse
 import uuid
-
-from playwright.sync_api import sync_playwright
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import smoke
+from playwright.sync_api import sync_playwright
 
 
 class Callback(BaseHTTPRequestHandler):
@@ -266,7 +265,8 @@ def main():
             smoke.request(smoke.API + "/v1/libraries", token=token, expected=401)
             browser.close()
             print(
-                "PASS: fresh passkey login, Code+PKCE, membership denial, recovery without platform access and full account revocation"
+                "PASS: fresh passkey login, Code+PKCE, membership denial, "
+                "recovery without platform access and full account revocation"
             )
     finally:
         server.shutdown()
@@ -279,7 +279,8 @@ def main():
             smoke.sql(
                 """
                 CREATE TEMP TABLE fixture_libraries AS SELECT library_id FROM library_members WHERE subject=:'subject';
-                DELETE FROM administration_events WHERE operation_id IN(SELECT id FROM administration_operations WHERE subject=:'subject');
+                DELETE FROM administration_events WHERE operation_id IN(
+                    SELECT id FROM administration_operations WHERE subject=:'subject');
                 DELETE FROM administration_operations WHERE subject=:'subject';
                 DELETE FROM library_members WHERE subject=:'subject';
                 DELETE FROM principals WHERE subject=:'subject';

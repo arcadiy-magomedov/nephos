@@ -1,13 +1,14 @@
-#if DEBUG
+// SwiftPM also runs optimized tests. The Xcode Release application excludes
+// these internal fixtures because it defines neither DEBUG nor SWIFT_PACKAGE.
+#if DEBUG || SWIFT_PACKAGE
     import Foundation
 
     extension UploadCandidate {
         static func fixture(id: String = "fixture-photo", live: Bool = false) -> UploadCandidate {
-            var resources = [
-                UploadResourceDescriptor(
-                    type: 1, role: "photo", filename: "\(id).HEIC", uniformTypeIdentifier: "public.heic",
-                    mediaType: "image/heic", isPrimary: true)
-            ]
+            let primary = UploadResourceDescriptor(
+                type: 1, role: "photo", filename: "\(id).HEIC", uniformTypeIdentifier: "public.heic",
+                mediaType: "image/heic", isPrimary: true)
+            var resources = [primary]
             if live {
                 resources.append(
                     UploadResourceDescriptor(

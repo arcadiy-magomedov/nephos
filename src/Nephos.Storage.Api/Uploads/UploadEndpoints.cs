@@ -160,7 +160,7 @@ public static class UploadEndpoints
 
 public sealed class UploadExceptionHandler(ILogger<UploadExceptionHandler> logger) : IExceptionHandler
 {
-    public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken)
+    public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
         var status = exception switch
         {
@@ -170,11 +170,11 @@ public sealed class UploadExceptionHandler(ILogger<UploadExceptionHandler> logge
             _ => 0
         };
         if (status == 0) return false;
-        logger.LogWarning("Upload request failed with {Status} ({ErrorType})", status, exception.GetType().Name);
+        StorageLog.RequestFailed(logger, status, exception.GetType().Name);
         if (exception is Npgsql.PostgresException databaseError)
-            logger.LogError("Upload persistence failed with SQLSTATE {SqlState}", databaseError.SqlState);
+            StorageLog.PersistenceFailed(logger, databaseError.SqlState);
         await Results.Problem(statusCode: status, title: status == 503 ? "A required storage service is unavailable." : exception.Message)
-            .ExecuteAsync(context);
+            .ExecuteAsync(httpContext);
         return true;
     }
 }

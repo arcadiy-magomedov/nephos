@@ -6,6 +6,18 @@ enum ClientError: LocalizedError {
     case http(Int, String)
     case signedOut
 
+    var isForbidden: Bool {
+        if case .http(403, _) = self { return true }
+        return false
+    }
+
+    var isRetryableHTTP: Bool {
+        if case .http(let status, _) = self {
+            return [408, 425, 429, 500, 502, 503, 504].contains(status)
+        }
+        return false
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalid(let reason): reason
@@ -26,8 +38,9 @@ struct ServerConfig: Codable, Equatable, Sendable {
 struct Connection: Codable, Equatable, Sendable {
     let baseURL: URL
     let config: ServerConfig
+    // Retained only for decoding deployed vault records; HTTP is never permitted.
     let allowDevelopmentHTTP: Bool
-    var persistentLogin: PersistentLoginConfiguration? = nil
+    var persistentLogin: PersistentLoginConfiguration?
 
     func hasSameIdentity(as other: Connection) -> Bool {
         baseURL == other.baseURL && config.serverId == other.config.serverId
@@ -52,7 +65,7 @@ struct PersistentLoginConfiguration: Codable, Equatable, Sendable {
 }
 
 enum URLPolicy {
-    static func validate(_ raw: String, allowDevelopmentHTTP: Bool = false) throws -> URL {
+    static func validate(_ raw: String) throws -> URL {
         guard let parts = URLComponents(string: raw), parts.scheme == "https",
             let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
             parts.query == nil, parts.fragment == nil, let url = parts.url

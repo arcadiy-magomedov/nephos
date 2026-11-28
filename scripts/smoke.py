@@ -2,19 +2,19 @@
 """Exercise real development services. Never run against a production realm."""
 
 import base64
-from html.parser import HTMLParser
-from http.cookiejar import CookieJar, DefaultCookiePolicy
 import json
 import os
-from pathlib import Path
-import secrets
 import re
+import secrets
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from html.parser import HTMLParser
+from http.cookiejar import CookieJar, DefaultCookiePolicy
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = dict(line.split("=", 1) for line in (ROOT / ".env").read_text().splitlines() if line and not line.startswith("#"))
@@ -191,7 +191,8 @@ def check_database_privileges():
                 "postgres",
                 "sh",
                 "-c",
-                'export PGPASSWORD="$LIBRARY_APP_PASSWORD"; exec psql -h 127.0.0.1 -U library_app -d "$1" -v ON_ERROR_STOP=1 -c "$2"',
+                'export PGPASSWORD="$LIBRARY_APP_PASSWORD"; '
+                'exec psql -h 127.0.0.1 -U library_app -d "$1" -v ON_ERROR_STOP=1 -c "$2"',
                 "smoke",
                 database,
                 statement,
@@ -282,7 +283,8 @@ def main():
         sql(
             """
             INSERT INTO principals(subject, enabled) VALUES (:'subject', true);
-            INSERT INTO libraries(id, name) VALUES (:'library'::uuid, 'Smoke visible'), (:'hidden'::uuid, 'Smoke hidden');
+            INSERT INTO libraries(id, name)
+            VALUES (:'library'::uuid, 'Smoke visible'), (:'hidden'::uuid, 'Smoke hidden');
             INSERT INTO library_members(subject, library_id) VALUES (:'subject', :'library'::uuid);
             """,
             subject=subject,

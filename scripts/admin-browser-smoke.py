@@ -4,13 +4,13 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import secrets
 import subprocess
 import uuid
+from pathlib import Path
 
-from playwright.sync_api import sync_playwright, expect
 import smoke
+from playwright.sync_api import expect, sync_playwright
 
 
 def main():

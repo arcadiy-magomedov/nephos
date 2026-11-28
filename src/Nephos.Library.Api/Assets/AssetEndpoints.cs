@@ -4,6 +4,10 @@ namespace Nephos.Library.Api.Assets;
 
 public static class AssetEndpoints
 {
+    private static readonly string[] RequestHeaders = ["Range", "If-Range", "If-None-Match"];
+    private static readonly string[] ResponseHeaders =
+        ["Content-Type", "Content-Length", "Content-Disposition", "Content-Range", "ETag", "Accept-Ranges", "Last-Modified"];
+
     public static void MapAssets(this WebApplication app)
     {
         app.MapDelete("/v1/assets/{id:guid}", async (
@@ -105,7 +109,7 @@ public static class AssetEndpoints
                 $"{configuration["Services:Storage"]}/internal/v1/assets/{id}/{kind}" +
                 (kind == "preview" ? $"?size={size ?? 512}" : ""));
             request.Headers.Add("X-Nephos-Service-Key", configuration["Services:Key"]);
-            foreach (var header in new[] { "Range", "If-Range", "If-None-Match" })
+            foreach (var header in RequestHeaders)
                 if (context.Request.Headers.TryGetValue(header, out var value))
                     request.Headers.TryAddWithoutValidation(header, value.ToArray());
             using var response = await clients.CreateClient("storage").SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -114,7 +118,7 @@ public static class AssetEndpoints
                 (response.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.NotModified);
             context.Response.Headers.CacheControl = cacheablePreview ? "private, no-cache" : "private, no-store";
             context.Response.Headers.XContentTypeOptions = "nosniff";
-            foreach (var header in new[] { "Content-Type", "Content-Length", "Content-Disposition", "Content-Range", "ETag", "Accept-Ranges", "Last-Modified" })
+            foreach (var header in ResponseHeaders)
             {
                 if (response.Content.Headers.TryGetValues(header, out var contentValues))
                     context.Response.Headers[header] = contentValues.ToArray();

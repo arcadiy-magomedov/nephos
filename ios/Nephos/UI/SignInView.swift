@@ -6,6 +6,7 @@ struct SignInView: View {
     @State private var image: PhotosPickerItem?
     @State private var photosPresented = false
     @State private var confirmSignOut = false
+    @State private var confirmCancelEnrollment = false
     @AccessibilityFocusState private var headingFocused: Bool
 
     var body: some View {
@@ -58,7 +59,23 @@ struct SignInView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "You will need a new QR code to sign in again. Device-only sign-out removes saved credentials but does not revoke the server session."
+                """
+                You will need a new QR code to sign in again. Device-only sign-out removes saved credentials \
+                but does not revoke the server session.
+                """
+            )
+        }
+        .confirmationDialog(
+            "Cancel this sign-in?", isPresented: $confirmCancelEnrollment, titleVisibility: .visible
+        ) {
+            Button("Start over", role: .destructive) { Task { await model.signOut() } }
+            Button("Keep waiting", role: .cancel) {}
+        } message: {
+            Text(
+                """
+                This clears the unfinished sign-in from this device so you can scan a new QR code. \
+                If the server already accepted the previous code, ask your administrator to revoke it.
+                """
             )
         }
     }
@@ -150,7 +167,13 @@ struct SignInView: View {
             VStack(spacing: 8) {
                 Button("Retry") { Task { await model.restore() } }
                     .buttonStyle(SignInButtonStyle())
-                signOutButton
+                if model.hasUnfinishedEnrollment {
+                    Button("Cancel sign-in") { confirmCancelEnrollment = true }
+                        .buttonStyle(SignInButtonStyle(primary: false))
+                        .disabled(model.signingOut)
+                } else {
+                    signOutButton
+                }
             }
         case .signedIn:
             signOutButton

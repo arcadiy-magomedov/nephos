@@ -10,7 +10,7 @@ final class QREnrollmentTests: XCTestCase {
     private let origin = "https://photos.example.test:8443"
     private var qr: EnrollmentQR {
         EnrollmentQR(
-            v: 1, origin: origin, inviteId: "00000000-0000-0000-0000-000000000123",
+            version: 1, origin: origin, inviteId: "00000000-0000-0000-0000-000000000123",
             secret: Hashing.base64URL(Data(repeating: 42, count: 32)))
     }
     private var connection: Connection {
@@ -186,10 +186,13 @@ final class QREnrollmentTests: XCTestCase {
     func testExplicitProviderErrors() {
         for code in [
             "invite_expired", "invite_used", "invite_cancelled", "user_disabled", "recovery_expired", "session_revoked",
-            "invalid_proof", "temporarily_unavailable",
+            "invalid_proof", "invalid_dpop_proof", "dpop_proof_required", "dpop_key_mismatch",
+            "persistent_login_not_enabled", "temporarily_unavailable",
         ] {
             XCTAssertNotNil(QREnrollmentError.provider(code)?.errorDescription)
         }
+        XCTAssertEqual(QREnrollmentError.provider("dpop_key_mismatch"), .invalidProof)
+        XCTAssertFalse(QREnrollmentError.invalidProof.invalidatesEnrollment)
         XCTAssertNil(QREnrollmentError.provider("arbitrary server content"))
     }
 }

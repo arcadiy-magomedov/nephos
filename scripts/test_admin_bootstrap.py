@@ -1,7 +1,7 @@
 import copy
 import importlib.util
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 SPEC = importlib.util.spec_from_file_location("admin_bootstrap", Path(__file__).with_name("admin-bootstrap.py"))
 bootstrap = importlib.util.module_from_spec(SPEC)

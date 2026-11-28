@@ -5,6 +5,25 @@ grant, not another token issuer. Existing PIN and browser passkeys remain
 compatible. New QR refresh credentials are device-bound; offline sessions use
 the explicit 180-day inactivity policy described below.
 
+## Provider quality checks
+
+With JDK 21 and Maven installed, run:
+
+```sh
+mvn -B -ntp -f deploy/keycloak/pin-provider/pom.xml clean verify
+```
+
+The pinned Maven compiler enables all compiler warnings and treats them as
+errors. Verification runs the JUnit regression tests and the unmodified default
+SpotBugs checker. This checks the maintained Keycloak SPI implementation without
+replacing its existing style with a new formatting convention.
+
+Two narrowly scoped compiler exemptions retain required Keycloak 26.8.1 APIs:
+the JPA entity-provider's abstract `getEntities()` method and the persisted
+client refresh timestamp accessor. Neither has a non-deprecated replacement in
+this version; the timestamp check remains required for receipt-replay fencing.
+The production Keycloak image build runs the same `verify` lifecycle.
+
 ## Persistent login and DPoP feasibility
 
 **Status: DPoP required for new QR sign-ins, with a 180-day inactivity policy.**
@@ -361,7 +380,7 @@ or production configuration change was made.
 
 Native integration verifies the shipped DPoP contract with
 `scripts/native-qr-ci.py`; see
-[native fixture usage](../native-qr-ci.md). New native QR sign-ins must require
+[native fixture usage](native-qr-ci.md). New native QR sign-ins must require
 advertised `refreshBinding=dpop` rather than silently accepting a legacy-bearer
 server. Saved legacy sessions remain separately usable without automatic rebinding.
 

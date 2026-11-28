@@ -1,12 +1,12 @@
 """Private renderer; bounded admission and pre-warmed killable children, no storage or model weights."""
 
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
-from pathlib import Path
 import signal
 import sys
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 if str(root) not in sys.path:

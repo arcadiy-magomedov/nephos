@@ -8,7 +8,9 @@ ARG PROJECT=Nephos.Faces.Api
 RUN dotnet restore src/${PROJECT}/${PROJECT}.csproj --locked-mode \
     && dotnet publish src/${PROJECT}/${PROJECT}.csproj -c Release -o /out --no-restore /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.8
-RUN apt-get update -qq && apt-get install -y --no-install-recommends libgssapi-krb5-2
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out .
 USER $APP_UID

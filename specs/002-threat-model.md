@@ -95,7 +95,7 @@ remain release gates under R31.
 
 | ID | Review severity | Source | Adopted design decision |
 |---|---|---|---|
-| F01 | HIGH | [R08/R09](000-media-platform.md#38-r08---passwordless-identity-and-biometrics) | Passkey-only; bound single-use activation; single-use offline recovery codes or audited administrator recovery with fresh admin passkey and verified out-of-band identity; revoke old credentials/sessions; never re-enable disabled membership |
+| F01 | HIGH | [R08/R09](000-media-platform.md#38-r08---bootstrap-and-persistent-oidc-device-sessions) | Passkey-only; bound single-use activation; single-use offline recovery codes or audited administrator recovery with fresh admin passkey and verified out-of-band identity; revoke old credentials/sessions; never re-enable disabled membership |
 | F02 | HIGH | [Processing isolation](000-media-platform.md#3241-untrusted-processing-isolation) | Hostile parsers and inference run isolated, non-root, with scoped read-only inputs, constrained output, default-deny egress and resource limits; verify artifact provenance before loading |
 | F03 | HIGH | [R24](000-media-platform.md#324-r24---durable-pubsub-and-queued-processing) | Authenticated workload identities, broker/topic ACLs, job/attempt-scoped capabilities, and owning-service result validation; no ambient authority |
 | F04 | HIGH | [R28](000-media-platform.md#328-r28---ownership-and-cloud-service-independence) | Quarantined restore, consistent recovery set, monotonic security epoch and protected revocation journal; fail closed if current authority cannot be proven |

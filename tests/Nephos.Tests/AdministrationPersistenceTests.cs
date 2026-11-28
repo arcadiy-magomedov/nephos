@@ -159,7 +159,7 @@ public sealed class AdministrationPersistenceTests
         Assert.Equal("identity-created", (await repository.OperationAsync(enable.Id, default))!.Step);
         Assert.True(await worker.RunOnceAsync(default));
         Assert.True((await repository.UserAsync(user.Subject, default))!.User.Enabled);
-        Assert.Equal(new[] { false, true }, provider.AccessChanges);
+        Assert.Collection(provider.AccessChanges, Assert.False, Assert.True);
         Assert.Equal(1, provider.Revocations);
         Assert.Equal(2, provider.Commands.Count);
         Assert.Equal("abandoned", (await repository.OperationAsync(disable.Id, default))!.Status);
@@ -327,6 +327,22 @@ public sealed class AdministrationPersistenceTests
         Assert.Equal(results[0].LibraryId, completed.PersonalLibraryId);
         Assert.Single((await second.UserAsync(completed.Subject, default))!.Libraries);
         Assert.Equal("completed", (await repository.OperationAsync(input.Id, default))!.Status);
+    }
+    [LibraryDatabaseFact]
+    public async Task Failed_unstarted_provision_can_be_abandoned_and_releases_login_while_started_provision_cannot()
+    {
+        await using var repository = new PostgresAdministrationRepository(Config());
+        var first = Input();
+        await repository.ProvisionAsync(first, default);
+        await repository.FailAsync(await Claim(repository, first.Id), "identity_conflict", false, default);
+        var abandoned = await repository.AbandonAsync(first.Id, Guid.NewGuid().ToString(), default);
+        Assert.Equal("abandoned", abandoned!.Status);
+        var replacement = first with { Id = Guid.NewGuid() };
+        await repository.ProvisionAsync(replacement, default);
+        await repository.AdvanceAsync(await Claim(repository, replacement.Id), "identity-created", 0, default);
+        await repository.FailAsync(await Claim(repository, replacement.Id), "identity_conflict", false, default);
+        await Assert.ThrowsAsync<AdministrationConflictException>(
+            () => repository.AbandonAsync(replacement.Id, Guid.NewGuid().ToString(), default));
     }
     [LibraryDatabaseFact]
     public async Task Expired_leases_recover_after_restart_and_stale_claims_cannot_advance()

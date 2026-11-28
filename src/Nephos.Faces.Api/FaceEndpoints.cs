@@ -36,7 +36,7 @@ public static class FaceEndpoints
         app.MapInternalV1("/faces/jobs", ["POST"], async (EnqueueRequest request, HttpContext c, IConfiguration config,
             IAnalysisSourceClient access, IFaceRepository r, CancellationToken ct) =>
         {
-            if (!ServiceAuthentication.Valid(c, config)) return Results.Unauthorized();
+            if (!MediaProtocol.IsInternal(c, config)) return Results.Unauthorized();
             if (string.IsNullOrWhiteSpace(request.Subject) || request.Subject.Length > 256) return Results.BadRequest();
             var source = await access.SourceAsync(request.Subject, request.AssetId, ct);
             if (source is null) return Results.NotFound();
@@ -51,7 +51,7 @@ public static class FaceEndpoints
             Guid assetId, [FromBody] DeleteAssetRequest request, HttpContext c, IConfiguration config,
             IFaceRepository repository, CancellationToken token) =>
         {
-            if (!ServiceAuthentication.Valid(c, config)) return Results.Unauthorized();
+            if (!MediaProtocol.IsInternal(c, config)) return Results.Unauthorized();
             if (string.IsNullOrWhiteSpace(request.Subject) || request.Subject.Length > 256)
                 return Results.BadRequest();
             await repository.DeleteAssetAsync(request.Subject, assetId, token);

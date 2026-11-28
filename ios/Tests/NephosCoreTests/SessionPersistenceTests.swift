@@ -112,7 +112,7 @@ final class SessionPersistenceTests: XCTestCase {
         let store = try MemorySessionStorage(saved)
         var completion: CheckedContinuation<Credentials, Error>?
         var calls = 0
-        let auth = AuthSession(credentials: saved, store: store) { previous in
+        let auth = AuthSession(credentials: saved, store: store) { _ in
             calls += 1
             return try await withCheckedThrowingContinuation { completion = $0 }
         }
@@ -188,22 +188,26 @@ final class SessionPersistenceTests: XCTestCase {
         XCTAssertTrue(model.message.isEmpty)
     }
 
+}
+
+extension SessionPersistenceTests {
     @MainActor
     func testForegroundNetworkFailurePreservesContentAndRetryClearsWarning() async throws {
         let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
-        var offline = false
+        let state = RenewalState()
+        state.offline = false
         let model = SignInModel(
             store: store,
             validate: { _ in
-                if offline { throw URLError(.notConnectedToInternet) }
+                if state.offline { throw URLError(.notConnectedToInternet) }
             })
         await model.restore()
-        offline = true
+        state.offline = true
         await model.restore()
         XCTAssertEqual(model.screen, .signedIn)
         XCTAssertFalse(model.message.isEmpty)
         XCTAssertNotNil(try store.vault().current)
-        offline = false
+        state.offline = false
         await model.restore()
         XCTAssertEqual(model.screen, .signedIn)
         XCTAssertTrue(model.message.isEmpty)
@@ -212,15 +216,16 @@ final class SessionPersistenceTests: XCTestCase {
     @MainActor
     func testWarmValidationFailureKeepsLocalContentEvenIfKeychainIsTemporarilyLocked() async throws {
         let store = try MemorySessionStorage(credentials(expiry: .distantFuture))
-        var offline = false
+        let state = RenewalState()
+        state.offline = false
         let model = SignInModel(
             store: store,
             validate: { _ in
-                if offline { throw URLError(.notConnectedToInternet) }
+                if state.offline { throw URLError(.notConnectedToInternet) }
             })
         await model.restore()
         store.readFails = true
-        offline = true
+        state.offline = true
         await model.restore()
         XCTAssertEqual(model.screen, .signedIn)
         XCTAssertFalse(model.message.isEmpty)
@@ -333,7 +338,7 @@ final class SessionPersistenceTests: XCTestCase {
     func testEnrollmentProofAndConfigurationErrorsPreserveRecoveryKey() async throws {
         let connection = credentials().connection
         let qr = EnrollmentQR(
-            v: 1, origin: connection.baseURL.absoluteString, inviteId: UUID().uuidString.lowercased(),
+            version: 1, origin: connection.baseURL.absoluteString, inviteId: UUID().uuidString.lowercased(),
             secret: Hashing.base64URL(Data(repeating: 3, count: 32)))
         for error in [
             QREnrollmentError.invalidRequest, .invalidProof, .invalidChallenge, .invalidScope, .unavailable,
@@ -356,7 +361,7 @@ final class SessionPersistenceTests: XCTestCase {
         let store = try MemorySessionStorage(nil)
         let connection = credentials().connection
         let qr = EnrollmentQR(
-            v: 1, origin: connection.baseURL.absoluteString, inviteId: UUID().uuidString.lowercased(),
+            version: 1, origin: connection.baseURL.absoluteString, inviteId: UUID().uuidString.lowercased(),
             secret: Hashing.base64URL(Data(repeating: 3, count: 32)))
         let pending = try PendingEnrollment(
             qr: qr, connection: connection, installationID: store.vault().installationID)
@@ -369,6 +374,7 @@ final class SessionPersistenceTests: XCTestCase {
         await model.signOut()
         XCTAssertEqual(model.screen, .welcome)
         XCTAssertNil(try store.vault().pending)
+        XCTAssertFalse(model.hasUnfinishedEnrollment)
         XCTAssertTrue(model.message.contains("not revoked"))
     }
 }

@@ -8,11 +8,11 @@ import re
 import urllib.parse
 import uuid
 
+import smoke
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from playwright.sync_api import sync_playwright, expect
-import smoke
 from dpop_proof import proof, thumbprint
+from playwright.sync_api import expect, sync_playwright
 
 
 def enroll_device(subject, name):
@@ -215,8 +215,8 @@ def main():
                 mobile_confirm.focus()
                 expect(mobile_confirm).to_be_focused()
                 box = mobile_confirm.bounding_box()
-                assert 0 <= box["x"] and box["x"] + box["width"] <= width
-                assert 0 <= box["y"] and box["y"] + box["height"] <= height
+                assert box["x"] >= 0 and box["x"] + box["width"] <= width
+                assert box["y"] >= 0 and box["y"] + box["height"] <= height
                 page.keyboard.press("Escape")
                 expect(revoke).to_be_focused()
             page.set_viewport_size({"width": 1280, "height": 900})
@@ -262,7 +262,8 @@ def main():
                 overflow = page.evaluate(
                     """() => [...document.querySelectorAll('body *')]
                       .filter(element => element.getBoundingClientRect().right > window.innerWidth + 1)
-                      .map(element => `${element.tagName}.${element.className}: ${Math.round(element.getBoundingClientRect().right)}`)
+                      .map(element => `${element.tagName}.${element.className}: ${
+                        Math.round(element.getBoundingClientRect().right)}`)
                       .slice(0, 12)"""
                 )
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (path, overflow)
@@ -283,7 +284,8 @@ def main():
             smoke.sql(
                 """
                 CREATE TEMP TABLE fixture_libraries AS SELECT library_id FROM library_members WHERE subject=:'subject';
-                DELETE FROM administration_events WHERE operation_id IN(SELECT id FROM administration_operations WHERE subject=:'subject');
+                DELETE FROM administration_events WHERE operation_id IN(
+                    SELECT id FROM administration_operations WHERE subject=:'subject');
                 DELETE FROM administration_operations WHERE subject=:'subject';
                 DELETE FROM library_members WHERE subject=:'subject';
                 DELETE FROM personal_libraries WHERE subject=:'subject';

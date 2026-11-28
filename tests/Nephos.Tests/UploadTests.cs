@@ -10,6 +10,8 @@ using Upload = storage::Nephos.Storage.Api.Uploads.Upload;
 using UploadIntent = storage::Nephos.Storage.Api.Uploads.UploadIntent;
 using UploadConflictException = storage::Nephos.Storage.Api.Uploads.UploadConflictException;
 using VolumeStore = storage::Nephos.Storage.Api.Uploads.VolumeStore;
+using UploadWorker = storage::Nephos.Storage.Api.Uploads.UploadWorker;
+using PostgresUploadRepository = storage::Nephos.Storage.Api.Uploads.PostgresUploadRepository;
 
 namespace Nephos.Tests;
 
@@ -27,6 +29,14 @@ public sealed class UploadTests : IDisposable
     private sealed class Clients(HttpClient? client = null) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => client ?? new();
+    }
+
+    private static async Task<bool> RenderPreviewAsync(VolumeStore store, string hash, string mediaType, int size)
+    {
+        var prepared = await store.PreparePreviewsAsync(store.OriginalPath(hash), hash, mediaType, Guid.NewGuid(), default, size);
+        if (prepared is null) return false;
+        store.PublishPreparedPreviews(hash, prepared);
+        return File.Exists(store.ResolvePreviewPath(hash, size));
     }
 
     [Theory]
@@ -47,13 +57,13 @@ public sealed class UploadTests : IDisposable
             ["Services:Derivatives"] = "http://renderer",
             ["Services:Key"] = "test-only-derivative-key"
         }).Build(), NullLogger<VolumeStore>.Instance, new Clients(http));
-        Assert.Equal(matchingHash, await renderer.CreatePreviewAsync(hash, "image/heic", default, 2560));
+        Assert.Equal(matchingHash, await RenderPreviewAsync(renderer, hash, "image/heic", 2560));
         Assert.Equal(original, await File.ReadAllBytesAsync(path));
         foreach (var size in PreviewSizes.All)
             Assert.Equal(matchingHash, File.Exists(renderer.PreviewPath(hash, size)));
         if (matchingHash)
         {
-            Assert.True(await renderer.CreatePreviewAsync(hash, "image/heic", default, 1280));
+            Assert.True(await RenderPreviewAsync(renderer, hash, "image/heic", 1280));
             Assert.Equal(1, handler.Calls);
         }
         Assert.Throws<ArgumentOutOfRangeException>(() => renderer.PreviewPath(hash, 9999));
@@ -74,7 +84,7 @@ public sealed class UploadTests : IDisposable
                     sourceSha256 = hash,
                     width = 6048,
                     height = 8064,
-                    variants = PreviewSizes.All.ToDictionary(size => size.ToString(), _ => new byte[] { 0xff, 0xd8, 0xff, 0xd9 })
+                    variants = PreviewSizes.All.ToDictionary(size => size.ToString(System.Globalization.CultureInfo.InvariantCulture), _ => new byte[] { 0xff, 0xd8, 0xff, 0xd9 })
                 })
             };
         }
@@ -134,8 +144,12 @@ public sealed class UploadTests : IDisposable
         await volume.SavePartAsync(id, 0, new MemoryStream(data[..MediaProtocol.ChunkSize]), MediaProtocol.ChunkSize, default);
         var upload = new Upload(id, "owner", Guid.NewGuid(), "original.bin", "application/octet-stream",
             data.Length, expected, "verifying", null, false, null, DateTimeOffset.UtcNow);
-        Assert.Equal(expected, await volume.AssembleAsync(upload, default));
-        Assert.Equal(expected, await volume.AssembleAsync(upload, default));
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var staged = await volume.StageVerifiedAsync(upload, Guid.NewGuid(), default);
+            Assert.Equal(expected, staged.Hash);
+            volume.PublishStaged(staged, null);
+        }
         Assert.Equal(data, await File.ReadAllBytesAsync(volume.OriginalPath(expected)));
         Assert.Single(Directory.GetFiles(Path.Combine(root, "blobs"), "*", SearchOption.AllDirectories));
     }
@@ -147,8 +161,52 @@ public sealed class UploadTests : IDisposable
         await volume.SavePartAsync(id, 0, new MemoryStream([1, 2, 3]), 3, default);
         var upload = new Upload(id, "owner", Guid.NewGuid(), "original.bin", "application/octet-stream",
             3, new string('0', 64), "verifying", null, false, null, DateTimeOffset.UtcNow);
-        await Assert.ThrowsAsync<UploadConflictException>(() => volume.AssembleAsync(upload, default));
+        await Assert.ThrowsAsync<UploadConflictException>(() => volume.StageVerifiedAsync(upload, Guid.NewGuid(), default));
         Assert.False(File.Exists(volume.OriginalPath(upload.ExpectedHash)));
+    }
+
+    [Fact]
+    public void Missing_prepared_preview_is_not_silently_published()
+    {
+        var hash = new string('a', 64);
+        Assert.Throws<FileNotFoundException>(() => volume.PublishPreparedPreviews(hash,
+            new Dictionary<int, string> { [512] = Path.Combine(root, "missing.jpg") }));
+        Assert.False(File.Exists(volume.PreviewPath(hash)));
+    }
+
+    [Fact]
+    public async Task Non_ascii_volume_paths_preserve_durable_single_part_publication()
+    {
+        var unicodeRoot = Path.Combine(root, "photos-é-画像");
+        Directory.CreateDirectory(unicodeRoot);
+        var unicodeVolume = new VolumeStore(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Storage:Root"] = unicodeRoot }).Build(),
+            NullLogger<VolumeStore>.Instance, new Clients());
+        byte[] bytes = [1, 2, 3];
+        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        var id = Guid.NewGuid();
+        await unicodeVolume.SavePartAsync(id, 0, new MemoryStream(bytes), bytes.Length, default);
+        var upload = new Upload(id, "owner", Guid.NewGuid(), "original.bin", "application/octet-stream",
+            bytes.Length, hash, "verifying", null, false, null, DateTimeOffset.UtcNow);
+        var staged = await unicodeVolume.StageVerifiedAsync(upload, Guid.NewGuid(), default);
+        unicodeVolume.PublishStaged(staged, null);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(unicodeVolume.OriginalPath(hash)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(9)]
+    public async Task Invalid_worker_concurrency_fails_instead_of_silently_clamping(int concurrency)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Upload:VerifyConcurrency"] = concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        }).Build();
+        await using var database = Npgsql.NpgsqlDataSource.Create("Host=localhost;Database=unused;Username=unused");
+        var repository = new PostgresUploadRepository(database, volume, NullLogger<PostgresUploadRepository>.Instance);
+        using var worker = new UploadWorker(repository, configuration, NullLogger<UploadWorker>.Instance);
+        await worker.StartAsync(default);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => worker.ExecuteTask!);
     }
 
     [Fact]

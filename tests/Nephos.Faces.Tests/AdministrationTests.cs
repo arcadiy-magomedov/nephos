@@ -1,5 +1,4 @@
 using System.Net;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Nephos.Faces.Api;
 using Npgsql;

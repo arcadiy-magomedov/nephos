@@ -1,4 +1,3 @@
-import BackgroundTasks
 import Foundation
 import OSLog
 import Observation
@@ -16,37 +15,36 @@ final class UploadModel {
     private(set) var message: String?
     private(set) var showsProgress = false
     private(set) var loadingLibraries = false
-    @ObservationIgnored private var directory: URL?
     @ObservationIgnored private var repository: SQLiteUploadRepository?
     @ObservationIgnored private var configuration: UploadConfigurationStore?
     @ObservationIgnored private var files: UploadFileStore?
     @ObservationIgnored private var events: UploadEventStore?
-    @ObservationIgnored private var transport: MediaUploadTransport?
+    @ObservationIgnored var transport: MediaUploadTransport?
     @ObservationIgnored private var fileUploader: BackgroundFileUploader?
     @ObservationIgnored private var coordinator: UploadCoordinator?
     @ObservationIgnored private var client: UploadHTTPClient?
-    @ObservationIgnored private var foregroundTask: Task<Void, Never>?
-    @ObservationIgnored private var foregroundID: UUID?
-    @ObservationIgnored private var work: Task<Void, Never>?
+    @ObservationIgnored var foregroundTask: Task<Void, Never>?
+    @ObservationIgnored var foregroundID: UUID?
+    @ObservationIgnored var work: Task<Void, Never>?
     @ObservationIgnored private var workID: UUID?
     @ObservationIgnored private var historyLimit = 100
     @ObservationIgnored private var visibleIDs: Set<String> = []
-    @ObservationIgnored private var backgroundCompletions: [() -> Void] = []
-    @ObservationIgnored private var isForeground = false
-    @ObservationIgnored private var needsDiscovery = true
-    @ObservationIgnored private var needsWork = true
-    @ObservationIgnored private var lastDiscovery: Date?
+    @ObservationIgnored var backgroundCompletions: [() -> Void] = []
+    @ObservationIgnored var isForeground = false
+    @ObservationIgnored var needsDiscovery = true
+    @ObservationIgnored var needsWork = true
+    @ObservationIgnored var lastDiscovery: Date?
+    @ObservationIgnored var onSessionRevoked: (@MainActor () async -> Void)?
     @ObservationIgnored private var reloadGeneration: UInt64 = 0
-    @ObservationIgnored private let wakeGate = UploadWakeGate()
-    @ObservationIgnored private lazy var connectivity = UploadConnectivity { [weak self] in
+    @ObservationIgnored let wakeGate = UploadWakeGate()
+    @ObservationIgnored lazy var connectivity = UploadConnectivity { [weak self] in
         self?.networkChanged()
     }
-    @ObservationIgnored private let logger = Logger(subsystem: "app.nephos.ios", category: "UploadQueue")
+    @ObservationIgnored let logger = Logger(subsystem: "app.nephos.ios", category: "UploadQueue")
 
     private init() {
         do {
             let directory = try UploadEnvironment.sharedDirectory()
-            self.directory = directory
             repository = try SQLiteUploadRepository(url: directory.appendingPathComponent("uploads.sqlite"))
             configuration = UploadConfigurationStore(directory: directory)
             files = UploadFileStore(directory: directory)
@@ -81,6 +79,7 @@ final class UploadModel {
                 libraries = []
                 showsProgress = false
                 lastDiscovery = nil
+                message = nil
                 wake()
                 return
             }
@@ -100,6 +99,7 @@ final class UploadModel {
                 libraries = []
                 showsProgress = false
                 lastDiscovery = nil
+                message = nil
                 client = UploadHTTPClient(
                     connection: saved.connection,
                     authorization: UploadAuthorization(
@@ -119,7 +119,11 @@ final class UploadModel {
             guard let client else { throw ClientError.invalid("Sign in before choosing an upload library.") }
             libraries = try await client.libraries()
             if libraries.count == 1, destination == nil { await select(libraries[0]) }
-            if libraries.isEmpty { message = "No upload library is available. Ask your administrator to add one." }
+            if libraries.isEmpty {
+                message = "No upload library is available. Ask your administrator to add one."
+            } else {
+                message = nil
+            }
         } catch { report(error) }
     }
 
@@ -129,7 +133,7 @@ final class UploadModel {
             guard let configuration else { throw unavailable() }
             let vault = try await KeychainStorage().vault()
             guard let saved = vault.current else { throw ClientError.signedOut }
-            work?.cancel()
+            await cancelWorkAndWait()
             if let old = destination {
                 try await repository?.setPolicy(.disabled, scope: old.scope)
                 await transport?.cancel(scope: old.scope)
@@ -162,7 +166,7 @@ final class UploadModel {
                         "Allow Photos access in system Settings before enabling automatic uploads.")
                 }
             }
-            work?.cancel()
+            await cancelWorkAndWait()
             try await repository.setPolicy(policy, scope: destination.scope)
             await transport?.cancel(scope: destination.scope)
             needsDiscovery = policy != .disabled
@@ -171,7 +175,7 @@ final class UploadModel {
             message = nil
             if policy == .disabled { UploadBackgroundScheduler.cancel() } else { UploadBackgroundScheduler.schedule() }
             wake()
-            await process(discover: policy != .disabled)
+            if policy != .disabled { await process(discover: true) }
         } catch { report(error) }
     }
 
@@ -179,119 +183,32 @@ final class UploadModel {
         do {
             guard let destination, let repository else { throw unavailable() }
             let paused = !snapshot.paused
-            work?.cancel()
+            await cancelWorkAndWait()
             try await repository.setPaused(paused, scope: destination.scope)
             if paused { await transport?.cancel(scope: destination.scope) }
             needsWork = !paused
             try await reload()
             wake()
-            await process(discover: true)
+            if !paused { await process(discover: true) }
         } catch { report(error) }
     }
 
     func retryFailed() async {
         do {
             guard let destination, let repository else { throw unavailable() }
+            await cancelWorkAndWait()
             try await repository.retryFailed(scope: destination.scope)
             needsWork = true
             try await reload()
             wake()
-            await process(discover: true)
+            if snapshot.canTransfer { await process(discover: true) }
         } catch { report(error) }
     }
 
-    func foreground() {
-        let wasForeground = isForeground
-        isForeground = true
-        _ = connectivity
-        if foregroundTask != nil {
-            if !wasForeground {
-                needsDiscovery = true
-                needsWork = true
-            }
-            wake()
-            return
-        }
-        needsDiscovery = true
-        needsWork = true
-        wake()
-        let id = UUID()
-        foregroundID = id
-        foregroundTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.foregroundID == id {
-                    self.foregroundTask = nil
-                    self.foregroundID = nil
-                }
-            }
-            await self.restore()
-            var nextWorkAt: Date?
-            while !Task.isCancelled, self.foregroundID == id, self.isForeground {
-                self.wakeGate.consumePending()
-                let now: Date
-                do {
-                    now = try await self.reload()
-                } catch {
-                    if !AuthSession.isCancelled(error) { self.report(error) }
-                    break
-                }
-                guard !Task.isCancelled, self.foregroundID == id, self.isForeground else { break }
-                let allowsNetwork = !self.connectivity.hasPath || self.connectivity.permits(self.snapshot.policy)
-                let hasPending = self.snapshot.pendingCount > 0 || !self.snapshot.pending.isEmpty
-                if let deadline = nextWorkAt, now >= deadline {
-                    nextWorkAt = nil
-                    if self.work == nil, self.snapshot.canTransfer, allowsNetwork, hasPending || self.snapshot.scanning
-                    {
-                        self.needsWork = true
-                    }
-                }
-                let discover = UploadWakePolicy.shouldDiscover(
-                    for: self.snapshot, needsDiscovery: self.needsDiscovery,
-                    lastDiscovery: self.lastDiscovery, now: now)
-                let shouldRunWork: Bool
-                if self.snapshot.policy == .disabled {
-                    self.needsDiscovery = false
-                    self.needsWork = false
-                    nextWorkAt = nil
-                    shouldRunWork = false
-                } else if discover {
-                    shouldRunWork = true
-                } else if self.snapshot.canTransfer, allowsNetwork, self.needsWork, hasPending {
-                    shouldRunWork = true
-                } else {
-                    if self.work == nil { self.needsWork = false }
-                    shouldRunWork = false
-                }
-                if shouldRunWork, self.work == nil {
-                    nextWorkAt = nil
-                    _ = self.startWork(discover: discover)
-                }
-                let waitSeconds = UploadWakePolicy.nextWait(
-                    for: self.snapshot, now: now, allowsNetwork: allowsNetwork, isWorking: self.work != nil)
-                let effectiveTimeout: TimeInterval?
-                if let waitSeconds {
-                    let proposed = now.addingTimeInterval(waitSeconds)
-                    if let existing = nextWorkAt, existing < proposed {
-                        effectiveTimeout = max(0.05, existing.timeIntervalSince(now))
-                    } else {
-                        nextWorkAt = proposed
-                        effectiveTimeout = waitSeconds
-                    }
-                } else {
-                    nextWorkAt = nil
-                    effectiveTimeout = nil
-                }
-                let outcome = await self.wakeGate.wait(timeout: effectiveTimeout)
-                if outcome == .cancelled { break }
-                if outcome == .timedOut, self.work == nil, self.snapshot.canTransfer, allowsNetwork,
-                    hasPending || self.snapshot.scanning
-                {
-                    nextWorkAt = nil
-                    self.needsWork = true
-                }
-            }
-        }
+    private func cancelWorkAndWait() async {
+        let previous = work
+        previous?.cancel()
+        await previous?.value
     }
 
     func background() {
@@ -312,10 +229,13 @@ final class UploadModel {
         foregroundID = nil
         wakeGate.cancel()
         work?.cancel()
+        message = nil
         await transport?.cancel(scope: nil)
         UploadBackgroundScheduler.cancel()
     }
+}
 
+extension UploadModel {
     func process(discover: Bool) async {
         guard let task = work ?? startWork(discover: discover) else { return }
         await withTaskCancellationHandler {
@@ -325,7 +245,7 @@ final class UploadModel {
         }
     }
 
-    private func startWork(discover: Bool) -> Task<Void, Never>? {
+    func startWork(discover: Bool) -> Task<Void, Never>? {
         guard let coordinator else { return nil }
         if discover { needsDiscovery = false }
         needsWork = false
@@ -357,6 +277,9 @@ final class UploadModel {
         return task
     }
 
+}
+
+extension UploadModel {
     func loadMoreHistory() async {
         historyLimit += 100
         do { try await reload() } catch { report(error) }
@@ -388,7 +311,7 @@ final class UploadModel {
         wake()
     }
 
-    private func wake() {
+    func wake() {
         wakeGate.wake()
     }
 
@@ -406,8 +329,11 @@ final class UploadModel {
         lastDiscovery = nil
     }
 
+}
+
+extension UploadModel {
     @discardableResult
-    private func reload() async throws -> Date {
+    func reload() async throws -> Date {
         guard let destination, let repository else { return Date() }
         reloadGeneration &+= 1
         let generation = reloadGeneration
@@ -454,55 +380,15 @@ final class UploadModel {
         return evaluatedAt
     }
 
-    private func receivedBackgroundEvent() {
-        needsWork = true
-        wake()
-        guard !isForeground, work == nil else { return }
-        backgroundWindow(completions: [])
-    }
-
-    private func finishedBackgroundEvents() {
-        needsWork = true
-        wake()
-        let completions = backgroundCompletions
-        backgroundCompletions.removeAll()
-        backgroundWindow(completions: completions)
-    }
-
-    private func backgroundWindow(completions: [() -> Void]) {
-        let logger = self.logger
-        Task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { @MainActor in await self.backgroundCheck(discover: false) }
-                group.addTask {
-                    do { try await Task.sleep(for: .seconds(20)) } catch is CancellationError { return } catch {
-                        logger.error(
-                            "Background upload deadline failed: \(error.localizedDescription, privacy: .private)")
-                    }
-                }
-                _ = await group.next()
-                group.cancelAll()
-                // Outcomes were persisted by the URLSession delegate before entering this window.
-                for completion in completions { completion() }
-            }
-        }
-    }
-
-    private func networkChanged() {
-        if !connectivity.permits(snapshot.policy) {
-            work?.cancel()
-            if snapshot.policy == .wiFiOnly {
-                Task { await transport?.cancel(scope: destination?.scope) }
-            }
-        } else if snapshot.canTransfer {
-            needsWork = true
-        }
-        wake()
-    }
-
-    private func report(_ error: Error) {
+    func report(_ error: Error) {
         message = error.localizedDescription
         logger.error("Upload queue requires attention: \(error.localizedDescription, privacy: .private)")
+        if case ClientError.signedOut = error {
+            Task { @MainActor in
+                await self.stop()
+                await self.onSessionRevoked?()
+            }
+        }
     }
 
     private func unavailable() -> ClientError {

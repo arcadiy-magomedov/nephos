@@ -4,8 +4,8 @@ import XCTest
 @testable import NephosCore
 
 private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let authorized = request.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed"
         let status = request.url?.path == "/revoked" ? 401 : authorized ? 200 : 401
@@ -51,7 +51,7 @@ final class SessionRecoveryTests: XCTestCase {
         let tokens = RecoveryTokens()
         let client = api(tokens)
         let data = try await client.data(client.request("v1/libraries"))
-        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{\"items\":[]}")
+        XCTAssertEqual(String(bytes: data, encoding: .utf8), "{\"items\":[]}")
         XCTAssertEqual(tokens.recoveries, 1)
         XCTAssertFalse(client.invalidated)
     }
@@ -93,4 +93,57 @@ final class SessionRecoveryTests: XCTestCase {
             XCTAssertFalse(client.invalidated)
         }
     }
+
+    @MainActor
+    func testExternalSignOutAndForbiddenAccessStateTransitions() async throws {
+        let saved = Credentials(
+            connection: Connection(
+                baseURL: URL(string: "https://photos.example.test")!,
+                config: ServerConfig(
+                    serverId: "test", issuer: "https://photos.example.test/realms/nephos",
+                    clientId: "nephos-ios", maxUploadBytes: nil, chunkSize: nil),
+                allowDevelopmentHTTP: false),
+            subject: "test-account", nonce: "test-nonce", accessToken: "access",
+            refreshToken: "offline-refresh", expiresAt: .distantFuture)
+        let store = RecoverySessionStorage(saved)
+        let flag = RecoveryFlag()
+        let model = SignInModel(
+            store: store,
+            validate: { _ in
+                if flag.forbidden { throw ClientError.http(403, "Access was denied.") }
+            })
+        await model.restore()
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertFalse(model.hasUnfinishedEnrollment)
+        XCTAssertTrue(model.accessDenied)
+
+        flag.forbidden = false
+        await model.restore()
+        XCTAssertEqual(model.screen, .signedIn)
+        XCTAssertFalse(model.accessDenied)
+        XCTAssertTrue(model.message.isEmpty)
+
+        await model.handleExternalSignOut()
+        XCTAssertEqual(model.screen, .welcome)
+        XCTAssertFalse(model.hasUnfinishedEnrollment)
+        XCTAssertNil(try store.vault().current)
+    }
+}
+
+@MainActor
+private final class RecoveryFlag {
+    var forbidden = true
+}
+
+@MainActor
+private final class RecoverySessionStorage: SessionStorage {
+    private var currentVault = EnrollmentVault()
+    init(_ credentials: Credentials) { currentVault.save(credentials) }
+    func vault() throws -> EnrollmentVault { currentVault }
+    @discardableResult
+    func update(_ change: @Sendable (inout EnrollmentVault) throws -> Void) throws -> EnrollmentVault {
+        try change(&currentVault)
+        return currentVault
+    }
+    func remove() throws { currentVault = EnrollmentVault() }
 }

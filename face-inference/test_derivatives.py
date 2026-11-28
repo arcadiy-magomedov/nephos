@@ -3,19 +3,18 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import runpy
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
-from PIL import Image, ImageCms
 import numpy as np
-
 from decoder import ANALYSIS_MAX_SIDE, ImageRejected, decode_working_rgb
 from derivatives import SIZES, render
 from infer import analyze
+from PIL import Image, ImageCms
 from worker_pool import WorkerResult
 
 ROOT = Path(__file__).resolve().parent
@@ -31,7 +30,7 @@ class DerivativeTests(unittest.TestCase):
             if valid:
                 response = render(output.getvalue())
                 with Image.open(io.BytesIO(base64.b64decode(response["variants"]["512"]))) as preview:
-                    for actual, expected in zip(preview.getpixel((20, 20)), (200, 120, 40)):
+                    for actual, expected in zip(preview.getpixel((20, 20)), (200, 120, 40), strict=True):
                         self.assertAlmostEqual(actual, expected, delta=3)
             else:
                 with self.assertRaisesRegex(ImageRejected, "^unsupported_color_profile$"):

@@ -17,24 +17,23 @@ enum IdentityTokenClaims {
             audience.count == 1 || claims["azp"] as? String == clientID,
             claims["azp"] == nil || claims["azp"] as? String == clientID
         else { throw ClientError.invalid("Identity token audience validation failed.") }
-        func numericDate(_ key: String) -> Double? {
-            guard let value = claims[key] as? NSNumber,
-                CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite
-            else { return nil }
-            return value.doubleValue
-        }
         let timestamp = now.timeIntervalSince1970
-        guard let expiry = numericDate("exp"), expiry > timestamp,
-            let issued = numericDate("iat"), issued <= timestamp + 30, expiry > issued
+        guard let expiry = numericDate(claims["exp"]), expiry > timestamp,
+            let issued = numericDate(claims["iat"]), issued <= timestamp + 30, expiry > issued
         else { throw ClientError.invalid("Identity token lifetime validation failed.") }
         if claims["nbf"] != nil {
-            guard let notBefore = numericDate("nbf"), notBefore <= timestamp + 30 else {
+            guard let notBefore = numericDate(claims["nbf"]), notBefore <= timestamp + 30 else {
                 throw ClientError.invalid("Identity token is not valid yet.")
             }
         }
         guard let subject = claims["sub"] as? String, !subject.isEmpty else {
             throw ClientError.invalid("Identity token subject is missing.")
         }
+        try validatePurpose(claims, subject: subject, purpose: purpose)
+        return subject
+    }
+
+    private static func validatePurpose(_ claims: [String: Any], subject: String, purpose: Purpose) throws {
         switch purpose {
         case .authorization(let nonce):
             guard claims["nonce"] as? String == nonce else {
@@ -49,7 +48,13 @@ enum IdentityTokenClaims {
                 throw ClientError.invalid("Refresh changed the authenticated account.")
             }
         }
-        return subject
+    }
+
+    private static func numericDate(_ claim: Any?) -> Double? {
+        guard let value = claim as? NSNumber,
+            CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite
+        else { return nil }
+        return value.doubleValue
     }
 }
 

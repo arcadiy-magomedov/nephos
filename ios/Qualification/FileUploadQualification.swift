@@ -3,6 +3,12 @@ import SwiftUI
 
 @MainActor
 enum FileUploadQualification {
+    private struct Input {
+        let name: String
+        let mediaType: String
+        let count: Int
+        let byte: UInt8
+    }
     static let identifier = "app.nephos.ui-qualification.generic-file"
     private static var uploader: BackgroundFileUploader?
     private static var events: FileUploadEventStore?
@@ -26,20 +32,20 @@ enum FileUploadQualification {
             onError: { error in Task { @MainActor in writeResult(["error": error]) } })
         self.uploader = uploader
         uploader.activate()
-        let inputs: [(String, String, Int, UInt8)] = [
-            ("book.pdf", "application/pdf", 5 * 1024 * 1024, 17),
-            ("book.epub", "application/epub+zip", 1024 * 1024, 29),
-            ("empty.custom", "application/x-nephos-fixture", 0, 0),
+        let inputs = [
+            Input(name: "book.pdf", mediaType: "application/pdf", count: 5 * 1024 * 1024, byte: 17),
+            Input(name: "book.epub", mediaType: "application/epub+zip", count: 1024 * 1024, byte: 29),
+            Input(name: "empty.custom", mediaType: "application/x-nephos-fixture", count: 0, byte: 0),
         ]
-        for (name, type, count, byte) in inputs {
-            let file = directory.appendingPathComponent(name)
-            try Data(repeating: byte, count: count).write(to: file)
-            var request = URLRequest(url: origin.appendingPathComponent("upload").appendingPathComponent(name))
+        for input in inputs {
+            let file = directory.appendingPathComponent(input.name)
+            try Data(repeating: input.byte, count: input.count).write(to: file)
+            var request = URLRequest(url: origin.appendingPathComponent("upload").appendingPathComponent(input.name))
             request.httpMethod = "PUT"
-            request.setValue(type, forHTTPHeaderField: "Content-Type")
+            request.setValue(input.mediaType, forHTTPHeaderField: "Content-Type")
             request.setValue("fixture-only", forHTTPHeaderField: "X-Fixture-Caller")
             let descriptor = FileUploadDescriptor(
-                id: UUID(), scope: "generic-fixture", byteCount: Int64(count), context: Data(name.utf8))
+                id: UUID(), scope: "generic-fixture", byteCount: Int64(input.count), context: Data(input.name.utf8))
             try await uploader.enqueue(descriptor, request: request, file: file)
         }
         try Data("queued".utf8).write(to: directory.appendingPathComponent("queued"), options: .atomic)

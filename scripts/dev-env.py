@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate local-only credentials without putting them in command output."""
 
-import os
 import base64
-from pathlib import Path
+import os
 import secrets
+from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 path = root / ".env"

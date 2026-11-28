@@ -19,8 +19,8 @@ import uuid
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
 from dpop_proof import claims, proof, thumbprint
+from service_diagnostics import print_service_diagnostics
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -216,7 +216,7 @@ def qualify(base, replica, service_key, restart, sql, rotate):
             return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        winners = list(pool.map(claim, zip(contenders, (base, replica))))
+        winners = list(pool.map(claim, zip(contenders, (base, replica), strict=True)))
     assert sum(value is not None for value in winners) == 1
     # Profile changes do not advance epoch or invalidate acquired sessions.
     identity = request(private + "/users/" + subject, headers=headers)
@@ -442,7 +442,7 @@ def main():
         qualify(base, replica, key, restart, sql, rotate)
     except Exception:
         if identity in containers:
-            print(docker("logs", "--tail", "40", identity))
+            print_service_diagnostics(docker("logs", "--tail", "40", identity))
         raise
     finally:
         for container in reversed(containers):

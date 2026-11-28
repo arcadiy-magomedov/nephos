@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verify HEIC upgrade/backfill in a disposable Library database, never live tables."""
 
-from pathlib import Path
 import subprocess
 import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "src/Nephos.Migrations/Sql/library"

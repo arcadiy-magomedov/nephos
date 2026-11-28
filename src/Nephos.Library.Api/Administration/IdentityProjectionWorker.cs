@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using Npgsql;
 
 namespace Nephos.Library.Api.Administration;
@@ -15,7 +14,7 @@ public sealed class IdentityProjectionWorker(IAdministrationRepository repositor
             catch (Exception e) when (e is HttpRequestException or NpgsqlException or TimeoutException
                 or TaskCanceledException or System.Text.Json.JsonException or AdministrationConflictException)
             {
-                logger.LogWarning("Identity projection unavailable ({ErrorType}); retaining last known state", e.GetType().Name);
+                LibraryLog.IdentityProjectionFailed(logger, e.GetType().Name);
             }
             await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }

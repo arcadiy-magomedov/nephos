@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verify stored operational metrics, evaluated alerts, dashboard, and broker permissions."""
 
-import subprocess
 import json
 import secrets
+import subprocess
 import urllib.parse
 import uuid
 
@@ -92,5 +92,6 @@ for user, allowed_read, allowed_write in (
 for path in ("/admin/", "/realms/master/", "/metrics", "/internal/administration/users"):
     smoke.request(smoke.API + path, expected=404)
 print(
-    "PASS: persisted operational gauges, evaluated alert rules, provisioned dashboard, restricted broker identities and private gateway routes"
+    "PASS: persisted operational gauges, evaluated alert rules, provisioned dashboard, "
+    "restricted broker identities and private gateway routes"
 )

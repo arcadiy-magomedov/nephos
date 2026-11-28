@@ -1,15 +1,22 @@
 import Foundation
 
+private struct EnrollmentConfiguration: Decodable, Sendable {
+    let version: Int
+    let origin: String
+    let issuer: String
+    let clientId: String
+    let grantType: String
+    let persistentLogin: PersistentLoginConfiguration?
+
+    enum CodingKeys: String, CodingKey {
+        case version = "v"
+        case origin, issuer, clientId, grantType, persistentLogin
+    }
+
+}
+
 enum QREnrollmentClient {
     static let grant = "urn:nephos:params:oauth:grant-type:qr"
-    private struct Configuration: Decodable, Sendable {
-        let v: Int
-        let origin: String
-        let issuer: String
-        let clientId: String
-        let grantType: String
-        let persistentLogin: PersistentLoginConfiguration?
-    }
     private struct Challenge: Decodable, Sendable {
         let challengeId: String
         let challenge: String
@@ -36,8 +43,8 @@ enum QREnrollmentClient {
         var connection = Connection(baseURL: origin, config: config, allowDevelopmentHTTP: false)
         _ = try await AuthSession.discovery(connection)
         let enrollment = try await HTTP.json(
-            Configuration.self, HTTP.request(issuer.appendingPathComponent("nephos-admin/enrollment/config")))
-        guard enrollment.v == 1, enrollment.origin == qr.origin,
+            EnrollmentConfiguration.self, HTTP.request(issuer.appendingPathComponent("nephos-admin/enrollment/config")))
+        guard enrollment.version == 1, enrollment.origin == qr.origin,
             enrollment.issuer == config.issuer, enrollment.clientId == config.clientId,
             enrollment.grantType == grant
         else { throw ClientError.invalid("The server's QR enrollment configuration does not match this code.") }
@@ -77,18 +84,16 @@ enum QREnrollmentClient {
         let key: DPoPKey? =
             pending.connection.persistentLogin?.supportsDPoP == true
             ? DPoPKey(signingKey: DeviceSigningKey(persisted: pending.privateKey)) : nil
-        let (data, http) = try await OAuthTransport.post(discovery.token_endpoint, fields: fields, key: key)
+        let (data, http) = try await OAuthTransport.post(discovery.tokenEndpoint, fields: fields, key: key)
         try check(data, response: http)
         let tokens = try OAuthResponse.tokens(data, status: http.statusCode)
-        guard tokens.token_type.lowercased() == "bearer", tokens.expires_in.isFinite,
-            tokens.expires_in > 0, !tokens.access_token.isEmpty,
-            let idToken = tokens.id_token, let refresh = tokens.refresh_token, !refresh.isEmpty
+        guard let idToken = tokens.idToken, let refresh = tokens.refreshToken, !refresh.isEmpty
         else { throw ClientError.invalid("The sign-in service omitted a persistent OIDC session.") }
         let subject = try await JWTVerifier.verify(
             idToken, discovery: discovery, clientID: pending.connection.config.clientId,
             purpose: .authorization(nonce: pending.nonce))
         try await JWTVerifier.verifyAccess(
-            tokens.access_token, discovery: discovery, clientID: pending.connection.config.clientId,
+            tokens.accessToken, discovery: discovery, clientID: pending.connection.config.clientId,
             subject: subject)
         let thumbprint = try key?.thumbprint
         if let thumbprint {
@@ -99,8 +104,8 @@ enum QREnrollmentClient {
         try Task.checkCancellation()
         return Credentials(
             connection: pending.connection, subject: subject, nonce: pending.nonce,
-            accessToken: tokens.access_token, refreshToken: refresh,
-            expiresAt: Date().addingTimeInterval(tokens.expires_in), dpopKeyThumbprint: thumbprint)
+            accessToken: tokens.accessToken, refreshToken: refresh,
+            expiresAt: Date().addingTimeInterval(tokens.expiresIn), dpopKeyThumbprint: thumbprint)
     }
 
     private static func response(_ request: URLRequest) async throws -> Data {

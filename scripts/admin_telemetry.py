@@ -2,8 +2,8 @@
 
 import logging
 import time
-from flask import g, request
 
+from flask import g, request
 from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter

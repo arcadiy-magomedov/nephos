@@ -70,16 +70,25 @@ public sealed class PostgresSharingRepository(NpgsqlDataSource source) : ISharin
         await using (var access = Command(connection, transaction, """
             SELECT EXISTS(SELECT 1 FROM library_members m JOIN principals p ON p.subject=m.subject
                 WHERE m.library_id=$1 AND m.subject=$2 AND p.enabled)
-            AND EXISTS(SELECT 1 FROM principals WHERE subject=$3 AND enabled AND discoverable AND display_name IS NOT NULL)
-            """, input.LibraryId, subject, input.RecipientId))
+            """, input.LibraryId, subject))
             if (subject == input.RecipientId || !(bool)(await access.ExecuteScalarAsync(token))!) throw new GalleryAccessException();
         await LockAsync(connection, transaction, input.LibraryId, token);
+        var existingShare = false;
         await using (var existing = Command(connection, transaction,
             "SELECT owner_subject,recipient_subject,library_id FROM shares WHERE id=$1 FOR UPDATE", id))
         await using (var reader = await existing.ExecuteReaderAsync(token))
-            if (await reader.ReadAsync(token) && (reader.GetString(0) != subject ||
-                reader.GetString(1) != input.RecipientId || reader.GetGuid(2) != input.LibraryId))
-                throw new ResourceConflictException("Share identity is bound to another owner, recipient or library.");
+            if (await reader.ReadAsync(token))
+            {
+                if (reader.GetString(0) != subject ||
+                    reader.GetString(1) != input.RecipientId || reader.GetGuid(2) != input.LibraryId)
+                    throw new ResourceConflictException("Share identity is bound to another owner, recipient or library.");
+                existingShare = true;
+            }
+        await using (var recipientAccess = Command(connection, transaction, """
+            SELECT EXISTS(SELECT 1 FROM principals WHERE subject=$1 AND enabled
+                AND ($2 OR (discoverable AND display_name IS NOT NULL)))
+            """, input.RecipientId, existingShare))
+            if (!(bool)(await recipientAccess.ExecuteScalarAsync(token))!) throw new GalleryAccessException();
         await using (var roots = Command(connection, transaction, """
             SELECT count(*) FROM assets WHERE id=ANY($1) AND library_id=$2 AND uploaded_by=$3
                 AND NOT hidden AND deleted_at IS NULL
@@ -91,8 +100,12 @@ public sealed class PostgresSharingRepository(NpgsqlDataSource source) : ISharin
             await using var write = Command(connection, transaction, """
                 INSERT INTO shares(id,library_id,owner_subject,recipient_subject,all_assets) VALUES($1,$2,$3,$4,$5)
                 ON CONFLICT(id) DO UPDATE SET all_assets=EXCLUDED.all_assets
+                WHERE shares.library_id=EXCLUDED.library_id
+                  AND shares.owner_subject=EXCLUDED.owner_subject
+                  AND shares.recipient_subject=EXCLUDED.recipient_subject
                 """, id, input.LibraryId, subject, input.RecipientId, input.AllAssets);
-            await write.ExecuteNonQueryAsync(token);
+            if (await write.ExecuteNonQueryAsync(token) == 0)
+                throw new ResourceConflictException("Share identity is bound to another owner, recipient or library.");
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
         { throw new ResourceConflictException("A share already exists for this recipient and library. Update that share instead."); }

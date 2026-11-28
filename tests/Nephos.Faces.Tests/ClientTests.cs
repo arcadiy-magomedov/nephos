@@ -33,7 +33,7 @@ public sealed class ClientTests
             Assert.Equal(new string('s', 64), request.Headers.GetValues("X-Nephos-Service-Key").Single());
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(source with { Subject = "other" }) };
         }), Config);
-        Assert.Null(await client.SourceAsync(owner, source.Id, default));
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SourceAsync(owner, source.Id, default));
     }
 
     [Fact]
@@ -67,7 +67,10 @@ public sealed class ClientTests
         var source = PersistenceTests.Source("owner") with { MediaType = mediaType };
         var client = new AnalysisSourceClient(new Factory(_ =>
             new(HttpStatusCode.OK) { Content = JsonContent.Create(source) }), Config);
-        Assert.Equal(supported, await client.SourceAsync(source.Subject, source.Id, default) is not null);
+        if (supported)
+            Assert.NotNull(await client.SourceAsync(source.Subject, source.Id, default));
+        else
+            await Assert.ThrowsAsync<HttpRequestException>(() => client.SourceAsync(source.Subject, source.Id, default));
     }
 
     [Fact]
@@ -81,7 +84,7 @@ public sealed class ClientTests
         };
         var metadata = new AnalysisSourceClient(new Factory(_ =>
             new(HttpStatusCode.OK) { Content = JsonContent.Create(source) }), Config);
-        Assert.Null(await metadata.SourceAsync(source.Subject, source.Id, default));
+        await Assert.ThrowsAsync<HttpRequestException>(() => metadata.SourceAsync(source.Subject, source.Id, default));
         var original = new AnalysisSourceClient(new Factory(_ =>
             new(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }), Config);
         await Assert.ThrowsAsync<InvalidDataException>(() =>
@@ -108,5 +111,40 @@ public sealed class ClientTests
 
         Assert.Equal(1, calls);
         Assert.Equal([first], allowed.ToArray());
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"authorizedIds\":null}")]
+    public async Task MalformedAuthorizationDoesNotBecomeAnEmptySuccess(string body)
+    {
+        var client = new AnalysisSourceClient(new Factory(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+        }), Config);
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.AuthorizeSourcesAsync("owner", [Guid.NewGuid()], default));
+    }
+
+    [Fact]
+    public async Task SourceWithNullHashIsRetryableWithoutNullDereference()
+    {
+        var source = PersistenceTests.Source("owner") with { Sha256 = null! };
+        var client = new AnalysisSourceClient(new Factory(_ => new(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(source)
+        }), Config);
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.SourceAsync("owner", source.Id, default));
+    }
+
+    [Fact]
+    public async Task UnexpectedOwnerAccessSuccessIsNotMisclassifiedAsDisabled()
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("sub", "owner")]))
+        };
+        var client = new AnalysisSourceClient(new Factory(_ => new(HttpStatusCode.OK)), Config);
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.IsEnabledAsync(context, default));
     }
 }

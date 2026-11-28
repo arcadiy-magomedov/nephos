@@ -19,11 +19,10 @@ struct UploadRepositoryTests {
     }
 
     private func candidate(_ id: String, revision: String = "1", live: Bool = false) -> UploadCandidate {
-        var resources = [
-            UploadResourceDescriptor(
-                type: 1, role: "photo", filename: "\(id).HEIC",
-                uniformTypeIdentifier: "public.heic", mediaType: "image/heic", isPrimary: true)
-        ]
+        let primary = UploadResourceDescriptor(
+            type: 1, role: "photo", filename: "\(id).HEIC",
+            uniformTypeIdentifier: "public.heic", mediaType: "image/heic", isPrimary: true)
+        var resources = [primary]
         if live {
             resources.append(
                 UploadResourceDescriptor(
@@ -183,5 +182,9 @@ struct UploadRepositoryTests {
         #expect(paused.paused)
         #expect(!paused.canTransfer)
         #expect(paused.batch?.total == 2)
+        try await repository.setPolicy(.wiFiOnly, scope: scope)
+        let unpaused = try await repository.snapshot(scope: scope, limit: 10)
+        #expect(!unpaused.paused)
+        #expect(unpaused.canTransfer)
     }
 }

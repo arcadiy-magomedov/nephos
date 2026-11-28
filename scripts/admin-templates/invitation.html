@@ -5,7 +5,7 @@
 <dialog class="modal" open aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" data-return-url="/users/{{ user.subject }}#connect-device">
   <header class="modal-header"><h2 id="dialog-title">Connect device</h2><a class="icon-button" href="/users/{{ user.subject }}#connect-device" aria-label="Close dialog" data-initial-focus>×</a></header>
   {% if invitation %}
-    {% set terminal = invitation.status in ('used', 'consumed', 'expired', 'cancelled') %}
+    {% set terminal = invitation.status in ('used', 'consumed', 'expired', 'cancelled', 'revoked') %}
     <p id="dialog-description" class="muted">{{ 'The invitation can no longer be used.' if terminal else 'Show the code to the account owner.' }}</p>
     {% if qr_data and not terminal %}<img class="qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Single-use QR code for signing in">
     {% elif not terminal %}<p class="warning">This invitation was already issued, but the code was not retained. Cancel it before creating another code.</p>{% endif %}

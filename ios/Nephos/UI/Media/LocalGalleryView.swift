@@ -191,7 +191,10 @@ struct LocalGalleryView: View {
             Text(
                 library.authorization == .restricted
                     ? "Photos access is restricted on this device."
-                    : "Allow Photos access to browse your photos and videos. Automatic upload stays off until you enable it."
+                    : """
+                    Allow Photos access to browse your photos and videos. \
+                    Automatic upload stays off until you enable it.
+                    """
             )
         } actions: {
             if library.authorization == .notDetermined {
@@ -212,12 +215,20 @@ struct LocalGalleryView: View {
         .controlSize(.large)
         .padding(.top, 40)
     }
+}
 
+extension LocalGalleryView {
     private var connectionNotice: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Couldn't connect to Nephos").font(.subheadline.weight(.semibold))
+            Text(session.accessDenied ? "Access disabled" : "Couldn't connect to Nephos")
+                .font(.subheadline.weight(.semibold))
             Text("Your local media is still available. \(session.message)").font(.footnote)
-            Button("Retry connection") { Task { await session.restore() } }.frame(minHeight: 44)
+            HStack(spacing: 16) {
+                Button("Retry connection") { Task { await session.restore() } }.frame(minHeight: 44)
+                if session.accessDenied {
+                    Button("Sign out", role: .destructive, action: signOut).frame(minHeight: 44)
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -7,7 +7,11 @@ import jakarta.ws.rs.core.Response;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.events.EventType;
-import org.keycloak.models.*;
+import org.keycloak.models.AuthenticatedClientSessionModel;
+import org.keycloak.models.ClientSessionContext;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
 import org.keycloak.models.session.UserSessionPersisterProvider;
 import org.keycloak.models.sessions.infinispan.transaction.DefaultInfinispanTransactionProvider;
 import org.keycloak.models.sessions.infinispan.transaction.InfinispanTransactionProvider;
@@ -99,7 +103,7 @@ public final class QrGrant extends OAuth2GrantTypeBase {
                 if (offline == null || !AuthenticationManager.isSessionValid(realm, offline))
                     return fail("session_revoked");
                 var clientSession = persisted.loadClientSession(realm, client, offline, true);
-                if (clientSession == null || clientSession.getTimestamp() != EnrollmentStore.number(data, "clientTimestamp"))
+                if (clientSession == null || clientTimestamp(clientSession) != EnrollmentStore.number(data, "clientTimestamp"))
                     return fail("session_revoked");
                 String json = EnrollmentCrypto.crypt((String) data.get("receipt"), binding, false);
                 var tokens = JsonSerialization.readValue(json, org.keycloak.representations.AccessTokenResponse.class);
@@ -152,7 +156,7 @@ public final class QrGrant extends OAuth2GrantTypeBase {
             data.put("status", "used"); data.put("binding", binding);
             if (bound) data.put("dpopJkt", dpopJkt);
             data.put("sessionId", userSession.getId()); data.put("deliveryUntil", now + 600);
-            data.put("clientTimestamp", offlineClient.getTimestamp());
+            data.put("clientTimestamp", clientTimestamp(offlineClient));
             data.put("receipt", EnrollmentCrypto.crypt(json, binding, true));
             store.save(record.id, record.kind, record.subject, record.expiresAt, data);
             store.save("request:" + requestId, "request", record.subject, 0, Map.of("inviteId", inviteId));
@@ -173,6 +177,12 @@ public final class QrGrant extends OAuth2GrantTypeBase {
     }
     private Response fail(String code) {
         throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, code, Response.Status.BAD_REQUEST);
+    }
+    // Keycloak 26.8 exposes no non-deprecated accessor for the persisted refresh timestamp.
+    // Keep this fence: a refreshed session must not replay its original enrollment receipt.
+    @SuppressWarnings("removal")
+    private static int clientTimestamp(AuthenticatedClientSessionModel clientSession) {
+        return clientSession.getTimestamp();
     }
     private Response proofFailure(String code) {
         throw new CorsErrorResponseException(cors, "invalid_dpop_proof", code, Response.Status.BAD_REQUEST);

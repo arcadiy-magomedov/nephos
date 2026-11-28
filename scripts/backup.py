@@ -5,13 +5,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import subprocess
 import tarfile
 import time
 import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VOLUMES = ("postgres", "media", "rabbitmq")
@@ -85,8 +85,7 @@ def run_stdin(command, *, input_bytes=None, stdin_file=None):
         command,
         input=input_bytes,
         stdin=stdin_file,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         cwd=ROOT,
         check=True,
     )
@@ -371,7 +370,7 @@ def inspect_media_blobs_archive(archive_path, verify_hashes=False):
                         hasher = hashlib.sha256()
                         actual_size = 0
                         with extracted:
-                            for block in iter(lambda: extracted.read(1024 * 1024), b""):
+                            while block := extracted.read(1024 * 1024):
                                 hasher.update(block)
                                 actual_size += len(block)
                         if hasher.hexdigest() != name or actual_size != member.size:
@@ -541,9 +540,9 @@ def wait_for_postgres(container, timeout=60, tcp=False):
         try:
             run(*command)
             return
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as error:
             if time.monotonic() >= deadline:
-                raise RuntimeError("Restored PostgreSQL failed readiness.")
+                raise RuntimeError("Restored PostgreSQL failed readiness.") from error
             time.sleep(1)
 
 
@@ -631,9 +630,7 @@ def reconcile_restored_storage(container):
     array_literal = "ARRAY[" + ",".join(f"'{asset_id}'::uuid" for asset_id in unprojected) + "]"
     run_stdin(
         ["docker", "exec", "-i", container, "psql", "-U", "postgres", "-d", "storage", "-v", "ON_ERROR_STOP=1"],
-        input_bytes=f"BEGIN;\nUPDATE outbox SET sent_at = NULL WHERE id = ANY({array_literal});\nCOMMIT;\n".encode(
-            "utf-8"
-        ),
+        input_bytes=f"BEGIN;\nUPDATE outbox SET sent_at = NULL WHERE id = ANY({array_literal});\nCOMMIT;\n".encode(),
     )
 
 
@@ -928,9 +925,9 @@ def verify_restore_v1(path, expected_queued=0, expected_sets=0, expected_snapsho
             try:
                 run("docker", "exec", broker, "rabbitmq-diagnostics", "-q", "check_running")
                 break
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as error:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError("Restored RabbitMQ failed readiness.")
+                    raise RuntimeError("Restored RabbitMQ failed readiness.") from error
                 time.sleep(2)
         queues = run("docker", "exec", broker, "rabbitmqctl", "list_queues", "--quiet", "name", "messages")
         rows = [line.split("\t") for line in queues.splitlines() if "\t" in line]

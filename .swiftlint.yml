@@ -1,0 +1,28 @@
+# SwiftLint 0.65.1 default rules; swift-format owns layout.
+included:
+  - ios/Nephos
+  - ios/Tests
+  - ios/Qualification
+  - ios/Package.swift
+excluded:
+  - ios/.build
+# Match swift-format's multiline layout without disabling the brace rule.
+opening_brace:
+  ignore_multiline_type_headers: true
+  ignore_multiline_statement_conditions: true
+  ignore_multiline_function_signatures: true
+trailing_comma:
+  mandatory_comma: true
+line_length:
+  ignores_comments: true
+  ignores_interpolated_strings: true
+  ignores_urls: true
+identifier_name:
+  excluded:
+    - id
+    - qr
+    # Standard JOSE/JWK field names and Cartesian coordinates.
+    - x
+    - y
+    - n
+    - e

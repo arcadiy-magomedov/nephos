@@ -5,12 +5,12 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 try:
@@ -114,9 +114,11 @@ class ArchiveExportTests(unittest.TestCase):
     def test_failed_tar_export_is_not_success(self):
         with tempfile.TemporaryDirectory(prefix="nephos-archive-test-") as directory:
             destination = Path(directory) / "database.tar"
-            with patch.object(backup.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["docker"])):
-                with self.assertRaises(subprocess.CalledProcessError):
-                    backup.export_volume("fixture-volume", destination)
+            with (
+                patch.object(backup.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["docker"])),
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                backup.export_volume("fixture-volume", destination)
 
 
 class ManifestVerificationTests(unittest.TestCase):
@@ -390,9 +392,9 @@ class OnlineBackupFlowTests(unittest.TestCase):
                 ),
                 patch.object(backup, "run", side_effect=fake_run),
                 patch.object(backup.subprocess, "run", side_effect=fake_subprocess_run),
+                self.assertRaisesRegex(RuntimeError, "Referenced blobs missing"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "Referenced blobs missing"):
-                    backup.create(destination, online=True)
+                backup.create(destination, online=True)
 
             self.assertIn(("docker", "compose", "stop", "cleanup"), run_calls)
             self.assertIn(("docker", "compose", "start", "cleanup"), run_calls)
@@ -586,7 +588,7 @@ class OnlineRestoreAndReconciliationTests(unittest.TestCase):
                 backup.verify_restore(path, expected_sets=2, expected_snapshots=1)
 
             base_container, faces_container = created_containers
-            # Ordering invariant on base postgres: start -> globals -> pg_restore(library, storage, keycloak) -> reconcile
+            # Base postgres ordering: start -> globals -> pg_restore(library, storage, keycloak) -> reconcile.
             base_events = [ev for ev in events if ev[1] == base_container]
             self.assertEqual(
                 [
@@ -681,9 +683,9 @@ class OnlineRestoreAndReconciliationTests(unittest.TestCase):
             with (
                 patch.object(backup, "run", side_effect=fake_run),
                 patch.object(backup, "run_stdin"),
+                self.assertRaisesRegex(RuntimeError, "failed integrity verification"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "failed integrity verification"):
-                    backup.verify_restore(path)
+                backup.verify_restore(path)
 
             self.assertEqual(started, removed)
 

@@ -1,11 +1,12 @@
 """Transport compatibility is independent of model/pipeline versioning."""
 
 import io
+import json
 import os
-from pathlib import Path
 import runpy
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parent
@@ -22,6 +23,22 @@ from worker_pool import (  # noqa: E402
 
 
 class ApiVersionTests(unittest.TestCase):
+    def test_model_integrity_is_checked_before_starting_any_workers(self):
+        with patch.dict(os.environ, {"INFERENCE_KEY": "k" * 32}):
+            server = runpy.run_path(str(ROOT / "server.py"))
+        with (
+            patch.object(
+                Path, "read_text", return_value=json.dumps({"models": [{"file": "fixture", "sha256": "bad"}]})
+            ),
+            patch.object(Path, "read_bytes", return_value=b"fixture transport bytes"),
+            patch.object(server["pool"], "warm") as warm,
+            patch("http.server.ThreadingHTTPServer") as httpd,
+            self.assertRaisesRegex(RuntimeError, "checksum"),
+        ):
+            server["run_server"]()
+        warm.assert_not_called()
+        httpd.assert_not_called()
+
     def test_v1_and_legacy_routes_share_authentication_and_processing(self):
         for file, setting, header, route in (
             ("server.py", "INFERENCE_KEY", "X-Nephos-Inference-Key", "infer"),
@@ -109,9 +126,11 @@ class ApiVersionTests(unittest.TestCase):
             handler.headers = {"Content-Length": "4", header: "k" * 32}
             handler.rfile = Mock()
             handler.reply = Mock()
-            with patch.object(server["pool"], "slot", side_effect=WorkerBusyError("busy")):
-                with patch.object(server["pool"], "execute") as execute:
-                    handler.do_POST()
-                    execute.assert_not_called()
+            with (
+                patch.object(server["pool"], "slot", side_effect=WorkerBusyError("busy")),
+                patch.object(server["pool"], "execute") as execute,
+            ):
+                handler.do_POST()
+                execute.assert_not_called()
             handler.rfile.read.assert_not_called()
             handler.reply.assert_called_once_with(429, b"{}")

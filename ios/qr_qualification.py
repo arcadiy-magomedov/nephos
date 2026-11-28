@@ -3,12 +3,12 @@
 
 import argparse
 import json
-from pathlib import Path
 import plistlib
 import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 from onboarding_qualification import BUNDLE, IOS, project
 
@@ -51,7 +51,10 @@ def main():
     parser.add_argument(
         "--local-gallery",
         action="store_true",
-        help="Also test the local gallery. Adds Photos fixtures and deletes only its own fixture; use a disposable simulator.",
+        help=(
+            "Also test the local gallery. Adds Photos fixtures and deletes only its own fixture; "
+            "use a disposable simulator."
+        ),
     )
     parser.add_argument(
         "--qr-image", type=Path, help="Fresh real invitation PNG from the isolated HTTPS service fixture."
@@ -85,7 +88,7 @@ def main():
             str(workspace / "DerivedData"),
         ]
         try:
-            subprocess.run(common + ["build-for-testing"], check=True)
+            subprocess.run([*common, "build-for-testing"], check=True)
             subprocess.run(
                 [
                     "codesign",

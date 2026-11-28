@@ -6,8 +6,22 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import jakarta.ws.rs.*;
-import jakarta.ws.rs.core.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotAuthorizedException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.UserModel;
 import org.keycloak.util.JsonSerialization;
@@ -26,13 +40,24 @@ public class EnrollmentResource {
         try {
             byte[] bytes = body.readNBytes(4097);
             if (bytes.length > 4096) throw new IllegalArgumentException("invalid_request");
-            return JsonSerialization.readValue(bytes, Map.class);
-        } catch (java.io.IOException exception) { throw new IllegalArgumentException("invalid_request"); }
+            Map<String, Object> data = JsonSerialization.readValue(bytes,
+                    new TypeReference<Map<String, Object>>() {});
+            if (data == null) throw new IllegalArgumentException("invalid_request");
+            return data;
+        } catch (java.io.IOException exception) { throw new IllegalArgumentException("invalid_request", exception); }
+    }
+    private static String text(Map<String, Object> data, String key) {
+        if (!(data.get(key) instanceof String value)) throw new IllegalArgumentException("invalid_request");
+        return value;
     }
     static Response response(int status, Object body) {
         return Response.status(status).entity(body).header("Cache-Control", "no-store").build();
     }
-    static Response failure(int status, String error) { return response(status, Map.of("error", error)); }
+    static Response failure(int status, String error) {
+        var builder = Response.status(status).entity(Map.of("error", error)).header("Cache-Control", "no-store");
+        if (status == 429) builder.header("Retry-After", "60");
+        return builder.build();
+    }
     private UserModel user(String subject) {
         return session.users().getUserById(session.getContext().getRealm(), uuid(subject));
     }
@@ -66,7 +91,7 @@ public class EnrollmentResource {
             var data = input(body);
             if (data.size() != 4 || !"nephos-ios".equals(data.get("clientId"))) return failure(400, "invalid_request");
             String inviteId = uuid(data.get("inviteId")), requestId = uuid(data.get("requestId"));
-            String key = (String) data.get("publicKey");
+            String key = text(data, "publicKey");
             String fingerprint = EnrollmentCrypto.fingerprint(key);
             String origin = EnrollmentCrypto.origin();
             store.lock();
@@ -95,10 +120,9 @@ public class EnrollmentResource {
         try {
             subject = uuid(subject); var data = input(body);
             String command = uuid(data.get("commandId"));
-            String hash = (String) data.get("requestHash"), login = (String) data.get("login");
-            String display = (String) data.get("displayName");
-            if (hash == null || !hash.matches("[a-f0-9]{64}") || login == null
-                    || !login.matches("[a-z0-9][a-z0-9._-]{0,63}") || display == null
+            String hash = text(data, "requestHash"), login = text(data, "login");
+            String display = text(data, "displayName");
+            if (!hash.matches("[a-f0-9]{64}") || !login.matches("[a-z0-9][a-z0-9._-]{0,63}")
                     || display.isBlank() || display.length() > 100) return failure(400, "invalid_request");
             store.lock();
             var provenance = store.get("provision:" + command);
@@ -156,15 +180,16 @@ public class EnrollmentResource {
     }
     @PUT @Path("users/{subject}/profile") @Consumes(MediaType.APPLICATION_JSON)
     public Response profile(@PathParam("subject") String subject, InputStream body, @Context HttpHeaders headers) {
-        return mutate(subject, input(body), headers, false);
+        return mutate(subject, body, headers, false);
     }
     @PUT @Path("users/{subject}/access") @Consumes(MediaType.APPLICATION_JSON)
     public Response access(@PathParam("subject") String subject, InputStream body, @Context HttpHeaders headers) {
-        return mutate(subject, input(body), headers, true);
+        return mutate(subject, body, headers, true);
     }
-    private Response mutate(String subject, Map<String, Object> data, HttpHeaders headers, boolean access) {
+    private Response mutate(String subject, InputStream body, HttpHeaders headers, boolean access) {
         auth(headers);
         try {
+            Map<String, Object> data = input(body);
             String command = uuid(data.get("commandId")); subject = uuid(subject);
             String id = (access ? "access:" : "profile:") + command;
             String hash = EnrollmentCrypto.digest(subject + "\n" + JsonSerialization.writeValueAsString(
@@ -246,6 +271,9 @@ public class EnrollmentResource {
         auth(headers); subject = uuid(subject);
         return response(200, Map.of("invitations", store.records(subject, "invite").stream().map(this::metadata).toList()));
     }
+    static boolean isCancellable(String status, long expiresAt, long now) {
+        return "active".equals(status) && expiresAt > now;
+    }
     @DELETE @Path("users/{subject}/invitations/{invite}")
     public Response cancel(@PathParam("subject") String subject, @PathParam("invite") String invite,
                            @Context HttpHeaders headers) {
@@ -253,6 +281,11 @@ public class EnrollmentResource {
         var record = store.get("invite:" + uuid(invite));
         if (record == null || !uuid(subject).equals(record.subject)) return failure(404, "invite_not_found");
         var data = store.data(record);
+        String status = (String) data.get("status");
+        if ("cancelled".equals(status)) return response(200, metadata(record));
+        if (!isCancellable(status, record.expiresAt, Instant.now().getEpochSecond())) {
+            return failure(409, "invite_not_active");
+        }
         data.remove("receipt"); data.put("status", "cancelled");
         store.save(record.id, record.kind, record.subject, record.expiresAt, data);
         return response(200, metadata(record));

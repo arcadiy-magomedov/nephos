@@ -10,6 +10,8 @@ import org.keycloak.models.KeycloakSessionFactory;
 public final class EnrollmentEntityProviderFactory implements JpaEntityProviderFactory {
     @Override public JpaEntityProvider create(KeycloakSession session) {
         return new JpaEntityProvider() {
+            // Keycloak 26.8 still requires this deprecated SPI method; no replacement exists.
+            @SuppressWarnings("removal")
             @Override public List<Class<?>> getEntities() { return List.of(EnrollmentRecord.class); }
             @Override public String getChangelogLocation() { return "META-INF/nephos-enrollment.xml"; }
             @Override public String getFactoryId() { return getId(); }

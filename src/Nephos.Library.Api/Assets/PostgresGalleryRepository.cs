@@ -19,8 +19,7 @@ public interface IGalleryRepository
     Task<AssetPage> PageAsync(string subject, Guid library, Guid snapshot, AssetCursor? before, int limit, CancellationToken token);
     Task<IReadOnlyList<TimelineBucket>> TimelineAsync(string subject, Guid library, Guid snapshot, int? year, int? month, CancellationToken token);
     Task<GalleryDelta> ChangesAsync(string subject, Guid library, long after, long through, int limit, CancellationToken token);
-    Task<HistoryCompactionResult> CompactHistoryAsync(CancellationToken token) =>
-        Task.FromResult(new HistoryCompactionResult(0, 0, 0));
+    Task<HistoryCompactionResult> CompactHistoryAsync(CancellationToken token);
 }
 
 public sealed class PostgresGalleryRepository(NpgsqlDataSource source) : IGalleryRepository

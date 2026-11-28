@@ -50,7 +50,7 @@ public static class MediaProtocol
         var expected = configuration[keyName]
             ?? throw new InvalidOperationException($"{keyName} is required.");
         var provided = context.Request.Headers["X-Nephos-Service-Key"].ToString();
-        return expected.Length >= 32 && CryptographicOperations.FixedTimeEquals(
+        return expected.Length >= 32 && provided.Length <= 512 && CryptographicOperations.FixedTimeEquals(
             SHA256.HashData(Encoding.UTF8.GetBytes(expected)), SHA256.HashData(Encoding.UTF8.GetBytes(provided)));
     }
 

@@ -374,7 +374,7 @@ and deployment configuration, not application contracts.
 ### 3.8 R08 - Bootstrap and persistent OIDC device sessions
 
 The approved mobile bootstrap is the administrator-issued, single-use QR flow
-specified in [QR enrollment](../deploy/keycloak/QR-ENROLLMENT.md). It establishes
+specified in [QR enrollment](qr-enrollment.md). It establishes
 a device session; the QR is not required again for normal renewal. The PIN
 contract below remains backend compatibility behavior, not an additional
 sign-in screen in the rebuilt iOS app.
@@ -489,7 +489,7 @@ rebinding to an attacker's key. Unexpected migration-driven mass logout is not
 an acceptable ordinary upgrade.
 
 The version-pinned integration findings and implementation gates are recorded
-in [QR enrollment: DPoP feasibility](../deploy/keycloak/QR-ENROLLMENT.md#persistent-login-and-dpop-feasibility).
+in [QR enrollment: DPoP feasibility](qr-enrollment.md#persistent-login-and-dpop-feasibility).
 
 Face ID/Touch ID may later protect local access to credentials, but biometrics
 remain on-device and are not an authentication factor verified by this backend.

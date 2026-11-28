@@ -12,7 +12,10 @@ struct FileUploadDescriptor: Codable, Equatable, Identifiable, Sendable {
 
     func taskDescription() throws -> String {
         guard isValid else { throw FileUploadError.invalid("Invalid background file upload descriptor.") }
-        return String(decoding: try JSONEncoder().encode(self), as: UTF8.self)
+        guard let description = String(bytes: try JSONEncoder().encode(self), encoding: .utf8) else {
+            throw FileUploadError.invalid("Unable to encode the background upload identity.")
+        }
+        return description
     }
 
     static func parse(_ description: String?) throws -> Self {

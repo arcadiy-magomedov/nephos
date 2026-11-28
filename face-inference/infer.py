@@ -2,15 +2,16 @@
 
 import hashlib
 import json
+import logging
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 import cv2
 import numpy as np
-from decoder import ImageRejected, MAX_BYTES, decode_working_rgb
+from decoder import MAX_BYTES, ImageRejected, decode_working_rgb
 from worker_pool import apply_worker_limits, serve_worker
 
 MODEL_VERSION = "yunet-2023mar-sface-2021dec-8f2383e4-0ba9fbfa"
@@ -106,10 +107,6 @@ def _handle_worker_request(data, models):
         return True, json.dumps(analyze(data, models=models), allow_nan=False).encode("utf-8")
     except ImageRejected as error:
         return False, json.dumps({"error": str(error)}).encode("utf-8")
-    except MemoryError:
-        raise
-    except Exception:
-        return False, b'{"error":"inference_rejected"}'
 
 
 if __name__ == "__main__":
@@ -131,6 +128,7 @@ if __name__ == "__main__":
         except ImageRejected as error:
             print(json.dumps({"error": str(error)}))
             sys.exit(1)
-        except Exception:
+        except Exception as error:
+            logging.error("Inference failed (%s)", type(error).__name__)
             print('{"error":"inference_rejected"}')
             sys.exit(1)

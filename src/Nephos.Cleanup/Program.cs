@@ -29,7 +29,7 @@ internal static class Program
             catch (OperationCanceledException) when (stopping.IsCancellationRequested) { break; }
             catch (Exception error)
             {
-                logger.LogError(error, "Cleanup run failed; durable claims and GC fences will retry on the next schedule");
+                CleanupLog.RunFailed(logger, error);
                 if (once) return 1;
             }
             if (once) break;

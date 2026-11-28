@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the isolated native sign-in XCTest project used by qr_qualification.py."""
 
-from pathlib import Path
 import plistlib
+from pathlib import Path
 
 from generate_project import oid
 
@@ -118,7 +118,7 @@ def project(workspace, test_sources=None, app_sources=None):
             )
         )
     products_group = add("products", "PBXGroup", name="Products", sourceTree="<group>", children=products)
-    main = add("main", "PBXGroup", sourceTree="<group>", children=files + [products_group])
+    main = add("main", "PBXGroup", sourceTree="<group>", children=[*files, products_group])
     root = add(
         "project",
         "PBXProject",
@@ -137,6 +137,9 @@ def project(workspace, test_sources=None, app_sources=None):
                 "SWIFT_VERSION": "5.0",
                 "CLANG_ENABLE_MODULES": "YES",
                 "SWIFT_OPTIMIZATION_LEVEL": "-Onone",
+                "SWIFT_TREAT_WARNINGS_AS_ERRORS": "YES",
+                "LM_SKIP_METADATA_EXTRACTION": "YES",
+                "COPY_PHASE_STRIP": "NO",
             },
         ),
     )
@@ -157,7 +160,11 @@ def project(workspace, test_sources=None, app_sources=None):
     schemes.mkdir(parents=True)
 
     def reference(name, suffix):
-        return f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{oid(name)}" BuildableName="{name}.{suffix}" BlueprintName="{name}" ReferencedContainer="container:Onboarding.xcodeproj"/>'
+        return (
+            f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{oid(name)}" '
+            f'BuildableName="{name}.{suffix}" BlueprintName="{name}" '
+            'ReferencedContainer="container:Onboarding.xcodeproj"/>'
+        )
 
     (schemes / "Onboarding.xcscheme").write_text(
         '<Scheme version="1.3"><BuildAction buildImplicitDependencies="YES"><BuildActionEntries>'

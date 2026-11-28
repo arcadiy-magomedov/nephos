@@ -22,8 +22,7 @@ struct LocalMediaItem: Identifiable, Hashable, Sendable {
     static func playbackTime(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let value = Int(min(seconds, Double(Int.max / 2)))
-        return value >= 3600
-            ? String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
-            : String(format: "%d:%02d", value / 60, value % 60)
+        let pattern: Duration.TimeFormatStyle.Pattern = value >= 3600 ? .hourMinuteSecond : .minuteSecond
+        return Duration.seconds(value).formatted(.time(pattern: pattern))
     }
 }

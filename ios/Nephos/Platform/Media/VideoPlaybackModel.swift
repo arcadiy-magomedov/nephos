@@ -49,8 +49,7 @@ final class VideoPlaybackModel {
             let options = PHVideoRequestOptions()
             options.isNetworkAccessAllowed = true
             options.version = .current
-            request = PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) {
-                [weak self] playerItem, info in
+            let handler: (AVPlayerItem?, [AnyHashable: Any]?) -> Void = { [weak self] playerItem, info in
                 let message = (info?[PHImageErrorKey] as? Error)?.localizedDescription
                 Task { @MainActor in
                     guard let self, self.generation == version else { return }
@@ -62,6 +61,8 @@ final class VideoPlaybackModel {
                     self.install(playerItem)
                 }
             }
+            request = PHImageManager.default().requestPlayerItem(
+                forVideo: asset, options: options, resultHandler: handler)
         } catch {
             self.error = error.localizedDescription
             isLoading = false

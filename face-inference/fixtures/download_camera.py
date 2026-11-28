@@ -2,8 +2,8 @@
 
 import hashlib
 import json
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 root = Path(__file__).resolve().parent
 source = json.loads((root / "camera-source.json").read_text())

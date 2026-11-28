@@ -1,10 +1,10 @@
 """Run deterministic face-service tests with a disposable DB and fixture inference, never model weights."""
 
 import os
-from pathlib import Path
 import secrets
 import subprocess
 import time
+from pathlib import Path
 
 
 def run(*args, **kwargs):
@@ -101,4 +101,6 @@ try:
         env=env,
     )
 finally:
-    subprocess.run(["docker", "rm", "--force", "--volumes", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["docker", "rm", "--force", "--volumes", name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )

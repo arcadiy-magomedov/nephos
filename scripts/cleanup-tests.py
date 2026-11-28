@@ -26,7 +26,7 @@ try:
         "postgres:18-alpine",
         stdout=subprocess.DEVNULL,
     )
-    for attempt in range(60):
+    for _attempt in range(60):
         ready = subprocess.run(
             ["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
             stdout=subprocess.DEVNULL,
@@ -91,4 +91,6 @@ try:
         env=env,
     )
 finally:
-    subprocess.run(["docker", "rm", "--force", "--volumes", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["docker", "rm", "--force", "--volumes", name], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    )

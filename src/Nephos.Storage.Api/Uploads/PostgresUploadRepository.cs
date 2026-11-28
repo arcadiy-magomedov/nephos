@@ -8,8 +8,7 @@ namespace Nephos.Storage.Api.Uploads;
 
 public interface IUploadRepository
 {
-    Task<Upload> RetryAsync(Guid id, CancellationToken token) =>
-        throw new UploadConflictException("This storage repository does not support restarting failed uploads.");
+    Task<Upload> RetryAsync(Guid id, CancellationToken token);
     Task<Upload> CreateAsync(UploadIntent intent, string subject, CancellationToken token);
     Task<Upload?> FindAsync(Guid id, CancellationToken token);
     Task<int[]> PartsAsync(Guid id, CancellationToken token);
@@ -23,7 +22,8 @@ public interface IUploadRepository
     Task<StorageMetrics> MetricsAsync(CancellationToken token);
 }
 
-public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolumeStore volume) : IUploadRepository
+public sealed class PostgresUploadRepository(
+    NpgsqlDataSource dataSource, IVolumeStore volume, ILogger<PostgresUploadRepository> logger) : IUploadRepository
 {
     public async Task<Upload> RetryAsync(Guid id, CancellationToken token)
     {
@@ -267,7 +267,7 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
         var upload = await SingleAsync(Command(connection, transaction, $"SELECT {Columns} FROM uploads WHERE id=$1 FOR UPDATE", id), token)
             ?? throw new UploadConflictException("Upload not found.");
         if (upload.State is "stored" or "verifying") return;
-        if (upload.State == "failed") throw new UploadConflictException("Failed uploads require a new intent.");
+        if (upload.State == "failed") throw new UploadConflictException("Retry the failed upload before sealing it.");
         await using (var count = Command(connection, transaction, "SELECT count(*) FROM upload_parts WHERE upload_id=$1", id))
             if ((long)(await count.ExecuteScalarAsync(token))! != (upload.Size + MediaProtocol.ChunkSize - 1) / MediaProtocol.ChunkSize)
                 throw new UploadConflictException("One or more chunks are missing.");
@@ -382,7 +382,10 @@ public sealed class PostgresUploadRepository(NpgsqlDataSource dataSource, IVolum
                     upload.Id, leaseId);
                 await releaseCmd.ExecuteNonQueryAsync(CancellationToken.None);
             }
-            catch (NpgsqlException) { }
+            catch (NpgsqlException exception)
+            {
+                StorageLog.LeaseReleaseFailed(logger, exception.GetType().Name);
+            }
             throw;
         }
     }

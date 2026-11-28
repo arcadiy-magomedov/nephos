@@ -44,7 +44,8 @@ All routes use `X-Nephos-Service-Key` and canonical `/internal/v1` paths:
   analysis before Library completion when configured.
 - Library `POST /cleanup/{assetId}/complete`, body `{leaseId}`: 204; 409 for a
   stale or expired current lease. The same completed lease remains idempotent.
-  Assets and sync deletion tombstones remain permanently.
+  Retained snapshots and synchronization tombstones remain protected until
+  eligible for history compaction.
 - Storage `POST /cleanup/gc`: `{collected}` (up to 100 per request). Runs even
   when no Library claims remain or a claim request failed, so expired holds
   eventually release bytes.
@@ -58,9 +59,12 @@ and fixed-size preview variants are removed together only when safe.
 ## Crash/race safety
 
 Reference/intent creation, verification/file publication, retention creation,
-preview regeneration, release and GC use one PostgreSQL advisory gate. GC first
+preview regeneration, release and GC use ordered quota, per-upload and
+per-hash PostgreSQL advisory locks. Disk assembly, hashing and preview rendering
+run outside database locks; publication is fenced by a verification lease.
+GC first
 commits `blobs.deleting=true`; new intents cannot use that hash until GC finishes.
-It then reacquires the gate, rechecks eligibility, idempotently unlinks and fsyncs
+It then reacquires that hash's lock, rechecks eligibility, idempotently unlinks and fsyncs
 file directories, and deletes the blob metadata. A crash during unlink or before
 metadata commit leaves the durable deleting fence; the next scheduled GC finishes
 it before writers can reuse those bytes. Released upload metadata/outbox and hold
@@ -71,8 +75,7 @@ Deploy the storage migration and upgraded Storage API **and worker** together
 before enabling cleanup. Do not run older verification workers alongside GC:
 they predate the shared publication gate.
 
-The global gate deliberately favors correctness and a simple MVP implementation
-over concurrent large verification/cleanup throughput. Monitor cleanup errors
+Unrelated hashes can proceed concurrently. Monitor cleanup errors
 and backlog; do not manually clear `deleting` fences after an interrupted unlink.
 
 ## Tests

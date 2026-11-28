@@ -4,11 +4,11 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import sys
 
+from decoder import MAX_BYTES, ImageRejected, decode_working_rgb
 from PIL import Image
-
-from decoder import ImageRejected, MAX_BYTES, decode_working_rgb
 from worker_pool import apply_worker_limits, serve_worker
 
 SIZES = (512, 1280, 2560)
@@ -39,10 +39,6 @@ def _handle_worker_request(data):
         return True, json.dumps(render(data), allow_nan=False).encode("utf-8")
     except ImageRejected as error:
         return False, json.dumps({"error": str(error)}).encode("utf-8")
-    except MemoryError:
-        raise
-    except Exception:
-        return False, b'{"error":"render_rejected"}'
 
 
 if __name__ == "__main__":
@@ -60,6 +56,7 @@ if __name__ == "__main__":
         except ImageRejected as error:
             print(json.dumps({"error": str(error)}))
             sys.exit(1)
-        except Exception:
+        except Exception as error:
+            logging.error("Rendering failed (%s)", type(error).__name__)
             print('{"error":"render_rejected"}')
             sys.exit(1)

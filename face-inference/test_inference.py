@@ -1,12 +1,13 @@
 """Real decoder/detector tests; no fake detector is used."""
 
 import io
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from decoder import ImageRejected
 from infer import analyze
+from PIL import Image
 
 
 class InferenceTests(unittest.TestCase):
@@ -17,7 +18,7 @@ class InferenceTests(unittest.TestCase):
         self.assertEqual([], analyze(encoded.getvalue())["faces"])
 
     def test_corrupt_and_oversized_payloads_rejected(self):
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(ImageRejected, "^corrupt_image$"):
             analyze(b"not an image")
         with self.assertRaises(ValueError):
             analyze(b"x" * (20 * 1024 * 1024 + 1))

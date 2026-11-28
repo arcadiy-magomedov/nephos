@@ -6,6 +6,6 @@ useDefault = true
 [[allowlists]]
 description = "Literal internal job route in documentation/tests, not an API credential"
 condition = "AND"
-paths = ['''face-inference/README\.md$''', '''tests/Nephos\.Tests/AnalysisTests\.cs$''']
+paths = ['''face-inference/README\.md$''', '''specs/face-analysis\.md$''', '''tests/Nephos\.Tests/AnalysisTests\.cs$''']
 regexTarget = "secret"
 regexes = ['''^8080/internal/(v1/)?faces/jobs$''']

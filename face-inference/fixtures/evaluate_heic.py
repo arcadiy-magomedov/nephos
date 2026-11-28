@@ -2,9 +2,9 @@
 
 import hashlib
 import json
-from pathlib import Path
 import platform
 import sys
+from pathlib import Path
 
 import numpy as np
 import pillow_heif

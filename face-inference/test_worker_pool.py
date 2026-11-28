@@ -3,12 +3,13 @@
 import io
 import json
 import os
-from pathlib import Path
 import struct
 import sys
 import threading
 import time
 import unittest
+from array import array
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent
@@ -25,6 +26,7 @@ from worker_pool import (  # noqa: E402
     apply_worker_limits,
     read_request_frame,
     resolve_memory_limit_bytes,
+    serve_worker,
     write_response_frame,
 )
 
@@ -101,6 +103,21 @@ def _has_media_deps() -> bool:
 
 
 class WorkerPoolTests(unittest.TestCase):
+    def test_unexpected_handler_failures_report_only_exception_type(self):
+        input_stream = io.BytesIO(struct.pack(">I", 4) + b"body")
+        output_stream = io.BytesIO()
+        with (
+            patch.object(sys, "stdin", MagicMock(buffer=input_stream)),
+            patch.object(sys, "stdout", MagicMock(buffer=output_stream)),
+            self.assertLogs("worker_pool", level="ERROR") as logs,
+        ):
+            serve_worker(
+                MagicMock(side_effect=RuntimeError("secret image details")), error_payload=b'{"error":"failed"}'
+            )
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("secret image", logs.output[0])
+        self.assertEqual(b'{"error":"failed"}', output_stream.getvalue()[5:])
+
     def test_warm_worker_reuse_keeps_same_pid(self):
         with WorkerPool(DUMMY_CMD, workers=1, timeout=5, max_requests=10, prewarm=True) as pool:
             r1 = pool.execute(b"echo:one")
@@ -177,18 +194,20 @@ class WorkerPoolTests(unittest.TestCase):
 
     def test_crashing_and_malformed_children_recover_on_fresh_worker(self):
         for trigger in (b"crash", b"eof", b"malformed_status", b"malformed_oversized", b"malformed_zero"):
-            with self.subTest(trigger=trigger.decode()):
-                with WorkerPool(DUMMY_CMD, workers=1, timeout=2, max_requests=10, prewarm=True) as pool:
-                    first = pool.execute(b"echo:before")
-                    first_pid = first.worker_pid
-                    with self.assertRaises(WorkerFailedError):
-                        pool.execute(trigger)
-                    self.assertFalse(_pid_exists(first_pid))
+            with (
+                self.subTest(trigger=trigger.decode()),
+                WorkerPool(DUMMY_CMD, workers=1, timeout=2, max_requests=10, prewarm=True) as pool,
+            ):
+                first = pool.execute(b"echo:before")
+                first_pid = first.worker_pid
+                with self.assertRaises(WorkerFailedError):
+                    pool.execute(trigger)
+                self.assertFalse(_pid_exists(first_pid))
 
-                    recovered = pool.execute(b"echo:after")
-                    self.assertTrue(recovered.ok)
-                    self.assertEqual("after", json.loads(recovered.payload)["echo"])
-                    self.assertNotEqual(first_pid, recovered.worker_pid)
+                recovered = pool.execute(b"echo:after")
+                self.assertTrue(recovered.ok)
+                self.assertEqual("after", json.loads(recovered.payload)["echo"])
+                self.assertNotEqual(first_pid, recovered.worker_pid)
 
     def test_secret_env_vars_are_stripped_from_child_environment(self):
         secrets = {
@@ -197,10 +216,9 @@ class WorkerPoolTests(unittest.TestCase):
             "SERVICE_KEY": "s" * 40,
             "POSTGRES_PASSWORD": "secret-db-password",
         }
-        with patch.dict(os.environ, secrets):
-            with WorkerPool(DUMMY_CMD, workers=1, timeout=5, prewarm=True) as pool:
-                result = pool.execute(b"env")
-                expected_mem = str(pool.memory_limit_bytes)
+        with patch.dict(os.environ, secrets), WorkerPool(DUMMY_CMD, workers=1, timeout=5, prewarm=True) as pool:
+            result = pool.execute(b"env")
+            expected_mem = str(pool.memory_limit_bytes)
         self.assertTrue(result.ok)
         child_env = json.loads(result.payload)["env"]
         for secret in secrets:
@@ -212,44 +230,46 @@ class WorkerPoolTests(unittest.TestCase):
 
     def test_concurrency_saturation_returns_busy_immediately(self):
         for count in (1, 2):
-            with self.subTest(workers=count):
-                with WorkerPool(DUMMY_CMD, workers=count, timeout=5, prewarm=True) as pool:
-                    results = []
-                    errors = []
+            with (
+                self.subTest(workers=count),
+                WorkerPool(DUMMY_CMD, workers=count, timeout=5, prewarm=True) as pool,
+            ):
+                results = []
+                errors = []
 
-                    def run_slow():
-                        try:
-                            results.append(pool.execute(b"sleep:0.4"))
-                        except Exception as exc:
-                            errors.append(exc)
+                def run_slow(results=results, errors=errors):
+                    try:
+                        results.append(pool.execute(b"sleep:0.4"))
+                    except Exception as exc:
+                        errors.append(exc)
 
-                    threads = [threading.Thread(target=run_slow) for _ in range(count)]
-                    for thread in threads:
-                        thread.start()
+                threads = [threading.Thread(target=run_slow) for _ in range(count)]
+                for thread in threads:
+                    thread.start()
 
-                    deadline = time.monotonic() + 3.0
-                    while time.monotonic() < deadline:
-                        with pool._lock:
-                            if len(pool._active) == count:
-                                break
-                        time.sleep(0.01)
-                    else:
-                        self.fail("Workers did not become active in time")
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline:
+                    with pool._lock:
+                        if len(pool._active) == count:
+                            break
+                    time.sleep(0.01)
+                else:
+                    self.fail("Workers did not become active in time")
 
-                    started = time.monotonic()
-                    with self.assertRaises(WorkerBusyError):
-                        pool.execute(b"echo:saturated")
-                    self.assertLess(time.monotonic() - started, 0.2)
+                started = time.monotonic()
+                with self.assertRaises(WorkerBusyError):
+                    pool.execute(b"echo:saturated")
+                self.assertLess(time.monotonic() - started, 0.2)
 
-                    for thread in threads:
-                        thread.join(timeout=5)
-                    self.assertEqual([], errors)
-                    self.assertEqual(count, len(results))
-                    self.assertTrue(all(r.ok for r in results))
+                for thread in threads:
+                    thread.join(timeout=5)
+                self.assertEqual([], errors)
+                self.assertEqual(count, len(results))
+                self.assertTrue(all(r.ok for r in results))
 
-                    after = pool.execute(b"echo:free")
-                    self.assertTrue(after.ok)
-                    self.assertEqual("free", json.loads(after.payload)["echo"])
+                after = pool.execute(b"echo:free")
+                self.assertTrue(after.ok)
+                self.assertEqual("free", json.loads(after.payload)["echo"])
 
     def test_large_payload_and_strict_frame_length_validation(self):
         with WorkerPool(DUMMY_CMD, workers=1, timeout=5, max_bytes=300_000, prewarm=True) as pool:
@@ -277,6 +297,28 @@ class WorkerPoolTests(unittest.TestCase):
         status, length = struct.unpack(">BI", out.getvalue()[:5])
         self.assertEqual(STATUS_ERROR, status)
         self.assertEqual(b'{"error":"response_limit"}', out.getvalue()[5 : 5 + length])
+
+    def test_memoryview_limits_and_framing_count_bytes_not_elements(self):
+        data = memoryview(array("I", [1, 2, 3]))
+        with WorkerPool(DUMMY_CMD, max_bytes=data.nbytes) as pool:
+            response = pool.execute(data)
+            self.assertEqual(data.nbytes, json.loads(response.payload)["length"])
+            response = pool.execute(data[::2])
+            self.assertEqual(data[::2].nbytes, json.loads(response.payload)["length"])
+        with (
+            WorkerPool(DUMMY_CMD, max_bytes=data.nbytes - 1) as pool,
+            self.assertRaisesRegex(ValueError, "payload_limit"),
+        ):
+            pool.execute(data)
+
+    def test_nonfinite_timeouts_rejected_before_launching_worker(self):
+        for timeout in (float("nan"), float("inf"), -float("inf"), 0):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(ValueError, "finite and positive"):
+                WorkerPool(DUMMY_CMD, timeout=timeout)
+            with WorkerPool(DUMMY_CMD) as pool, self.subTest(timeout=timeout), patch.object(pool, "_spawn") as spawn:
+                with self.assertRaisesRegex(ValueError, "finite and positive"):
+                    pool.execute(b"echo:timeout", timeout=timeout)
+                spawn.assert_not_called()
 
     def test_close_kills_idle_and_active_workers_cleanly(self):
         pool = WorkerPool(DUMMY_CMD, workers=1, timeout=5, prewarm=True)
@@ -314,7 +356,14 @@ class WorkerPoolTests(unittest.TestCase):
         self.assertEqual(1, len(error_holder))
         self.assertIsInstance(error_holder[0], WorkerPoolClosedError)
 
-    @unittest.skipUnless(_has_media_deps(), "Requires face-inference virtualenv dependencies")
+    @unittest.skipUnless(
+        _has_media_deps()
+        and all(
+            (ROOT / "models" / filename).exists()
+            for filename in ("face_detection_yunet_2023mar.onnx", "face_recognition_sface_2021dec.onnx")
+        ),
+        "Requires media dependencies and pinned local models",
+    )
     def test_real_inference_and_derivative_workers_reuse_and_handle_errors(self):
         from PIL import Image
 

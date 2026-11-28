@@ -1,9 +1,17 @@
 package app.nephos.keycloak;
 
 import java.util.HashMap;
-import java.util.Map;
-import org.keycloak.models.*;
-import org.keycloak.models.session.*;
+import org.keycloak.models.AuthenticatedClientSessionModel;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.models.session.PersistentAuthenticatedClientSessionAdapter;
+import org.keycloak.models.session.PersistentClientSessionModel;
+import org.keycloak.models.session.PersistentUserSessionAdapter;
+import org.keycloak.models.session.PersistentUserSessionModel;
+import org.keycloak.models.session.UserSessionPersisterProvider;
 
 final class JpaEnrollmentSession {
     final PersistentUserSessionAdapter online;
@@ -17,7 +25,7 @@ final class JpaEnrollmentSession {
         this.session = session;
         persister = session.getProvider(UserSessionPersisterProvider.class);
         RealmModel realm = session.getContext().getRealm();
-        int now = org.keycloak.common.util.Time.currentTime();
+        int now = Math.toIntExact(org.keycloak.common.util.Time.currentTimeSeconds());
         online = userSession(realm, user, id, now, false, deviceName, epoch);
         var offline = userSession(realm, user, id, now, true, deviceName, epoch);
         onlineClient = clientSession(realm, client, online, now);

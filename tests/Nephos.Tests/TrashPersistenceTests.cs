@@ -16,7 +16,7 @@ public sealed class LibraryDatabaseFactAttribute : FactAttribute
 }
 
 [CollectionDefinition("trash-database", DisableParallelization = true)]
-public sealed class TrashDatabaseCollection;
+public sealed class TrashDatabaseFixture;
 
 [Collection("trash-database")]
 public sealed class TrashPersistenceTests

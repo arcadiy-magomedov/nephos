@@ -12,4 +12,5 @@ __pycache__/
 .venv/
 .admin-venv/
 **/target/
+**/node_modules/
 .ruff_cache/

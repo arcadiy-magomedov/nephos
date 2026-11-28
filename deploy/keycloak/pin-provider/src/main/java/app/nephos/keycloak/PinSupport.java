@@ -21,7 +21,7 @@ final class PinSupport {
     private PinSupport() {}
 
     static String newPin() {
-        return "%08d".formatted(RANDOM.nextInt(100_000_000));
+        return String.format(Locale.ROOT, "%08d", RANDOM.nextInt(100_000_000));
     }
 
     static String pinKey(String realm, String userId) {

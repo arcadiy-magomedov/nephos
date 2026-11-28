@@ -8,7 +8,9 @@ public sealed class UploadWorker(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var concurrency = Math.Clamp(configuration.GetValue("Upload:VerifyConcurrency", 2), 1, 8);
+        var concurrency = configuration.GetValue("Upload:VerifyConcurrency", 2);
+        if (concurrency is < 1 or > 8)
+            throw new InvalidOperationException("Upload:VerifyConcurrency must be 1..8.");
         IConnection? connection = null;
         IChannel? channel = null;
         try
@@ -45,7 +47,7 @@ public sealed class UploadWorker(
                     await DisposeBrokerAsync(channel, connection);
                     channel = null;
                     connection = null;
-                    logger.LogError("Durable upload worker will retry after {ErrorType}", exception.GetType().Name);
+                    StorageLog.WorkerFailed(logger, exception.GetType().Name);
                 }
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
             }
@@ -65,15 +67,17 @@ public sealed class UploadWorker(
         await Task.WhenAll(workers);
     }
 
-    private static async Task DisposeBrokerAsync(IChannel? channel, IConnection? connection)
+    private async Task DisposeBrokerAsync(IChannel? channel, IConnection? connection)
     {
         if (channel is not null)
         {
-            try { await channel.DisposeAsync(); } catch (Exception) { }
+            try { await channel.DisposeAsync(); }
+            catch (Exception exception) { StorageLog.BrokerDisposalFailed(logger, "channel", exception.GetType().Name); }
         }
         if (connection is not null)
         {
-            try { await connection.DisposeAsync(); } catch (Exception) { }
+            try { await connection.DisposeAsync(); }
+            catch (Exception exception) { StorageLog.BrokerDisposalFailed(logger, "connection", exception.GetType().Name); }
         }
     }
 }

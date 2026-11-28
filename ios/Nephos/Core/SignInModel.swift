@@ -12,6 +12,8 @@ final class SignInModel {
     private(set) var message = ""
     private(set) var serverName = ""
     private(set) var signingOut = false
+    private(set) var hasUnfinishedEnrollment = false
+    private(set) var accessDenied = false
     @ObservationIgnored private let store: any SessionStorage
     @ObservationIgnored private let connect: (EnrollmentQR) async throws -> Connection
     @ObservationIgnored private let exchange: (PendingEnrollment) async throws -> Credentials
@@ -41,10 +43,12 @@ final class SignInModel {
                 try await self.validate(session)
                 try Task.checkCancellation()
                 self.message = ""
+                self.accessDenied = false
                 return
             }
             let vault = try await self.store.vault()
             try Task.checkCancellation()
+            self.hasUnfinishedEnrollment = vault.current == nil && vault.pending != nil
             if let saved = vault.current {
                 try await self.establish(saved, restoringLocalContent: true)
             } else if let pending = vault.pending {
@@ -113,14 +117,40 @@ final class SignInModel {
             if remotely {
                 guard let saved = try await store.vault().current else {
                     throw ClientError.invalid(
-                        "Remote sign-out was not confirmed. Finish restoring your session or choose device-only sign-out."
+                        """
+                        Remote sign-out was not confirmed. Finish restoring your session or choose device-only sign-out.
+                        """
                     )
                 }
                 try await AuthSession.revokeCredentials(saved, store: store)
             }
             try await store.remove()
+            hasUnfinishedEnrollment = false
+            accessDenied = false
             serverName = ""
             message = remotely ? "" : "Signed out on this device. The server session was not revoked."
+            screen = .welcome
+        } catch {
+            screen = .recovery
+            message = error.localizedDescription
+        }
+    }
+
+    func handleExternalSignOut() async {
+        guard !signingOut, screen == .signedIn else { return }
+        signingOut = true
+        defer { signingOut = false }
+        generation = UUID()
+        operation?.cancel()
+        operation = nil
+        auth?.invalidate()
+        auth = nil
+        accessDenied = false
+        do {
+            try await store.remove()
+            hasUnfinishedEnrollment = false
+            serverName = ""
+            message = ClientError.signedOut.localizedDescription
             screen = .welcome
         } catch {
             screen = .recovery
@@ -159,12 +189,14 @@ final class SignInModel {
         let session = AuthSession(credentials: credentials, store: store, renew: renew)
         auth?.invalidate()
         auth = session
+        hasUnfinishedEnrollment = false
         serverName = credentials.connection.baseURL.host ?? credentials.connection.baseURL.absoluteString
         // Local Photos needs no server authorization. Protected requests still authenticate independently.
         if restoringLocalContent { screen = .signedIn }
         try await validate(session)
         try Task.checkCancellation()
         screen = .signedIn
+        accessDenied = false
         message = ""
     }
 
@@ -193,10 +225,13 @@ final class SignInModel {
                 guard generation == version else { return }
                 auth?.invalidate()
                 auth = nil
+                hasUnfinishedEnrollment = false
+                accessDenied = false
                 screen = .welcome
                 message = error.localizedDescription
             } catch {
                 guard generation == version else { return }
+                hasUnfinishedEnrollment = false
                 screen = .recovery
                 message = error.localizedDescription
             }
@@ -204,6 +239,7 @@ final class SignInModel {
         }
         if auth?.credentials != nil {
             screen = .signedIn
+            accessDenied = (error as? ClientError)?.isForbidden == true
             message =
                 AuthSession.isCancelled(error) ? "Connection interrupted. Please retry." : error.localizedDescription
             return
@@ -214,16 +250,20 @@ final class SignInModel {
             }
             let vault = try await store.vault()
             guard generation == version else { return }
+            hasUnfinishedEnrollment = vault.current == nil && vault.pending != nil
             screen = vault.current != nil || vault.pending != nil ? .recovery : .qrError
             message =
                 AuthSession.isCancelled(error) ? "Connection interrupted. Please retry." : error.localizedDescription
         } catch {
             guard generation == version else { return }
+            hasUnfinishedEnrollment = false
             screen = .recovery
             message = error.localizedDescription
         }
     }
+}
 
+extension SignInModel {
     static func validateSession(_ session: AuthSession) async throws {
         guard let saved = session.credentials else { throw ClientError.signedOut }
         let connection = saved.connection

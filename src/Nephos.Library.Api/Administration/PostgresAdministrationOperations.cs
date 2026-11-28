@@ -61,7 +61,7 @@ public sealed partial class PostgresAdministrationRepository
         }
         await using (var check = Command(connection, tx, """
             SELECT EXISTS(SELECT 1 FROM principals WHERE lower(login)=$1)
-            OR EXISTS(SELECT 1 FROM administration_operations WHERE lower(login)=$1 AND kind='provision')
+            OR EXISTS(SELECT 1 FROM administration_operations WHERE lower(login)=$1 AND kind='provision' AND status<>'abandoned')
             """, input.Login))
             if (Equals(await check.ExecuteScalarAsync(token), true)) throw new AdministrationConflictException("Login is already reserved.");
         var subject = Guid.NewGuid().ToString();
@@ -79,11 +79,11 @@ public sealed partial class PostgresAdministrationRepository
     }
     public Task<AdminOperation> ProfileAsync(string subject, ProfileCommand input, CancellationToken token, string? operatorSubject = null) =>
         ReserveChange(subject, input.CommandId, "profile", Hash(input with { DisplayName = input.DisplayName.Trim() }),
-            input.ExpectedRevision, input.DisplayName.Trim(), input.Discoverable, null, token, operatorSubject);
+            input.ExpectedRevision, input.DisplayName.Trim(), input.Discoverable, null, operatorSubject, token);
     public Task<AdminOperation> AccessAsync(string subject, AccessCommand input, CancellationToken token, string? operatorSubject = null) =>
-        ReserveChange(subject, input.CommandId, "access", Hash(input), input.ExpectedRevision, null, null, input.Enabled, token, operatorSubject);
+        ReserveChange(subject, input.CommandId, "access", Hash(input), input.ExpectedRevision, null, null, input.Enabled, operatorSubject, token);
     private async Task<AdminOperation> ReserveChange(string subject, Guid id, string kind, string hash, long revision,
-        string? displayName, bool? discoverable, bool? enabled, CancellationToken token, string? operatorSubject)
+        string? displayName, bool? discoverable, bool? enabled, string? operatorSubject, CancellationToken token)
     {
         hash = Hash(new { subject, requestHash = hash });
         await using var connection = await OpenAsync(token);
@@ -156,14 +156,19 @@ public sealed partial class PostgresAdministrationRepository
             await query.ExecuteNonQueryAsync(token);
         var operation = await FindOperation(connection, tx, id, token);
         if (operation is null || operation.Status == "abandoned") return operation;
-        if (operation.Kind == "provision" || operation.Status != "failed" || operation.LeaseId is not null)
-            throw new AdministrationConflictException("Only failed profile/access operations can be abandoned.");
+        if ((operation.Kind == "provision" && operation.Step != "reserved") || operation.Status != "failed" || operation.LeaseId is not null)
+            throw new AdministrationConflictException("Only failed profile, access, or unstarted provision operations can be abandoned.");
         await using (var abandon = Command(connection, tx, """
             UPDATE administration_operations SET status='abandoned',revision=revision+1,updated_at=now() WHERE id=$1;
-            UPDATE principals SET admin_revision=admin_revision+1 WHERE subject=$2;
-            INSERT INTO administration_events(operation_id,operator_subject,action) VALUES($1,$3,'abandoned')
-            """, id, operation.Subject, operatorSubject))
+            INSERT INTO administration_events(operation_id,operator_subject,action) VALUES($1,$2,'abandoned')
+            """, id, operatorSubject))
             await abandon.ExecuteNonQueryAsync(token);
+        if (operation.Kind != "provision")
+        {
+            await using var bump = Command(connection, tx,
+                "UPDATE principals SET admin_revision=admin_revision+1 WHERE subject=$1", operation.Subject);
+            await bump.ExecuteNonQueryAsync(token);
+        }
         var result = await FindOperation(connection, tx, id, token);
         await tx.CommitAsync(token);
         return result;
@@ -190,13 +195,13 @@ public sealed partial class PostgresAdministrationRepository
         await using var r = await query.ExecuteReaderAsync(token);
         return await r.ReadAsync(token) ? ReadOperation(r) : null;
     }
-    public async Task AdvanceAsync(AdminOperation operation, string step, long providerRevision, CancellationToken token)
+    public async Task AdvanceAsync(AdminOperation operation, string nextStep, long providerRevision, CancellationToken token)
     {
         var valid = operation.Kind == "provision"
-            ? (operation.Step, step) is ("reserved", "identity-created") or ("identity-created", "library-created") or ("library-created", "completed")
+            ? (operation.Step, nextStep) is ("reserved", "identity-created") or ("identity-created", "library-created") or ("library-created", "completed")
             : operation.Kind == "access" && operation.DesiredEnabled
-                ? (operation.Step, step) is ("reserved", "identity-created") or ("identity-created", "completed")
-                : operation.Step == "reserved" && step == "completed";
+                ? (operation.Step, nextStep) is ("reserved", "identity-created") or ("identity-created", "completed")
+                : operation.Step == "reserved" && nextStep == "completed";
         if (!valid) throw new InvalidOperationException("Invalid administration transition.");
         await using var connection = await OpenAsync(token);
         await using var tx = await connection.BeginTransactionAsync(token);
@@ -205,7 +210,7 @@ public sealed partial class PostgresAdministrationRepository
               AND lease_until>now() AND step=$3 AND status='running' FOR UPDATE)
             """, operation.Id, operation.LeaseId, operation.Step))
             if (!Equals(await guard.ExecuteScalarAsync(token), true)) throw new AdministrationConflictException("Operation lease expired.");
-        if (step == "library-created")
+        if (nextStep == "library-created")
         {
             await using var insert = Command(connection, tx, """
                 INSERT INTO principals(subject,login,display_name,enabled,discoverable) VALUES($3,$4,$5,false,$6);
@@ -215,7 +220,7 @@ public sealed partial class PostgresAdministrationRepository
                 """, operation.LibraryId, operation.LibraryName, operation.Subject, operation.Login, operation.DisplayName, operation.Discoverable);
             await insert.ExecuteNonQueryAsync(token);
         }
-        if (step == "completed")
+        if (nextStep == "completed")
         {
             await using var complete = Command(connection, tx, """
                 UPDATE principals SET display_name=CASE WHEN $7='access' THEN display_name ELSE $2 END,
@@ -238,9 +243,9 @@ public sealed partial class PostgresAdministrationRepository
               status=CASE WHEN $3='completed' THEN 'completed' ELSE 'pending' END,
               lease_id=NULL,lease_until=NULL,error_code=NULL,next_attempt_at=now(),revision=revision+1,updated_at=now()
               WHERE id=$1 AND lease_id=$2
-            """, operation.Id, operation.LeaseId, step, providerRevision))
+            """, operation.Id, operation.LeaseId, nextStep, providerRevision))
             await update.ExecuteNonQueryAsync(token);
-        await using (var audit = Command(connection, tx, "INSERT INTO administration_events(operation_id,action) VALUES($1,$2)", operation.Id, step))
+        await using (var audit = Command(connection, tx, "INSERT INTO administration_events(operation_id,action) VALUES($1,$2)", operation.Id, nextStep))
             await audit.ExecuteNonQueryAsync(token);
         await tx.CommitAsync(token);
     }
@@ -264,7 +269,7 @@ public sealed partial class PostgresAdministrationRepository
     }
     public async Task RebaseAsync(AdminOperation operation, long providerRevision, CancellationToken token)
     {
-        if (providerRevision < 0) throw new ArgumentOutOfRangeException(nameof(providerRevision));
+        ArgumentOutOfRangeException.ThrowIfNegative(providerRevision);
         await using var connection = await OpenAsync(token);
         await using var query = Command(connection, null, """
             UPDATE administration_operations SET provider_revision=$3,revision=revision+1,updated_at=now()

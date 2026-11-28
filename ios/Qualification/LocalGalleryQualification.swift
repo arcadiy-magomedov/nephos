@@ -61,6 +61,28 @@ struct LocalGalleryQualification: View {
         }
         let video = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         defer { LocalMediaExport.remove(video) }
+        try await writeVideo(to: video)
+        let photos = OSAllocatedUnfairLock(initialState: [String]())
+        let videoID = OSAllocatedUnfairLock<String?>(initialState: nil)
+        try await PHPhotoLibrary.shared().performChanges {
+            for (index, image) in images.enumerated() {
+                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                request.creationDate = Date().addingTimeInterval(-Double(index) * 86_400)
+                if let id = request.placeholderForCreatedAsset?.localIdentifier { photos.withLock { $0.append(id) } }
+            }
+            let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: video)
+            videoID.withLock { $0 = request?.placeholderForCreatedAsset?.localIdentifier }
+        }
+        photoIdentifiers = photos.withLock { $0 }
+        videoIdentifier = videoID.withLock { $0 }
+        guard photoIdentifiers.count == images.count, videoIdentifier != nil else {
+            throw ClientError.invalid("Photos did not return the qualification fixture identifiers.")
+        }
+        UserDefaults.standard.set(photoIdentifiers, forKey: "gallery-photo-identifiers")
+        UserDefaults.standard.set(videoIdentifier, forKey: "gallery-video-identifier")
+    }
+
+    private func writeVideo(to video: URL) async throws {
         let writer = try AVAssetWriter(outputURL: video, fileType: .mp4)
         let input = AVAssetWriterInput(
             mediaType: .video,
@@ -97,24 +119,6 @@ struct LocalGalleryQualification: View {
         writer.endSession(atSourceTime: CMTime(seconds: 3, preferredTimescale: 600))
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? LocalMediaError.exportUnavailable }
-        let photos = OSAllocatedUnfairLock(initialState: [String]())
-        let videoID = OSAllocatedUnfairLock<String?>(initialState: nil)
-        try await PHPhotoLibrary.shared().performChanges {
-            for (index, image) in images.enumerated() {
-                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                request.creationDate = Date().addingTimeInterval(-Double(index) * 86_400)
-                if let id = request.placeholderForCreatedAsset?.localIdentifier { photos.withLock { $0.append(id) } }
-            }
-            let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: video)
-            videoID.withLock { $0 = request?.placeholderForCreatedAsset?.localIdentifier }
-        }
-        photoIdentifiers = photos.withLock { $0 }
-        videoIdentifier = videoID.withLock { $0 }
-        guard photoIdentifiers.count == images.count, videoIdentifier != nil else {
-            throw ClientError.invalid("Photos did not return the qualification fixture identifiers.")
-        }
-        UserDefaults.standard.set(photoIdentifiers, forKey: "gallery-photo-identifiers")
-        UserDefaults.standard.set(videoIdentifier, forKey: "gallery-video-identifier")
     }
 
     private func checkUploadInventory() async throws {
