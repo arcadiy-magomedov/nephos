@@ -1,0 +1,9 @@
+numpy==2.2.6
+opencv-python-headless==4.12.0.88
+Pillow==12.2.0
+pillow-heif==1.8.1
+onnxruntime==1.23.2
+onnx==1.19.1
+torch==2.6.0
+safetensors==0.6.2
+fvcore==0.1.5.post20221221
